@@ -2,6 +2,7 @@
 # Using the reference LAPACK/Blas and assuming
 # both LAPACK and CFITSIO are in /usr/local.
 
+# Test
 
 # =============== Installation ===================
 
