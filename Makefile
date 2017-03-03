@@ -108,7 +108,7 @@ export FCOMP := $(FFLAGS) -I$(TOPDIR)/src/f90/include $(LAPACK_INCLUDE) $(HEALPI
 export LINK := -L$(TOPDIR)/src/f90/include -lquiet $(HEALPIX_LINK) $(CFITSIO_LINK) $(LAPACK_LINK) $(FFTW_LINK) $(NOVAS_LINK) $(LDFLAGS) $(HDF_LINK) $(LDFLAGS) $(OPENMP)
 export TEMPITA := "$(TOPDIR)/src/python/tempita_proc.py"
 
-all : libquiet l2gen l3gen postmap tod2map map_editor libutil utils_f90 ces_validate maptool # ces_detect
+all : libquiet libutil l2gen postmap map_editor ces_validate maptool # ces_detect l3gen tod2map utils_f90
 
 full : all libquietscala scalapost map2cl
 
