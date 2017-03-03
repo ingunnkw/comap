@@ -1,0 +1,147 @@
+# Config file for a generic GCC based compile,
+# Using the reference LAPACK/Blas and assuming
+# both LAPACK and CFITSIO are in /usr/local.
+
+
+# =============== Installation ===================
+
+# Final install location.  This defaults to a
+# subdirectory of the top-level directory called
+# install_$COMMANDER.
+#export INSTALL := /usr/local
+
+
+# =============== System Tools ===================
+
+# The defaults should be fine for any normal
+# GNU/Linux operating system...
+
+# Here you can override the make version to use
+#export MAKE := gmake
+
+# How to make a tar.gz file
+#export CTAR := tar czvf
+
+# The archive command
+#export AR := ar
+
+# Archive options to create a library
+#export ARFLAGS := crv
+
+# The ranlib command
+#export RANLIB := ranlib
+
+
+# ================= Compilers ====================
+
+# Serial Fortran 90 compiler.  Default is "f90".
+export F90 := ifort
+
+# MPI Fortran 90 compiler.  Default is "mpif90".
+export MPF90 := mpif90
+
+# MPI Fortran 77 compiler.  Default is "mpif77".
+export MPF77 := mpif90
+
+# MPI C compiler.  Default is "mpicc".
+export MPCC := mpicc
+
+# =========== Compiler Optimizations =============
+
+# Fortran 90 compiler flags
+export F90FLAGS := -O3 -assume byterecl
+#export F90FLAGS := -g -C -vec_report0 -assume byterecl
+
+# Fortran 77 compiler flags
+export FFLAGS := -O2
+
+# C compiler flags.
+export CFLAGS := -O2
+
+# Extra flags used for linking
+export LDFLAGS := -cxxlib -qopenmp
+export OPENMP := -qopenmp
+
+
+COMMON_FLAGS_DEBUG := -O0 -g
+COMMON_FLAGS_FORTRAN_DEBUG := $(COMMON_FLAGS_DEBUG) $(BOUNDS) -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
+#COMMON_FLAGS_FORTRAN_DEBUG := $(COMMON_FLAGS_DEBUG) -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl
+export F90FLAGS_DEBUG := -vec_report0 $(COMMON_FLAGS_FORTRAN_DEBUG)
+export FFLAGS_DEBUG := $(COMMON_FLAGS_FORTRAN_DEBUG)
+export CFLAGS_DEBUG := $(COMMON_FLAGS_DEBUG)
+export LDFLAGS_DEBUG := -lm -cxxlib -qopenmp
+
+# ============== Fortran Features ================
+
+# Set this variable to 1 if the fortran compiler
+# produces module files with capitalization (*.MOD)
+# instead of lowercase (*.mod).
+#export FORTRAN_UPPER := 1
+
+
+# =============== Latex and PDF for documentation ================
+
+# The include and linking commands for cfitsio.
+export LATEX_COMP   := latex
+export DVI2PDF_COMP := dvi2pdf
+
+# =============== Main path ================
+
+export LOCAL=/mn/stornext/u3/hke/owl/local
+
+# =============== CFITSIO Linking ================
+
+# The include and linking commands for cfitsio.
+export CFITSIO_INCLUDE := 
+export CFITSIO_LINK := -L$(LOCAL)/lib -lcfitsio
+
+
+# =============== LAPACK Linking =================
+#MKLPATH := /opt/app-sync/intel/mkl/lib/intel64/
+MKLPATH := /astro/local/opt/Intel/composer_xe_2013_sp1.2.144/mkl/lib/intel64/
+
+# The include and linking commands for LAPACK.
+export LAPACK_INCLUDE := 
+#export LAPACK_LINK := -L/mn/stornext/u3/hke/owl/local/ -llapack -lptf77blas -lptcblas -latlas
+export LAPACK_LINK := -shared-intel -Wl,-rpath,$(MKLPATH) -L$(MKLPATH)  -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -lpthread
+#export LAPACK_LINK := -L/mn/stornext/u3/hke/owl/local/lib/ifort64_fma4_mp_int64/lib -lifcoremt_pic -lacml_mp
+#export LAPACK_LINK := -L/mn/stornext/u3/hke/owl/local/lib/ifort64_fma4_mp_int64/lib -lifcoremt_pic -lacml
+
+# =============== Scalapack =======================
+SCAPATH := /astro/local/opt/Intel/composer_xe_2013_sp1.2.144/mkl/lib/intel64/
+export SCALAPACK_LIBS := $(MKLPATH)/libmkl_intel_lp64.a $(MKLPATH)/libmkl_scalapack_lp64.a $(MKLPATH)/libmkl_sequential.a $(MKLPATH)/libmkl_core.a $(SCAPATH)/libmkl_blacs_intelmpi_lp64.a
+#export SCALAPACK_LIBS := -limf -lirc -lsvml
+
+# =============== HEALPix Linking =================
+
+# The include and linking commands for HEALPix.
+#export HEALPIX_INCLUDE := -I$(LOCAL)/include
+#export HEALPIX_LINK := -L$(LOCAL)/lib -lhealpix
+
+#export HEALPIX_INCLUDE_CPP := -I$(LOCAL)/include
+#export HEALPIX_LINK_CPP := -L$(LOCAL)/lib -lhealpix_cxx -lcxxsupport -lgomp -lfftpack
+
+export HEALPIX := /mn/stornext/u3/hke/owl/local/src/Healpix_3.11
+export HEALPIX_INCLUDE := -I$(HEALPIX)/include
+export HEALPIX_LINK := -L$(HEALPIX)/lib -lhealpix
+
+export HEALPIX_INCLUDE_CPP := -I$(HEALPIX)/include
+export HEALPIX_LINK_CPP := -L$(HEALPIX)/lib -lhealpix_cxx -lcxxsupport -lgomp -lfftpack
+
+# =============== FFTW3 ===========================
+export FFTW_INCLUDE := -I$(LOCAL)/include
+export FFTW_LINK := -L$(LOCAL)/lib -lfftw3 -lfftw3f -lfftw3_threads -lfftw3f_threads
+
+export PNG_LINK := -lpng
+
+# =============== NOVAS ============================                            
+#export NOVAS_LINK := -L$(LOCAL)/lib -lnovas
+
+export PNG_LINK := -lpng
+
+
+# =============== HDF ============================                              
+export HDF_LINK := -L$(LOCAL)/lib -lhdf5_fortran -lhdf5
+export HDF_LINK_CPP := -L$(LOCAL)/lib -lhdf5_cpp -lhdf5
+export HDF_INCLUDE := -I$(LOCAL)/include
+

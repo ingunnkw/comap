@@ -1,0 +1,69 @@
+Index: map_editor.f90
+===================================================================
+--- map_editor.f90	(revision 4206)
++++ map_editor.f90	(working copy)
+@@ -487,6 +487,11 @@
+      call getarg(2,mapname_in1)
+      call maskcount(mapname_in1)
+ 
++  else if (trim(operation) == 'badcount') then
++
++     call getarg(2,mapname_in1)
++     call maskcount(mapname_in1)
++
+   else if (trim(operation) == 'merge_maps') then
+ 
+      call merge_maps(suffix=='_dp')
+Index: map_editor_complex_ops_mod.f90
+===================================================================
+--- map_editor_complex_ops_mod.f90	(revision 4206)
++++ map_editor_complex_ops_mod.f90	(working copy)
+@@ -583,10 +583,30 @@
+        write(*,*) int(i,i2b), 'Number unmasked =', count(mask(:,i)>0.5d0), ' Number masked =', count(mask(:,i)<=0.5d0)
+     end do
+     write(*,*) int(i,i2b), 'Total number unmasked =', count(mask>0.5d0), ', Total number masked =', count(mask<=0.5d0)
+-stop
+ 
+   end subroutine maskcount
+ 
++  subroutine badcount(mapfile)
++    implicit none
++
++    character(len=*),                   intent(in)    :: mapfile
++
++    integer(i4b) :: npix, nside, ordering, nmaps, i
++    real(dp)     :: nullval, missval = -1.6375e30
++    logical(lgt) :: anynull
++    real(dp), allocatable, dimension(:,:) :: mask
++
++    npix = getsize_fits(mapfile, nside=nside, ordering=ordering, nmaps=nmaps)
++    allocate(mask(0:npix-1,nmaps))
++    call read_bintab(mapfile, mask, npix, nmaps, nullval, anynull)
++    write(*,*)
++    do i=1,nmaps
++       write(*,*) int(i,i2b), 'Bad pixels =', count(mask(:,i)==missval), ' Good pixels =', count(mask(:,i)/=missval)
++    end do
++    write(*,*) int(i,i2b), 'Total number bad =', count(mask==missval), ', Total number good =', count(mask/=missval)
++
++  end subroutine badcount
++
+   subroutine apply_mask(maskfile, nside, ordering, map, fact)
+     implicit none
+ 
+@@ -2602,14 +2622,14 @@
+        end do
+     end do
+ 
+-    if (anymiss) then
++!    if (anymiss) then
+        do i = 1, nmaps
+           write(*,*) i, count(abs(map(:,i)) > 1e30), ' missing pixels out of ', npix
+           if (ordering==2) call convert_ring2nest(nside, outmap(0:npix-1,i))
+        end do
+        ! Output result map
+        call write_result_map(outfile, nside, ordering, header, outmap)
+-    end if
++!    end if
+ 
+   end subroutine median_filter_misspix
+ 

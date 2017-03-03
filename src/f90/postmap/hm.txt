@@ -1,0 +1,218 @@
+Index: postmap.f90
+===================================================================
+--- postmap.f90	(revision 3519)
++++ postmap.f90	(working copy)
+@@ -6,7 +6,6 @@
+   use math_tools
+   use quiet_postutils
+   use quiet_utils
+-
+   implicit none
+ 
+   include "mpif.h"
+@@ -25,7 +24,7 @@
+   call mpi_comm_rank(MPI_COMM_WORLD, myid, ierr)
+   call mpi_comm_size(MPI_COMM_WORLD, numprocs, ierr)
+   root = 0
+-  unit        = 21+myid ! What is the point of this? -annoying you :-)
++  unit        = 21+myid
+ 
+   if (iargc() == 0) then
+      call give_user_info
+@@ -79,11 +78,13 @@
+   else if (kommando == 'makemask') then
+      write(*,*) 'Make mask from center coordinates and radius'
+      call make_mask(unit)
++  else if (kommando == 'findpatch') then
++     write(*,*) 'Find patch with lowest rms'
++     call findpatch
+   else
+      call give_user_info
+   end if
+ 
+-
+   ! And exit
+   call mpi_finalize(ierr)
+   if (myid == root) then 
+@@ -1957,11 +1958,11 @@
+      write(*,*) 'simulation:', i-1
+      rhsdev  = sqrt(sum((rhs1(ind(:,1))-rhs2(ind(:,2)))**2)/nc)
+      icovdev = sqrt(sum((icov1(ind(:,1),ind(:,1))-icov2(ind(:,2),ind(:,2)))**2)/nc/nc)
+-     write(*,fmt="(a,e10.5,a,e10.5)") "difference rms: rhs: ", rhsdev, " icov: ", icovdev
++!     write(*,fmt="(a,e10.5,a,e10.5)") "difference rms: rhs: ", rhsdev, " icov: ", icovdev
+ 
+      rhscorr = sum(rhs1(ind(:,1))*rhs2(ind(:,2)))/sqrt(sum(rhs1(ind(:,1))**2)*sum(rhs2(ind(:,2))**2))
+      icovcorr = sum(icov1(ind(:,1),ind(:,1))*icov2(ind(:,2),ind(:,2)))/sqrt(sum(icov1(ind(:,1),ind(:,1))**2)*sum(icov2(ind(:,2),ind(:,2))**2))
+-     write(*,fmt="(a,e10.5,a,e10.5)") "deviation:      rhs: ", 1-rhscorr, " icov: ", 1-icovcorr
++!     write(*,fmt="(a,e10.5,a,e10.5)") "deviation:      rhs: ", 1-rhscorr, " icov: ", 1-icovcorr
+      write(*,*)
+   end do
+ 
+@@ -2143,10 +2144,10 @@
+        fillall = .true.
+     end if
+ 
+-    nside = 256
++    nside = 512
+     npix  = 12*nside**2
+     ordering = 1
+-    nmaps = 3
++    nmaps = 1
+     allocate(mask(0:npix-1,nmaps))
+     allocate(pixlist(0:npix))
+ !    allocate(healvec(1:npix))
+@@ -2173,9 +2174,153 @@
+     call write_map(mask, ordering, outfile)
+     write(*,*) '* Mask written to file = ', trim(outfile)  
+ 
+-  end subroutine
++  end subroutine make_mask
+ 
+ !-----------------------------------------------------------------------------------------------
++! subroutine findpatch
++!-----------------------------------------------------------------------------------------------
++
++  subroutine findpatch
++    implicit none
++
++    character(len=256)                    :: mapfile, outprefix, outfile, nside_in, radius_in 
++    character(len=256)                    :: maskfile
++    integer(i4b)                          :: i, j, nside_search, npix_search, numpix
++    integer(i4b)                          :: ordering, nside, nmaps, npix, nummask
++    integer(i4b)                          :: ordering2, nside2, nmaps2
++    real(dp)                              :: radius, vec(3), ms, colat, long
++    real(dp)                              :: healnan=-1.6375d30
++    
++    real(dp),     allocatable, dimension(:,:) :: inmap, inmask, mask
++    real(dp),     allocatable, dimension(:)   :: rms, mean
++    integer(i4b), allocatable, dimension(:)   :: pixlist, minpix
++    logical(lgt), allocatable, dimension(:)   :: lmask
++
++    ! Get parameters
++    if (iargc() /= 6 ) then
++       write(*,*) 'findpatch takes 5 parameters: map, mask, nside for search centers, radius, outprefix'
++       call give_user_info
++    else 
++       call getarg(2, mapfile)
++       call getarg(3, maskfile)
++       call getarg(4, nside_in)
++       call getarg(5, radius_in)
++       call getarg(6, outprefix)
++    end if
++    read(nside_in,*) nside_search
++    read(radius_in,*) radius
++    npix_search = 12*nside_search**2
++    write(*, fmt='(a,f5.2,a,i4)') ' Searching for lowest rms patch using circles of radius =', radius, ' degrees, centered around each healpix center for nside = ', nside_search
++    radius = radius*pi/180.d0 ! in radians
++    ! Read (and allocate) map
++    call read_map(inmap, ordering, mapfile, nside=nside, nmap=nmaps)
++    if (myid==0) write(*,*) nside,'= nside', nmaps,'= nmaps', ordering,'= ordering'
++    if (nmaps==1) then
++       if (myid==0) write(*,*) 'Running at temperature data' 
++    else if (nmaps==3) then
++       if (myid==0) write(*,*) 'Running at polarisation data' 
++    else
++       write(*,*) nmaps, '= nmaps. Unknown number. Quiting'
++    end if
++    if (ordering==2) then
++       call convert_nest2ring(nside, inmap)
++       ordering = 1
++       if (myid==0) write(*,*) 'Converting input map from nest to ring' 
++    end if
++    npix = 12*nside**2
++    call read_map(inmask, ordering2, maskfile, nside=nside2, nmap=nmaps2)
++    if (myid==0) write(*,*) nside2,'= nside', nmaps2,'= nmaps', ordering2,'= ordering'
++    call assert(nside == nside2, "Nside mismatch between map and mask")
++    call assert(nmaps == nmaps2, "Nmaps mismatch between map and mask")
++    if (ordering2==2) then
++       call convert_nest2ring(nside, inmask)
++       ordering2 = 1
++       if (myid==0) write(*,*) 'Converting input mask from nest to ring' 
++    end if
++
++    ! Get ready to work
++    allocate(pixlist(0:nside**2-1))
++    allocate(rms(0:npix_search-1))
++    allocate(mean(0:npix_search-1))
++    allocate(mask(0:npix-1,1:1))
++    mask= 0.d0
++    rms = -healnan
++    ! Loop over search centers
++    do i = 0+myid, npix_search-1, numprocs
++       if (mod(i,1000) == 0) write(*,*) i, npix_search
++       call pix2vec_ring(nside_search, i, vec)
++       call query_disc(nside, vec, radius, pixlist, numpix)
++       ! Calculate rms for each patch
++       mean(i) = sum(inmap(pixlist(0:numpix-1),nmaps))/real(numpix,dp)
++       ms = 0.d0
++       do j = 0, numpix-1
++          ms = ms + (inmap(pixlist(j),nmaps)-mean(i))**2
++       end do
++       rms(i) = sqrt(ms/real(numpix,dp))
++!       if (any(inmask(pixlist(0:numpix-1),nmaps) == 0.d0)) rms(i) = -healnan
++       if (sum(inmask(pixlist(0:numpix-1),nmaps)) < real(numpix,dp)/2.d0) rms(i) = -healnan
++       if (rms(i)<200. .and. rms(i)>0.d0) mask(pixlist(0:numpix-1),1) = 1.d0
++    end do
++    write(*,*) 'Unmasked part in %', sum(mask)/real(npix,dp)*100.d0
++
++    ! Write rmsmask to file
++    outfile = trim(outprefix) // '_rmsmask.fits'
++    call write_map(mask, ordering, outfile)
++    write(*,*) '* rmsmask written to file = ', trim(outfile)  
++   
++    ! Write ampmask to file
++    mask = 0.d0
++    where (inmap < 1000.d0) mask=1.d0
++    outfile = trim(outprefix) // '_ampmask.fits'
++    call write_map(mask, ordering, outfile)
++    write(*,*) '* ampmask written to file = ', trim(outfile)  
++    deallocate(mask)
++
++    ! Write result map to file
++    allocate(mask(0:npix_search-1, 1))
++    mask(:,1) = rms
++    where(mask==-healnan) mask=healnan
++    outfile = trim(outprefix) // '_rms.fits'
++    call write_map(mask, ordering, outfile)
++    write(*,*) '* rms written to file = ', trim(outfile)  
++    deallocate(mask)
++
++    !Find best patches
++    allocate(lmask(0:npix_search-1))
++    lmask = .true.
++!    lmask(npix_search/2:npix_search-1) = .false.
++!    lmask(0:npix_search/2) = .false.
++    nummask = 1
++    allocate(minpix(nummask))
++    do i = 1, nummask
++       minpix(i) = minloc(rms, 1, lmask) - 1   !OBS minloc does not take start point 0 into account!!!
++       call pix2ang_ring(nside_search, minpix(i), colat, long)
++    write(*, fmt='(i2,a,i5,a,i5,a,f6.2,a,f6.2,a,f7.2,a,f7.2)') i, ': pix=', minpix(i),'(',npix_search,') rms=',rms(minpix(i)),'  mean=', mean(minpix(i)), '   lat=', 90.d0-colat*180.d0/pi, '   lon=', long*180.d0/pi
++       lmask(minpix(i)) = .false.
++    end do
++
++    ! Make mask
++    allocate(mask(0:npix-1, 1))
++    mask = 0.d0
++    do i = 1, 1!nummask
++       call pix2vec_ring(nside_search, minpix(i), vec)
++       call query_disc(nside, vec, radius, pixlist, numpix)
++       mask(pixlist(0:numpix-1),1) = 1.d0
++    end do
++
++    ! Write patch map to file
++    mask = inmap*mask
++    outfile = trim(outprefix) // '_patch.fits'
++    call write_map(mask, ordering, outfile)
++    write(*,*) '* patch map written to file = ', trim(outfile)  
++
++    ! Clean up
++    deallocate(inmap,rms,mask,lmask)
++    deallocate(pixlist)
++
++  end subroutine findpatch
++
++!-----------------------------------------------------------------------------------------------
+ ! subroutine give_user_info
+ !-----------------------------------------------------------------------------------------------
+ 

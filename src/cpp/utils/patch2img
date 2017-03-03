@@ -1,0 +1,235 @@
+#!/bin/bash
+
+function showhelp {
+	echo "patch2img [options] [patch] infile [outfile]
+Options are:
+   -size: Patch size in degrees. Default: Value in patch file, or 10.
+   -res: Resolution in arc minutes per pixel. Default: 1.
+   -patches: Path to patch definition file. Default:
+      /data4/quiet/auxilliary/patches_*.txt
+      where * is is 'galactic' or 'celestial' for those coordinate systems.
+   -lon: Longitude of image center. Only needed without patch argument.
+   -lat: Latitude of image center. Only needed without patch argument.
+   -v: Increase verbosity. Maximum is 3. Default: 0.
+   -q: Descrease verbosity. See -v.
+   -min: Force the minimum value of the scale of the image. Default: auto-scale.
+   -max: Force the maximum value of the scale of the image. Default: auto-scale.
+   -range: Force a symmetric range around zero. Default: auto-scale.
+   -quant: Auto-scale from quantile quant to 1-quant instead of min to max.
+   -hist: Use a histogram for the color scale. Default: Linear scale.
+   -lin: Use a linear color scale. This is the default.
+   -bar: Turn color bar on/off.
+   -c: Do not reprocess existing output files. Default: Reprocess everything.
+   -reprocess: Opposite of -c.
+   -sig or -comp: Specify map components to plot. Several possible at once.
+   -T: Output temperature field. Equivalent to -sig 1. This is the default.
+   -Q: Output Q-polarization field. Equivalent to -sig 2.
+   -U: Output U-polarization field. Equivalent to -sig 3.
+   -P: Outout both polarization fields. Equivalent to -sig 2 -sig 3
+   -A: Output all signal fields. Equivalent to -sig 1 -sig 2 -sig 3
+   -clear: Clear the list of chosen map components.
+   -gal: Select galactic coordinates. This is the default.
+   -cel: Select celestial coordinates.
+   -grid: Set lat/lon grid size to the same value. Default: no grid.
+   -glat: Set lat grid size. Default: no grid.
+   -glon: Set lon grid size. Default: no grid.
+   -map: Which submap to display. There is usually just one submap. Default: 1
+   -nog: Disable lat/lon grid. Default: disabled.
+   -ncol: Use this many columns in the output.
+   -ticks: Set the tick level of the color bar. 0 disables. Higher numbers give finer ticks.
+   -lw: Set lat/lon grid line width.
+   -dig: Number of characters for displaying numbers. Default: 7.
+   -mjd: Specify time in mjd manually. Only needed for moving objects for which mjd cannot be found from the input filename via the level2 runlist.
+   -runlist: Level2 runlist location. Default: /projects/quiet/runlist.txt
+   -ext: Default output extension. Used when no output file is given. Default: png.
+   -color: Color scheme wmap, gray or val:col,val:col,val:col,...
+   -h: Show this message." >&2
+}
+
+# Defaults:
+defpatchsize=10
+patch_size=   # Patch width/height in degrees + any desired padding
+components=()
+submaps=()
+defresolution=4  # arc minutes per pixel
+resolution=
+verbose=0
+verbsub=
+minval=auto
+maxval=auto
+engine=map2png
+pref_ext="png"
+quant="0.05"
+ticks=3
+ncol=0
+dig=7
+bar=-bar
+hist=
+cont=
+color=
+celestial=
+grid=
+mjd=
+run_database="/projects/quiet/runlist.txt"
+
+# Parse arguments
+args=("$@")
+nf=0
+for (( i=0; i < ${#args[@]}; i++ )); do
+	case "${args[$i]}" in
+		-size) patch_size="${args[$((++i))]}" ;;
+		-res)  resolution="${args[$((++i))]}" ;;
+		-sig*|-comp*) components[${#components[@]}]="${args[$((++i))]}" ;;
+		-map) submaps[${#submaps[@]}]="${args[$((++i))]}" ;;
+		-patch*) patchdefs="${args[$((++i))]}" ;;
+		-eng*) engine=${args[$((++i))]} ;;
+		-ext) pref_ext="${args[$((++i))]}" ;;
+		-lon) lon=${args[$((++i))]} ;;
+		-v) verbose=$((verbose+1)) ;;
+		-q) verbose=$((verbose-1)) ;;
+		-lat) lat=${args[$((++i))]} ;;
+		-min) minval=${args[$((++i))]} ;;
+		-max) maxval=${args[$((++i))]} ;;
+		-quant) quant=${args[$((++i))]} ;;
+		-tick*) ticks=${args[$((++i))]} ;;
+		-bar) if [[ $bar ]]; then bar=; else bar=-bar; fi ;;
+		-ncol*) ncol=${args[$((++i))]} ;;
+		-hist*) hist="-hist";;
+		-lin*) hist= ;;
+		-range) maxval=${args[$((++i))]} ; minval=-$maxval ;;
+		-c) cont=1 ;;
+		-re*) cont= ;;
+		-clear) components=() ;;
+		-T) components[${#components[@]}]=1 ;;
+		-Q) components[${#components[@]}]=2 ;;
+		-U) components[${#components[@]}]=3 ;;
+		-P) components[${#components[@]}]=2
+			components[${#components[@]}]=3 ;;
+		-A) components[${#components[@]}]=1
+			components[${#components[@]}]=2
+			components[${#components[@]}]=3 ;;
+		-gal*) celestial= ;;
+		-cel*) celestial=1 ;;
+		-grid) grid="$grid -grid ${args[$((++i))]}" ;;
+		-glat) grid="$grid -glat ${args[$((++i))]}" ;;
+		-glon) grid="$grid -glon ${args[$((++i))]}" ;;
+		-nog*) grid="$grid -nogrid" ;;
+		-lw) grid="$grid -lw ${args[$((++i))]}" ;;
+		-color) grid="-color ${args[$((++i))]}" ;;
+		-dig*) dig=${args[$((++i))]} ;;
+		-mjd) mjd=${args[$((++i))]} ;;
+		-run*) run_database="${args[$((++i))]}" ;;
+		-h) showhelp; exit ;;
+		-*) showhelp; exit ;;
+		*) infiles[$nf]="${args[$i]}" ; nf=$(($nf+1)) ;;
+	esac
+done
+
+if (( ${#infiles[@]} < 1 )); then showhelp; exit; fi
+if (( verbose > 2 )); then verbsub=-v; fi
+
+if (( ${#components[@]} == 0 )); then components[0]=1; fi
+if (( ${#components[@]} == 0 )); then submaps[0]=1; fi
+if [[ $minval != auto && $minval != -auto ]]; then mi="-min $minval"; fi
+if [[ $maxval != auto ]]; then ma="-max $maxval"; fi
+if [[ ! $patchdefs ]]; then
+	if [[ $celestial ]]; then patchdefs="/projects/quiet/auxilliary/patches_celestial.txt"
+	else patchdefs="/mn/stornext/u2/ingunnkw/planckdata/patches_galactic.txt"; fi
+#	else patchdefs="/projects/quiet/auxilliary/patches_galactic.txt"; fi
+fi
+if (( ${#infiles[@]} > 2 )); then
+	patch="${infiles[0]}"
+	infile="${infiles[1]}"
+	outfile="${infiles[2]}"
+elif (( ${#infiles[@]} > 1 )); then
+	patch="${infiles[0]}"
+	infile="${infiles[1]}"
+	outfile="${infile%.*}.$pref_ext"
+else
+	infile="${infiles[0]}"
+	outfile="${infile%.*}.$pref_ext"
+fi
+
+if [[ ! -f "$infile" ]]; then echo "Cannot open file '$infile'!" >&2; exit; fi
+if [[ ! -r "$infile" ]]; then echo "File '$infile' is not readable!" >&2; exit; fi
+
+# Do noting if cont is true and the output file already exists
+if [[ $cont && -f "$outfile" ]]; then
+	if (( verbose >=3 )); then echo "Skipping completed file '$infile'" >&2; fi
+	exit
+fi
+
+if [[ $patch ]]; then
+	if [[ ! -f "$patchdefs" ]]; then echo "Cannot find patch definition file '$patchdefs'!" >&2; exit; fi
+	if [[ ! -r "$patchdefs" ]]; then echo "Patch definition file '$patchdefs' is not readable!!" >&2; exit; fi
+	tmp=($(awk "/^$patch/{print}" "$patchdefs"))
+	if [[ ! $tmp ]]; then
+		echo "Patch '$patch' is not defined in '$patchdefs'!" >&2; exit
+	fi
+	lon=${tmp[1]}; lat=${tmp[2]}
+	if [[ $lon == "x" || $lat == "x" ]]; then
+		# Find the date: If a time argument is given, use that. Otherwise
+		# look at the file name, find the run number, and look up the mjd
+		# in the level2 database. When the time is known, run eph to find
+		# the position of the object.
+		if [[ ! $mjd ]]; then
+			name=$(basename "$infile")
+			if [[ ! $name =~ ces0*\([[:digit:]]\+\) ]]; then echo "Object $patch is not stationary, but could not deduce time from filename '$infile'. Specify manually using -mjd"  >&2; exit; fi
+			# If runs are very long, then we will have to take the segment into
+			# account too, here.
+			ces="${BASH_REMATCH[1]}"
+			mjd=$(awk "/^  $ces /{printf(\"%.12f\", 0.5*(\$2+\$3))}" "$run_database")
+			if [[ ! $mjd ]]; then
+				echo "Error lookup up appropriate date from run database $run_database" >&2
+				echo "Use -mjd to specify it manually." >&2
+				exit
+			fi
+		fi
+		tmp2=($(eph $patch $mjd 2>/dev/null))
+		if (( $? != 0 )); then
+			echo "Error running eph $patch $mjd!" >&2
+			exit
+		fi
+		lon=${tmp2[1]}; lat=${tmp2[2]}
+		if (( verbose >= 3)); then
+			echo "Found mjd:$mjd and lat:$lat, lon:$lon for moving object '$patch'"
+		fi
+	fi
+	if [[ ! $patch_size ]]; then patch_size=$((2*${tmp[4]})); fi
+	if [[ ! $resolution ]]; then resolution=${tmp[5]}; fi
+elif [[ ! $lat || ! $lon ]]; then
+	echo "No patch specified, but lat and/or lon are missing!" >&2
+	exit
+fi
+if [[ ! $patch_size ]]; then patch_size="$defpatchsize"; fi
+if [[ ! $resolution ]]; then resolution="$defresolution"; fi
+xsz=`awk "BEGIN{print $patch_size*60.0/$resolution}"`
+
+function conv {
+	oldmask=`umask`
+	umask 000
+	case $engine in
+	*)
+		tmpfile="/tmp/tmp$RANDOM$RANDOM.png"
+		command="map2png '$infile' '$tmpfile' $hist -ncol $ncol -dig $dig -auto $quant -ticks $ticks -lon $lon -lat $lat -gnomonic -res $resolution -xsz $xsz $bar $1 $mi $ma $grid $verbsub"
+		if (( verbose == 1 )); then
+			echo "$infile"
+		elif (( verbose >= 2 )); then
+			echo "$command"
+		fi
+		map2png "$infile" "$tmpfile" $hist -ncol $ncol -dig $dig -auto $quant -ticks $ticks -lon $lon -lat $lat -gnomonic -res $resolution -xsz $xsz $bar $1 $mi $ma $grid $verbsub
+		if [[ ! -f "$tmpfile" ]]; then
+			echo "Error making map from '$infile' with map2png!" >&2
+			if (( verbose == 1 )); then echo "Command: $command" >&2; fi
+			exit
+		fi ;;
+	esac
+	umask $oldmask
+	convert "$tmpfile" "$2"
+	rm -f "$tmpfile"
+}
+
+for comp in ${components[@]}; do compstring="$compstring -sig $comp"; done
+for map  in ${submaps[@]};    do mapstring="$mapstring -map $map"; done
+
+conv "$compstring $mapstring" "$outfile"

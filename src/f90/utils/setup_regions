@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Given a region definition file, a spectral definition file
+# and an output beam, produces folders with smoothed maps and
+# noise for each region, in sindex-ready format.
+function showhelp {
+	echo "setup_regions [options] regions.fits data ncomp outbeam outprefix"
+}
+function rel2abs {
+	if [[ $1 =~ ^/ ]]; then
+		printf "%s" "$1"
+	else
+		printf "%s/%s" "$(cd "$(dirname "$1")"; pwd)" "$(basename "$1")"
+	fi
+}
+
+argv=("$@")
+nf=0
+for (( i=0; i < ${#argv[@]}; i++ )); do
+	case "${argv[$i]}" in
+#		-size) patch_size="${argv[$((++i))]}" ;;
+		-*) showhelp; exit ;;
+		*) args[$((nf++))]="${argv[$i]}" ;;
+	esac
+done
+
+if ((${#args[@]} <5)); then showhelp; exit; fi
+
+regdef="${args[0]}"
+specdef="${args[1]}"
+ncomp="${args[2]}"
+obeam="${args[3]}"
+oprefix="${args[4]}"
+
+# The file $specdef/info.txt contains information about the input maps.
+# It has the format:
+#   nband nside order
+#   freq1 map1 rms1 beam1
+#   freq2 map2 rms2 beam2
+#   ...
+# Where mapX and rmsX are paths to those files, and freqs are
+# in GHz. Paths in specdef are relative to it, if relative.
+
+# Parse the specdef file
+if [[ ! -d "$specdef" ]]; then
+	printf "Data directory %s is not a directory!\n" "$specdef" >&2
+	exit
+fi
+if [[ ! -r "$specdef/info.txt" ]]; then
+	printf "Cannot open %s/info.txt!\n" "$specdef" >&2
+	exit
+fi
+
+dir="$(pwd)"
+cd "$specdef"
+exec <info.txt
+read line
+toks=($line)
+nband=${toks[0]}
+nside=${toks[1]}
+order=${toks[2]}
+i=0
+while read line; do
+	if ((i >= nband)); then break; fi
+	toks=($line)
+	freqs[$i]=${toks[0]}
+	maps[$i]="$(rel2abs "${toks[1]}")"
+	rmss[$i]="$(rel2abs "${toks[2]}")"
+	if [[ ${toks[3]} =~ ^[0-9]*(.[0-9]*)?$ ]]; then
+		beams[$i]=${toks[3]}
+	else
+		beams[$i]="$(rel2abs "${toks[3]}")"
+	fi
+	((i++))
+done
+if ((i != nband)); then
+	printf "Error parsing specdef file!\n" >&2
+	exit
+fi
+cd "$dir"
+
+# Ok, having read this file, we can now make the region directories,
+# populate them with cropped versions of the input files, smooth them
+# and produce the info file.
+
+if ! region_split "$regdef" "$oprefix"; then
+	printf "Error parsing region definition file %s!\n" "$regdef" >&2
+	exit
+fi
+for((j=1;;j++)); do
+	odir="$(printf "%s%d" "$oprefix" $j)"
+	if [[ ! -d "$odir" ]]; then break; fi
+	(
+	cd "$odir"
+	printf "%d %d %s %d\n" $nband $nside $order $ncomp > info.txt
+	for ((i=0;i<nband;i++)); do
+		# Get our local, cropped copies
+		mapname="$(printf "map_raw%d.fits" $i)"
+		rmsname="$(printf "rms_raw%d.fits" $i)"
+		echo ${maps[$i]}
+		echo cp "${maps[$i]}" "$mapname"
+		cp "${maps[$i]}" "$mapname" || exit
+		echo cp "${rmss[$i]}" "$rmsname"
+		cp "${rmss[$i]}" "$rmsname" || exit
+		echo smap transfer sparsity.fits "$mapname"
+		smap transfer sparsity.fits "$mapname" || exit
+		echo smap transfer sparsity.fits "$rmsname"
+		smap transfer sparsity.fits "$rmsname" || exit
+		# Smooth them. Pixsmooth needs to know how many components to
+		# actually consider, to avoid getting huge TQU covmats when we
+		# only care about T, or QU, for example.
+		smapname="$(printf "map%d.fits" $i)"
+		scovname="$(printf "cov%d.hdf"  $i)"
+		iscovname="$(printf "icov%d.hdf" $i)"
+		bname="$(printf "beam%d.txt" $i)"
+		cbname="$(printf "cut_beam%d.txt" $i)"
+		echo pixsmooth beam "${beams[$i]}" $obeam "$bname"
+		pixsmooth beam "${beams[$i]}" $obeam "$bname" || exit
+		# Hack: We have problems with ringing in the beam, so cut off at first zero
+		echo awk '{if($2<0)exit;print}' "$bname" '>' "$cbname"
+		awk '{if($2<0)exit;print}' "$bname" > "$cbname" || exit
+		echo pixsmooth map "$mapname" "$cbname" "$smapname"
+		pixsmooth map "$mapname" "$cbname" "$smapname" || exit
+		echo pixsmooth rms -sig 2 -sig 3 "$rmsname" "$cbname" "$scovname"
+		pixsmooth rms -sig 2 -sig 3 "$rmsname" "$cbname" "$scovname" || exit
+		# We will need the inverse covmat
+#		echo mpirun scalapost invert eigenvalue "$scovname" tmp.unf
+#		mpirun scalapost invert eigenvalue "$scovname" tmp.unf 2>&1 >/dev/null || exit
+#		echo addpix_cov tmp.unf "$mapname" "$iscovname"
+#		addpix_cov tmp.unf "$mapname" "$iscovname" || exit
+#		rm -f tmp.unf
+#		rm -f "$scovname" # we dont need cov matrix, just the inverse
+		printf "%s %s %s %s\n" "${freqs[$i]}" "$smapname" "$scovname" "$iscovname" >> info.txt
+	done
+	)
+done

@@ -1,0 +1,123 @@
+# Config file for a generic GCC based compile,
+# Using the reference LAPACK/Blas and assuming
+# both LAPACK and CFITSIO are in /usr/local.
+
+
+# =============== Installation ===================
+
+# Final install location.  This defaults to a
+# subdirectory of the top-level directory called
+# install_$QUIET.
+#export INSTALL := /usr/local
+
+
+# =============== System Tools ===================
+
+# The defaults should be fine for any normal
+# GNU/Linux operating system...
+
+# Here you can override the make version to use
+#export MAKE := gmake
+
+# How to make a tar.gz file
+#export CTAR := tar czvf
+
+# The archive command
+#export AR := ar
+
+# Archive options to create a library
+#export ARFLAGS := crv
+
+# The ranlib command
+#export RANLIB := ranlib
+
+
+# ================= Compilers ====================
+
+# Serial Fortran 90 compiler.  Default is "f90".
+export F90 := $(HPCP_FC)
+
+# MPI Fortran 90 compiler.  Default is "mpif90".
+export MPF90 := $(HPCP_MPIFC)
+
+# MPI Fortran 77 compiler.  Default is "mpif77".
+export MPF77 := $(HPCP_MPIF77)
+
+# MPI C compiler.  Default is "mpicc".
+export MPCC := $(HPCP_MPICC)
+
+
+# =========== Compiler Optimizations =============
+
+# Compiler flags for all
+export COMMON_FLAGS := -O2
+ifeq ($(PROFILE), 1)
+	export COMMON_FLAGS := $(COMMON_FLAGS) -pg
+endif
+
+export F90FLAGS := $(HPCP_FCFLAGS) $(HPCP_OMPFLAGS) -ffree-line-length-none
+# Fortran 77 compiler flags
+export FFLAGS := $(HPCP_FFLAGS) $(HPCP_OMPFLAGS) -ffree-line-length-none
+# C compiler flags.
+export CFLAGS := $(HPCP_CFLAGS) $(HPCP_OMPFLAGS)
+# Extra flags used for linking
+export LDFLAGS := $(HPCP_OMPFLAGS) $(HPCP_LDFLAGS) $(HPCP_LIBS) -lstdc++
+# F90 flags for OpenMP parallelization
+export OPENMP = 
+
+ifeq ($(DEBUG), 1)
+	BOUNDS := -check bounds
+endif
+
+COMMON_FLAGS_DEBUG := -O0 -g
+COMMON_FLAGS_FORTRAN_DEBUG := $(COMMON_FLAGS_DEBUG) $(BOUNDS) -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
+#COMMON_FLAGS_FORTRAN_DEBUG := $(COMMON_FLAGS_DEBUG) -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl
+export F90FLAGS_DEBUG := -vec_report0 $(COMMON_FLAGS_FORTRAN_DEBUG)
+export FFLAGS_DEBUG := $(COMMON_FLAGS_FORTRAN_DEBUG)
+export CFLAGS_DEBUG := $(COMMON_FLAGS_DEBUG)
+export LDFLAGS_DEBUG := -lm -cxxlib
+
+# ============== Fortran Features ================
+# Set this variable to 1 if the fortran compiler
+# produces module files with capitalization (*.MOD)
+# instead of lowercase (*.mod).
+#export FORTRAN_UPPER := 1
+
+# =============== CFITSIO Linking ================
+# The include and linking commands for cfitsio.
+export CFITSIO_INCLUDE := 
+export CFITSIO_LINK := $(cfitsio_LIBS_FC)
+
+# =============== LAPACK Linking =================
+# The include and linking commands for LAPACK.
+export LAPACK_INCLUDE := 
+export LAPACK_LINK := $(lapack_LIBS_FC) $(blas_LIBS_FC)
+
+# =============== HEALPix Linking =================
+# The include and linking commands for HEALPix.
+export HEALPIX_INCLUDE := -I$(healpix_PREFIX)/include
+export HEALPIX_LINK := $(healpix_LIBS_FC)
+
+export HEALPIX_INCLUDE_CPP := -I/usit/abel/u1/sigurdkn/local/include
+export HEALPIX_LINK_CPP := -L/usit/abel/u1/sigurdkn/local/lib -lhealpix_cxx -lcxxsupport -lfftpack
+
+export QPOINT_INCLUDE := -I/usit/abel/u1/sigurdkn/local/include
+export QPOINT_LINK := -L/usit/abel/u1/sigurdkn/local/lib -lqpoint
+
+export FFTW_INCLUDE := -I$(fftw_PREFIX)/include
+export FFTW_LINK := $(fftw_LIBS_FC)
+
+# =============== Scalapack =======================
+export SCALAPACK_LIBS := 
+
+
+# =============== NOVAS ============================
+export NOVAS_LINK := 
+
+export PNG_LINK := 
+
+
+## =============== HDF ============================
+export HDF_LINK := $(hdf5_LIBS_FC)
+export HDF_LINK_CPP := 
+export HDF_INCLUDE := -I$(hdf5_PREFIX)/include

@@ -1,0 +1,196 @@
+{{py:
+def dims(i):
+    if i == 0: return ""
+    else: return "("+",".join([":" for i in range(i)])+")"
+def ncomp(i):
+    if i == 2: return "ncomp,"
+    else: return ""
+def alloc(rw):
+    if rw == "read": return ", allocatable"
+    else: return ""
+}}
+module quiet_covfile_mod
+  use healpix_types
+  use quiet_hdf_mod
+  implicit none
+
+  {{for rw in ["read", "write"]}}
+  interface {{rw}}_covmat
+     {{for dim in [2,4]}}
+     module procedure {{rw}}_covmat_{{dim}}
+     {{endfor}}
+  end interface
+
+  {{endfor}}
+
+contains
+
+  ! I want to be able to read/write covmatrices/equation sets
+  ! with a consistent interface no matter if they are unf or hdf.
+  ! So I will implement RW for hdf, and then wrapper functions which
+  ! choose the appropriate one.
+
+  {{for rw  in ["read", "write"]}}
+  {{for dim in [2,4]}}
+  subroutine {{rw}}_covmat_{{dim}}(covmat, pixels, nside, order, {{ncomp(dim)}} fname, inv, type, verbose)
+    implicit none
+    real(dp){{alloc(rw)}}         :: covmat{{dims(dim)}}
+    integer(i4b){{alloc(rw)}}     :: pixels(:)
+    integer(i4b)                  :: {{ncomp(dim)}} nside, order
+    logical(lgt),     optional    :: inv, verbose
+    character(len=*)              :: fname
+    character(len=*), optional    :: type
+    character(len=32)             :: typ_
+    typ_ = get_extension(fname, type)
+    select case(typ_)
+       case("hdf"); call {{rw}}_covmat_{{dim}}_hdf(covmat, pixels, nside, order, {{ncomp(dim)}} fname, inv, verbose)
+       case("unf"); call {{rw}}_covmat_{{dim}}_unf(covmat, pixels, nside, order, {{ncomp(dim)}} fname, inv, verbose)
+       case default; stop "Unknown covmat filetype."
+    end select
+  end subroutine
+
+  {{endfor}}
+  {{endfor}}
+
+  {{for rw  in ["read", "write"]}}
+  {{for dim in [2,4]}}
+  subroutine {{rw}}_covmat_{{dim}}_hdf(covmat, pixels, nside, order, {{ncomp(dim)}} fname, inv, verbose)
+    implicit none
+    real(dp){{alloc(rw)}}         :: covmat{{dims(dim)}}
+    integer(i4b){{alloc(rw)}}     :: pixels(:)
+    integer(i4b)                  :: {{ncomp(dim)}} nside, order, ext(4), inv_
+    character(len=*)              :: fname
+    logical(lgt),     optional    :: inv, verbose
+	logical(lgt)                  :: verb
+    type(hdf_file)                :: hfile
+    verb = .false.; if(present(verbose)) verb = verbose
+    {{if rw == "read"}}
+    if(allocated(covmat)) deallocate(covmat)
+    if(allocated(pixels)) deallocate(pixels)
+    call open_hdf_file(fname, hfile, "r")
+    call get_size_hdf(hfile, "cov", ext)
+    {{elif dim == 2}}
+    ext = [size(covmat,1)/ncomp,ncomp,size(covmat,2)/ncomp,ncomp]
+    {{elif dim == 4}}
+    ext = shape(covmat)
+    {{endif}}
+    call open_hdf_file(fname, hfile, {{"\"" + rw[0] + "\""}})
+    call {{rw}}_hdf(hfile, "nside",    nside)
+    if(verb) write(*,'(a10,i5)') "nside: ", nside
+    call {{rw}}_hdf(hfile, "ordering", order)
+    if(verb) write(*,'(a10,i5)') "order: ", order
+    call {{rw}}_hdf(hfile, "inverse", inv_)
+    if(verb) write(*,'(a10,l)') "inverse: ", inv_
+    {{if   rw == "read" and dim == 4}}
+    allocate(covmat(ext(1),ext(2),ext(3),ext(4)), pixels(ext(1)))
+    {{elif rw == "read" and dim == 2}}
+    allocate(covmat(ext(1)*ext(2),ext(3)*ext(4)), pixels(ext(1)))
+    {{endif}}
+    if(verb) write(*,'(a10,4i5)') "shape: ", ext
+    {{if dim == 4}}
+    call {{rw}}_hdf(hfile, "cov",      covmat)
+    {{else}}
+    {{if rw == "write"}}
+    call create_hdf_set(hfile, "cov", ext, H5T_IEEE_F64LE)
+    {{else}}
+    ncomp = size(covmat,1)/size(pixels)
+    {{endif}}
+    call open_hdf_set(hfile, "cov")
+    call h5d{{rw}}_f(hfile%sethandle, H5T_NATIVE_DOUBLE, covmat, int(ext,hsize_t), hfile%status)
+    {{endif}}
+    call {{rw}}_hdf(hfile, "pixels",   pixels)
+    call close_hdf_file(hfile)
+    if(present(inv)) inv = inv_ /= 0
+  end subroutine
+
+  {{endfor}}
+  {{endfor}}
+
+  {{for rw  in ["read", "write"]}}
+  {{for dim in [2,4]}}
+  subroutine {{rw}}_covmat_{{dim}}_unf(covmat, pixels, nside, order, {{ncomp(dim)}} fname, inv, verbose)
+    implicit none
+    character(len=*)              :: fname
+    real(dp){{alloc(rw)}}         :: covmat{{dims(dim)}}
+    integer(i4b){{alloc(rw)}}     :: pixels(:)
+    logical(lgt),     optional    :: inv, verbose
+    integer(i4b) :: nside, order, i, j, ncomp, ntot, n, unit
+    logical(lgt) :: inverse, verb
+
+    verb = .false.; if(present(verbose)) verb = verbose
+    unit = getlun()
+    {{if rw == "read"}}
+    if(allocated(covmat)) deallocate(covmat)
+    if(allocated(pixels)) deallocate(pixels)
+    open(unit, file=fname, form='unformatted', action="read", status="old")
+    {{else}}
+    open(unit, file=fname, form='unformatted')
+    {{endif}}
+	{{if rw == "write"}}n = size(covmat,1){{endif}}
+    {{if rw == "write" and dim == 2}}ntot = size(covmat,1)
+    {{elif rw == "write" and dim == 4}}ntot = size(covmat,1)*size(covmat,2)
+    {{endif}}
+    {{rw}}(unit) ntot
+    if(verb) write(*,'(a10,i5)') "ntot: ", ntot
+    {{rw}}(unit) order
+    if(verb) write(*,'(a10,i5)') "order: ", order
+
+    {{#Covmat is handled totally differently for 2 and 4}}
+    {{if dim == 4}}
+    {{if rw == "read"}}
+    read(unit) ncomp
+    if(verb) write(*,'(a10,i5)') "ncomp: ", ncomp
+    n = ntot/ncomp
+    allocate(covmat(n,ncomp,n,ncomp), pixels(n))
+    {{else}}
+    ncomp = size(covmat,2)
+    write(unit) ncomp
+    {{endif}}
+    do j = 1, ncomp
+       do i = 1, n
+          {{rw}}(unit) covmat(:,:,i,j)
+       end do
+    end do
+    {{else}}
+    {{rw}}(unit) ncomp
+    if(verb) write(*,'(a10,i5)') "ncomp: ", ncomp
+    {{if rw == "read"}}
+    allocate(covmat(ntot,ntot), pixels(ntot/ncomp))
+    {{endif}}
+    do i = 1, ntot
+       {{rw}}(unit) covmat(:,i)
+    end do
+    {{endif}}
+    {{if rw == "write"}}
+    inverse = .false.; if(present(inv)) inverse = inv
+    {{endif}}
+    {{rw}}(unit) inverse
+    if(verb) write(*,'(a10,l)') "inverse: ", inverse
+    {{rw}}(unit) nside
+    if(verb) write(*,'(a10,i5)') "nside: ", nside
+    {{rw}}(unit) pixels
+    close(unit)
+    {{if rw == "read"}}if(present(inv)) inv = inverse{{endif}}
+  end subroutine
+
+  {{endfor}}
+  {{endfor}}
+
+  function get_extension(filename, override) result(ext)
+    implicit none
+    character(len=*)                  :: filename
+    character(len=*),    optional     :: override
+    character(len=len_trim(filename)) :: ext
+    integer(i4b)                      :: n, i
+    if(present(override)) then
+       ext = override
+       return
+    end if
+    n = len_trim(filename)
+    do i = n,1,-1
+       if(filename(i:i) == ".") exit
+    end do
+    ext = filename(i+1:n)
+  end function
+
+end module
