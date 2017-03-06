@@ -42,8 +42,8 @@ contains
     integer(i4b)                 :: nsamp, nfreq, ndet, npoint, ext(7)
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
-    call get_size_hdf(file, "tod", ext) ! tod_l1 ?
-    nsamp = ext(1); nfreq = ext(2); ndet = ext(3) ! ndet = ext(4) if tod_l1
+    call get_size_hdf(file, "tod", ext)
+    nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
     call get_size_hdf(file, "orig_point", ext)
     npoint = ext(1)
     allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet))
