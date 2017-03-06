@@ -39,20 +39,19 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, ndi, npoint, ext(7)
+    integer(i4b)                 :: nsamp, nfreq, ndet, npoint, ext(7)
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
-    call get_size_hdf(file, "tod", ext)
-    nsamp = ext(1); ndi = ext(2)
+    call get_size_hdf(file, "tod", ext) ! tod_l1 ?
+    nsamp = ext(1); nfreq = ext(2); ndet = ext(3) ! ndet = ext(4) if tod_l1
     call get_size_hdf(file, "orig_point", ext)
     npoint = ext(1)
-    allocate(data%time(nsamp), data%tod(nsamp,ndi), data%tp(nsamp,ndi))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet))
     allocate(data%orig_point(npoint,nsamp))
     call read_hdf(file, "decimation", data%decimation)
     call read_hdf(file, "samprate",   data%samprate)
     call read_hdf(file, "time",       data%time)
     call read_hdf(file, "tod",        data%tod)
-    call read_hdf(file, "tp",         data%tp)
     call read_hdf(file, "orig_point", data%orig_point)
     call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
