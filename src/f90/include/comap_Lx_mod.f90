@@ -374,10 +374,9 @@ contains
     implicit none
     type(lx_struct), intent(in)    :: in(:)
     type(lx_struct), intent(inout) :: out
-    integer(i4b)                   :: i, j, jg, n, m, mg, ndi, nmod, npix, ng
+    integer(i4b)                   :: i, j, jg, n, m, mg, ndet, nmod, npix, ng, nf
     logical(lgt)                   :: l3
     real(dp)                       :: f
-    logical(lgt), allocatable      :: hit(:)
 
     call free_lx_struct(out)
 
@@ -389,27 +388,24 @@ contains
       n = n + size(in(i)%time)
       if(l3) ng = ng + size(in(i)%time_gain)
     end do
-    allocate(out%time(n), out%tod(n,ndi), out%orig_point(3,n), out%tp(n,ndi))
+    allocate(out%time(n), out%tod(n,nf,ndet), out%orig_point(3,n))
     if(l3) then
        allocate(out%point(3,n,size(in(1)%point,3)))
-       allocate(out%point_objrel(3,n,size(in(1)%point_objrel,3)))
-       allocate(out%time_gain(ng), out%gain(ng,ndi))
+       allocate(out%time_gain(ng), out%gain(ng,nf,ndet))
     end if
     j  = 0
     jg = 0
     mg = 0
     do i = 1, size(in)
        m  = size(in(i)%time)
-       out%time       (  1+j:m+j  ) = in(i)%time
-       out%tod        (  1+j:m+j,:) = in(i)%tod
-       out%tp         (  1+j:m+j,:) = in(i)%tp
-       out%orig_point (:,1+j:m+j  ) = in(i)%orig_point
+       out%time       (  1+j:m+j  )   = in(i)%time
+       out%tod        (  1+j:m+j,:,:) = in(i)%tod
+       out%orig_point (:,1+j:m+j  )   = in(i)%orig_point
        if(l3) then
           mg = size(in(i)%time_gain)
           out%point(:,1+j:m+j,:)        = in(i)%point
-          out%point_objrel(:,1+j:m+j,:) = in(i)%point_objrel
           out%time_gain(1+jg:mg+jg)     = in(i)%time_gain
-          out%gain(1+jg:mg+jg,:)        = in(i)%gain
+          out%gain(1+jg:mg+jg,:,:)      = in(i)%gain
        end if
        j  = j+m
        jg = jg + mg
@@ -418,18 +414,19 @@ contains
     ! These have fixed length
     out%decimation = in(1)%decimation
     out%samprate   = in(1)%samprate
-    out%nside      = in(1)%nside
     out%coord_sys  = in(1)%coord_sys
     out%scanfreq   = in(1)%scanfreq
+    out%pixsize    = in(1)%pixsize
+    out%mapsize    = in(1)%mapsize
 
     ! These could actually differ between the files. We make
     ! a weighted average
     if(l3) then
-       allocate(out%sigma0(ndi), out%alpha(ndi), out%fknee(ndi), out%corr(ndi,ndi,2))
-       allocate(out%diode_stats(ndi,size(in(1)%diode_stats,2)))
+       allocate(out%sigma0(nf,ndet), out%alpha(nf,ndet), out%fknee(nf,ndet), out%corr(nf,nf,ndet,ndet))
+       allocate(out%det_stats(ndi,size(in(1)%det_stats,2)))
        allocate(out%filter_par(ndi,size(in(1)%filter_par,2)))
        out%sigma0 = 0; out%alpha = 0; out%fknee = 0; out%corr = 0
-       out%stats  = 0; out%diode_stats = 0; out%filter_par = 0
+       out%stats  = 0; out%det_stats = 0; out%filter_par = 0
        do i = 1, size(in)
           f = real(size(in(i)%time),dp)/n
           out%sigma0 = out%sigma0 + in(i)%sigma0 * f
@@ -437,26 +434,9 @@ contains
           out%fknee  = out%fknee  + in(i)%fknee  * f
           out%corr   = out%corr   + in(i)%corr   * f
           out%stats  = out%stats  + in(i)%stats  * f
-          out%diode_stats = out%diode_stats + in(i)%diode_stats*f
-          out%filter_par  = out%filter_par  + in(i)%filter_par*f
+          out%det_stats  = out%det_stats  + in(i)%det_stats*f
+          out%filter_par = out%filter_par + in(i)%filter_par*f
        end do
-    end if
-
-    ! Pixels need to be completely rebuilt
-    if(l3) then
-       allocate(hit(0:12*out%nside**2))
-       hit = .false.
-       do i = 1, size(in)
-          hit(in(i)%pixels) = .true.
-       end do
-       allocate(out%pixels(count(hit)))
-       j = 0
-       do i = 0, size(hit)-1
-          if(.not. hit(i)) cycle
-          j = j+1
-          out%pixels(j) = i
-       end do
-       deallocate(hit)
     end if
 
     ! Ok, only housekeeping is left
