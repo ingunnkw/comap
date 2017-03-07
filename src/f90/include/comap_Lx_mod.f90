@@ -266,23 +266,19 @@ contains
     type(lx_struct) :: data
     if(allocated(data%time))        deallocate(data%time)
     if(allocated(data%tod))         deallocate(data%tod)
-    if(allocated(data%tp))          deallocate(data%tp)
     if(allocated(data%orig_point))  deallocate(data%orig_point)
     call deallocate_hk_struct(data%hk)
 
     if(allocated(data%point))       deallocate(data%point)
-    if(allocated(data%pixels))      deallocate(data%pixels)
     if(allocated(data%time_gain))   deallocate(data%time_gain)
     if(allocated(data%gain))        deallocate(data%gain)
     if(allocated(data%sigma0))      deallocate(data%sigma0)
     if(allocated(data%alpha))       deallocate(data%alpha)
     if(allocated(data%fknee))       deallocate(data%fknee)
     if(allocated(data%corr))        deallocate(data%corr)
-    if(allocated(data%corr_freqs))  deallocate(data%corr_freqs)
-    if(allocated(data%diode_stats)) deallocate(data%diode_stats)
+    if(allocated(data%det_stats))   deallocate(data%det_stats)
     if(allocated(data%filter_par))  deallocate(data%filter_par)
     !if(allocated(data%point_sidelobe))deallocate(data%point_sidelobe)
-    if(allocated(data%point_objrel))deallocate(data%point_objrel)
   end subroutine
 
   subroutine write_l2_file(filename, data)
