@@ -57,122 +57,28 @@ contains
     call close_hdf_file(file)
   end subroutine read_L2_file
 
-! Version edited for Planck
-  subroutine read_l2_planck(filename, data, parfile)
-    implicit none
-    character(len=*), intent(in) :: filename
-    character(len=512)           :: parfile
-    type(lx_struct)              :: data
-    type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, ndi, npoint, ext(7), i
-    real(dp), allocatable        :: time(:), tod(:,:), point(:,:,:)
-    real(dp), allocatable        :: time_full(:), tod_full(:,:), point_full(:,:,:), tmp(:,:)
-    call free_lx_struct(data)
-    call open_hdf_file(filename, file, "r")
-    call get_size_hdf(file, "tod", ext) !tod : Dataset {2807349, 4} according to h5ls
-    nsamp = ext(2); ndi = ext(1)
-    call get_size_hdf(file, "point", ext)
-    npoint = ext(1) 
-    call get_parameter(0, parfile, 'DECIMATION_PLANCK', par_int=data%decimation)
-    call get_parameter(0, parfile, 'SAMPRATE_ORIG_PLANCK', par_dp=data%samprate)
-
-    ! Reading undecimated data
-    allocate(time_full(nsamp), tod_full(nsamp,ndi), point_full(npoint,nsamp,0:ndi-1))
-    call read_hdf(file, "time",   time_full)
-    call read_hdf(file, "tod",     tod_full)
-    call read_hdf(file, "point", point_full)
-!    call read_hk_hdf(file, data%hk) ! no housekeeping as of yet
-    call close_hdf_file(file)
-
-    ! Scaling time to seconds rather than Planck OBT. Do we need it in MJD?
-    time_full = time_full/2.0**16
-    ! Ordering in l2files is theta, phi, psi, while for QUIET we have used phi,theta,psi. 
-    ! There is probably a better way of doing this?
-    allocate(tmp(nsamp,ndi))
-    tmp = point_full(1,:,:)
-    point_full(1,:,:) = point_full(2,:,:)
-    point_full(2,:,:) = tmp
-    deallocate(tmp)
-!!$
-!!$open(42,file="tod_undecimated.txt")
-!!$do i=1,nsamp
-!!$   write(42,*) time_full(i), tod_full(i,1)
-!!$end do
-!!$close(42)
-
-    ! Decimating data
-    if (data%decimation>0) then
-       nsamp = nsamp/data%decimation !integer division - rounding down (nsamp is not in l3file, btw)
-       data%samprate = data%samprate/data%decimation ! srate is real
-    end if
-
-    allocate(time(nsamp), tod(nsamp,ndi), point(npoint,nsamp,0:ndi-1))
-    call decimate(time, time_full, tod, tod_full, point, point_full, data%decimation)
-    deallocate(time_full, tod_full, point_full)
-!!$write(*,*) "after decimation", nsamp
-!!$open(42,file="decim_303.txt")
-!!$do i=1,nsamp
-!!$   write(42,'(3g15.7)') point(:,i,0)
-!!$end do
-!!$close(42)
-
-    ! Shortening arrays to ensure periodicity (for pretty FFT's)
-    ! Choosing the phi component for this
-    call chop_pointing_data(point(2,:,0), nsamp)
-!!$write(*,*) "after chop, should be shorter than former", nsamp
-!!$open(42,file="chopped_303.txt")
-!!$do i=1,nsamp
-!!$   write(42,'(3g15.7)') point(:,i,0)
-!!$end do
-!!$close(42)
-
-    ! Storing in data structure
-    allocate(data%time(nsamp), data%tod(nsamp,ndi))! Now nsamp is updated
-    allocate(data%orig_point(npoint,nsamp), data%point(npoint,nsamp,0:ndi-1))
-    data%time = time(1:nsamp)
-    data%tod = tod(1:nsamp,:)
-    data%point = point(:,1:nsamp,:)
-    data%orig_point = data%point(:,:,0) ! calc_scanfreq needs orig_point - just use the first diode
-    deallocate(time, tod, point)
-
-  end subroutine read_l2_planck
-
-! where should this sub logically be?
-  subroutine chop_pointing_data(array, i)
-    implicit none
-    real(dp), dimension(:), intent(in)    :: array
-    integer(i4b),           intent(inout) :: i
-    real(dp), allocatable                 :: diff(:)
-    real(dp)                              :: delta
-    allocate(diff(i))
-    diff = abs(array - array(1))
-    delta = diff(2)
-    do while (diff(i) > delta)
-       i = i-1
-    end do
-    deallocate(diff)
-  end subroutine chop_pointing_data
-
 
   ! Where should this sub logically be?
   subroutine decimate(time, time_full, tod, tod_full, point, point_full, dec)
     implicit none
-    integer(i4b)                                      :: n, ndi, npt, dec, i, j, k, ind
+    integer(i4b)                                      :: n, nfreq, ndet, npt, dec, i, j, k, l, ind
     real(dp), dimension(:),      intent(inout)        :: time, time_full
-    real(dp), dimension(:,:),    intent(inout)        :: tod, tod_full
+    real(dp), dimension(:,:,:),  intent(inout)        :: tod, tod_full
     real(dp), dimension(:,:,0:), intent(inout)        :: point, point_full
 
     if (dec>0) then
-       n   = size(tod,1) 
-       ndi = size(tod,2)
-       npt = size(point,1)
+       n     = size(tod,1)
+       nfreq = size(tod,2)
+       ndet  = size(tod,3)
+       npt   = size(point,1)
 
        ! Averaging over every (dec) elements of the time dimension of time, tod and pointing arrays
        ind = 1
        do i=1,n
           time(i) = mean(time_full(ind:ind+dec-1))
-          do j=1,ndi
-             tod(i,j) = mean(tod_full(ind:ind+dec-1,j))
+          do j=1,ndet
+             do l=1,nfreq:
+                tod(i,l,j) = mean(tod_full(ind:ind+dec-1,j)) ! not done
              do k=1,npt
                 ! do I need to make the angles safe?
                 point(k,i,j-1) = mean(point_full(k,ind:ind+dec-1,j-1))
