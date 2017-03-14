@@ -34,6 +34,30 @@ module comap_Lx_mod
 
 contains
 
+  subroutine read_l1_file(filename, data)
+    implicit none
+    character(len=*), intent(in) :: filename
+    type(lx_struct)              :: data
+    type(hdf_file)               :: file
+    integer(i4b)                 :: nsamp, nfreq, ndet, npoint, nsb, ext(7)
+    call free_lx_struct(data)
+    call open_hdf_file(filename, file, "r")
+    call get_size_hdf(file, "tod", ext)
+    nsamp = ext(1); nfreq = ext(2); nsb = ext(3); ndet = ext(4)
+    call get_size_hdf(file, "orig_point", ext)
+    npoint = ext(1)
+    allocate(data%time(nsamp), data%tod_l1(nsamp,nfreq,nsb,ndet))
+    allocate(data%orig_point(npoint,nsamp))
+    call read_hdf(file, "decimation", data%decimation)
+    call read_hdf(file, "samprate",   data%samprate)
+    call read_hdf(file, "time",       data%time)
+    call read_hdf(file, "tod",        data%tod_l1)
+    call read_hdf(file, "orig_point", data%orig_point)
+    call read_hk_hdf(file, data%hk)
+    call close_hdf_file(file)
+  end subroutine read_l1_file
+
+
   subroutine read_l2_file(filename, data)
     implicit none
     character(len=*), intent(in) :: filename
@@ -78,7 +102,7 @@ contains
           time(i) = mean(time_full(ind:ind+dec-1))
           do j=1,ndet
              do l=1,nfreq:
-                tod(i,l,j) = mean(tod_full(ind:ind+dec-1,j)) ! not done
+                tod(i,l,j) = mean(tod_full(ind:ind+dec-1,l,j))
              do k=1,npt
                 ! do I need to make the angles safe?
                 point(k,i,j-1) = mean(point_full(k,ind:ind+dec-1,j-1))
