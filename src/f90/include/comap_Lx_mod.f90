@@ -79,7 +79,7 @@ contains
     call read_hdf(file, "orig_point", data%orig_point)
     call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
-  end subroutine read_L2_file
+  end subroutine read_l2_file
 
 
   ! Where should this sub logically be?
@@ -164,7 +164,7 @@ contains
     ! Read filter parameters
     call read_hdf(file, "filter_par",  data%filter_par)
     call close_hdf_file(file)
-  end subroutine read_L3_file
+  end subroutine read_l3_file
 
   subroutine read_hk_hdf(file, hk)
     implicit none
@@ -372,6 +372,7 @@ contains
     ! Ok, only housekeeping is left
     call cat_hk_struct(in%hk, out%hk)
   end subroutine
+
 
 end module comap_Lx_mod
 
