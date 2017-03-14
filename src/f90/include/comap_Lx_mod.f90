@@ -1,6 +1,6 @@
 module comap_Lx_mod
   use healpix_types
-  use quiet_defs
+  use comap_defs
   use quiet_hdf_mod
   use l1_read_mod
   use quiet_fft_mod
@@ -26,7 +26,7 @@ module comap_Lx_mod
      real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
      real(dp),     allocatable, dimension(:,:,:,:)  :: corr                 ! (freq, freq, detector, detector)
-     real(dp)                                       :: stats(STAT_NUM)
+     real(dp)                                       :: stats(ST_NUM)
      real(dp),     allocatable, dimension(:,:,:)    :: det_stats            ! (freq, detector, stat)
      real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
 
@@ -101,8 +101,9 @@ contains
        do i=1,n
           time(i) = mean(time_full(ind:ind+dec-1))
           do j=1,ndet
-             do l=1,nfreq:
+             do l=1, nfreq
                 tod(i,l,j) = mean(tod_full(ind:ind+dec-1,l,j))
+             end do
              do k=1,npt
                 ! do I need to make the angles safe?
                 point(k,i,j-1) = mean(point_full(k,ind:ind+dec-1,j-1))
@@ -151,7 +152,7 @@ contains
     nfreq = ext(1); ndet = ext(3)
     allocate(data%sigma0(nfreq,ndet),data%alpha(nfreq,ndet),data%fknee(nfreq,ndet))
     allocate(data%corr(nfreq,nfreq,ndet,ndet))
-    allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTER_PAR))
+    allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
     call read_hdf(file, "sigma0", data%sigma0)
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)
@@ -310,7 +311,7 @@ contains
 
     call free_lx_struct(out)
 
-    ndi  = size(in(1)%tod,2)
+    ndet = size(in(1)%tod,3)
     l3   = allocated(in(1)%point)
     n    = 0
     ng   = 0
@@ -353,8 +354,8 @@ contains
     ! a weighted average
     if(l3) then
        allocate(out%sigma0(nf,ndet), out%alpha(nf,ndet), out%fknee(nf,ndet), out%corr(nf,nf,ndet,ndet))
-       allocate(out%det_stats(ndi,size(in(1)%det_stats,2)))
-       allocate(out%filter_par(ndi,size(in(1)%filter_par,2)))
+       allocate(out%det_stats(ndet,nf,size(in(1)%det_stats,2)))
+       allocate(out%filter_par(ndet,nf,size(in(1)%filter_par,2)))
        out%sigma0 = 0; out%alpha = 0; out%fknee = 0; out%corr = 0
        out%stats  = 0; out%det_stats = 0; out%filter_par = 0
        do i = 1, size(in)

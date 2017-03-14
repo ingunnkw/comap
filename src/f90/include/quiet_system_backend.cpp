@@ -218,8 +218,8 @@ extern "C"
 	}
 	int ishift_(int * val, int * steps) { return *val << *steps; }
 
-	int svn_revision_() { return REVISION; }
-	double nan = numeric_limits<double>::quiet_NaN(),
+  // int svn_revision_() { return REVISION; }
+        double nan = numeric_limits<double>::quiet_NaN(),
 		snan = numeric_limits<double>::signaling_NaN(),
 		infinity = numeric_limits<double>::infinity();
 	int64_t fe_divbyzero = FE_DIVBYZERO, fe_inexact = FE_INEXACT, fe_nan = FE_INVALID, fe_overflow = FE_OVERFLOW, fe_underflow = FE_UNDERFLOW;
@@ -227,9 +227,9 @@ extern "C"
 	void fe_disable_(int64_t * a) { fedisableexcept(*a); }
 	uint32_t count_set_bits_(uint32_t * j)
 	{
-		uint32_t i = *j;
-		i = i - ((i >> 1) & 0x55555555);
-		i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
-		return (((i + (i >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
+	  uint32_t i = *j;
+	  i = i - ((i >> 1) & 0x55555555);
+	  i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+	  return (((i + (i >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
 	}
 }
