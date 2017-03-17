@@ -49,8 +49,8 @@ export MPCC := mpicc
 # =========== Compiler Optimizations =============
 
 # Fortran 90 compiler flags
-export F90FLAGS := -O3 -assume byterecl
-#export F90FLAGS := -g -C -vec_report0 -assume byterecl
+#export F90FLAGS := -O3 -assume byterecl
+export F90FLAGS := -g -C -vec_report0 -assume byterecl
 
 # Fortran 77 compiler flags
 export FFLAGS := -O2

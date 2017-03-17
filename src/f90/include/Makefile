@@ -23,7 +23,7 @@ OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_stat_mod.o quiet_ephem_backend.o locate_mod.o \
          quiet_constrained_mod.o quiet_patch_detect_mod.o quiet_typeb_mod.o \
          quiet_pointing_mod2.o quiet_covfile_mod.o quiet_angcorr_mod.o  \
-         quiet_ephem_mod.o ../../cpp/ephcom/ephcom.o ../../cpp/ephcom/gnulliver.o wmap_beam_mod.o
+         quiet_ephem_mod.o ../../cpp/ephcom/ephcom.o ../../cpp/ephcom/gnulliver.o wmap_beam_mod.o \
 
 SCALAOBJS := scalawrap.o quiet_mpi_mod.o scalautils.o
 

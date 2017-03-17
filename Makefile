@@ -108,7 +108,7 @@ export FCOMP := $(FFLAGS) -I$(TOPDIR)/src/f90/include $(LAPACK_INCLUDE) $(HEALPI
 export LINK := -L$(TOPDIR)/src/f90/include -lquiet $(HEALPIX_LINK) $(CFITSIO_LINK) $(LAPACK_LINK) $(FFTW_LINK) $(NOVAS_LINK) $(LDFLAGS) $(HDF_LINK) $(LDFLAGS) $(OPENMP)
 export TEMPITA := "$(TOPDIR)/src/python/tempita_proc.py"
 
-all : libquiet libutil l2gen postmap map_editor ces_validate maptool # ces_detect l3gen tod2map utils_f90
+all : libquiet libutil l2gen postmap map_editor ces_validate maptool test # ces_detect l3gen tod2map utils_f90
 
 full : all libquietscala scalapost map2cl
 
@@ -200,7 +200,10 @@ libutil:
 maptool:
 	@cd src/f90/maptool; $(MAKE)
 
-clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_ces_validate clean_l3gen clean_ces_detect clean_l2gen clean_maptool
+test :
+	@cd src/f90/test; $(MAKE)
+
+clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_ces_validate clean_l3gen clean_ces_detect clean_l2gen clean_maptool clean_test
 
 clean_postmap :
 	@cd src/f90/postmap; $(MAKE) clean
@@ -243,6 +246,9 @@ clean_maptool :
 
 clean_tester :
 	@cd src/f90/tester; $(MAKE) clean
+
+clean_test :
+	@cd src/f90/test; $(MAKE) clean
 
 dist : clean
 	@mkdir $(DIR)
