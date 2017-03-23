@@ -7,6 +7,8 @@ module comap_Lx_mod
   use quiet_utils
   implicit none
 
+  include "mpif.h"
+
   type Lx_struct
      !! The level1 and level2 part, present in all files.
      integer(i4b)                                :: decimation
@@ -56,6 +58,55 @@ contains
     !call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
   end subroutine read_l1_file
+
+!!$  subroutine read_l1_mpi(filename, data)
+!!$    implicit none
+!!$    character(len=*), intent(in) :: filename
+!!$    type(lx_struct)              :: data
+!!$    type(hdf_file)               :: file
+!!$    integer(i4b)                 :: nsamp, nfreq, ndet, npoint, nsb, ext(7)
+!!$    integer(i4b)                 :: myid, numprocs, ierr, root
+!!$    integer(i4b), dimension(MPI_STATUS_SIZE) :: status
+!!$    call free_lx_struct(data)
+!!$
+!!$    ! The root process distribute workload ! point, samprate, time, tod
+!!$    if (myid == root) then 
+!!$       do i = 1, numprocs-1
+!!$          call read_l1_file(trim(filename), data)
+!!$          nsamp = size(data%tod,1)
+!!$          nfreq = size(data%tod,2)
+!!$          nsb   = size(data%tod,3)
+!!$          ndet  = size(data%tod,4)
+!!$          npoint = size(data%orig_point,1)
+!!$          ! distribute workload
+!!$          call mpi_send(nsamp, 1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(nfreq, 1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(nsb,   1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(ndet,  1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(npoint,1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(data%tod,   size(data%tod),   MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(data%time,  size(data%time),  MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(data%orig_point, size(data%orig_point), MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$          call mpi_send(data%samprate, 1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
+!!$       end do
+!!$    else
+!!$       ! receive workload
+!!$       call mpi_recv(nsamp, 1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(nfreq, 1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(nsb,   1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(ndet,  1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(npoint,  1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(samprate,  1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(data%tod,   size(data%tod),   MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(data%time,  size(data%time),  MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       call mpi_recv(data%orig_point, size(data%orig_point), MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
+!!$       allocate(data%tod(nsamp,nfreq,nsb,ndet))
+!!$       allocate(data%time(nsamp))
+!!$       allocate(data%orig_point(npoint,nsamp))
+!!$
+!!$    endif
+!!$
+!!$  end subroutine read_l1_mpi
 
 
   subroutine read_l2_file(filename, data)
