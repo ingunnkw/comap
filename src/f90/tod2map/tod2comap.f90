@@ -1,4 +1,4 @@
-program tod2map
+program tod2comap
   use quiet_ces_mod
   use quiet_assembly_mod
   use comap_lx_mod
@@ -11,9 +11,9 @@ program tod2map
   use quiet_filter_mod
   use quiet_target_mod
   use quiet_mask_mod
-  use tod2map_utils
-  use tod2map_mapmaker
-  use tod2map_cl_mod
+  use tod2comap_utils
+  use tod2comap_mapmaker
+  use tod2comap_cl_mod
   implicit none
   character(len=512)   :: parfile, acceptfile, output_dir, target_name, arg
   character(len=512)   :: jackknives, string, fft3_magic_file, task_method
@@ -1522,4 +1522,4 @@ contains
     end do
   end subroutine
 
-end program tod2map
+end program tod2comap

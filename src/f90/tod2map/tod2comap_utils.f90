@@ -1,4 +1,4 @@
-module tod2map_utils
+module tod2comap_utils
   use healpix_types
   use pix_tools
   use math_tools

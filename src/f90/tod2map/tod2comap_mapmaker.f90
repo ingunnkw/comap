@@ -1,6 +1,6 @@
-module tod2map_mapmaker
+module tod2comap_mapmaker
   use quiet_utils
-  use tod2map_utils
+  use tod2comap_utils
   use quiet_assembly_mod
   use quiet_filter_mod
   use quiet_todsim_mod

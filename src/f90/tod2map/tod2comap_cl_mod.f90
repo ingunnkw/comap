@@ -1,7 +1,7 @@
-module tod2map_cl_mod
+module tod2comap_cl_mod
   use alm_tools
   use quiet_fileutils
-  use tod2map_utils
+  use tod2comap_utils
   use quiet_healpix_mod
   implicit none
 
@@ -325,4 +325,4 @@ contains
   end subroutine generate_bins
 
 
-end module tod2map_cl_mod
+end module tod2comap_cl_mod
