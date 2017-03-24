@@ -403,7 +403,7 @@ contains
 
     if(.not. associated(out%cov)) return
 
-call bench_start(info%bench, bench_cov3)
+    call bench_start(info%bench, bench_cov3)
     ndi     = assembly%num_diodes
     nsamp   = assembly%numsamp
     corrlen = assembly%noise_corr_length
@@ -458,7 +458,7 @@ call bench_start(info%bench, bench_cov3)
     end do
     deallocate(tpix)
     locmax = maxval(locn)
-call bench_stop(info%bench, bench_cov3)
+    call bench_stop(info%bench, bench_cov3)
 
     !$OMP PARALLEL PRIVATE(b1,b2,i1,i2,j1,j2,d1,d2,h1,h2,p1,p2,c1,c2,k,N_phase,N_phase_sq,buf,col,r1,r2,l1,l2)
     allocate(buf(info%ncomp,info%ncomp,locmax,locmax,2))
@@ -470,7 +470,7 @@ call bench_stop(info%bench, bench_cov3)
           r2 = [ (b2-1)*bsize+1, min(b2*bsize,nsamp) ]
           buf = 0
           j1 = 0
-call bench_start(info%bench, bench_cov1)
+          call bench_start(info%bench, bench_cov1)
           do i1 = r1(1), r1(2)
              j1 = j1+1
              do d1 = 1, ndi
@@ -503,8 +503,8 @@ call bench_start(info%bench, bench_cov1)
                 end do
              end do
           end do
-call bench_stop(info%bench, bench_cov1)
-call bench_start(info%bench, bench_cov2)
+          call bench_stop(info%bench, bench_cov1)
+          call bench_start(info%bench, bench_cov2)
           do l1 = 1, locn(b1)
              p1 = loc2glob(b1,l1)
              do l2 = 1, locn(b2)
@@ -526,12 +526,12 @@ call bench_start(info%bench, bench_cov2)
                 end if
              end do
           end do
-call bench_stop(info%bench, bench_cov2)
+          call bench_stop(info%bench, bench_cov2)
        end do
     end do
     !$OMP END DO
 
-call bench_start(info%bench, bench_cov4)
+    call bench_start(info%bench, bench_cov4)
     ! And finally fill in the other symmetric part of the components
     !$OMP DO
     do p1 = 1, out%n
@@ -543,7 +543,7 @@ call bench_start(info%bench, bench_cov4)
           end do
        end do
     end do
-call bench_stop(info%bench, bench_cov4)
+    call bench_stop(info%bench, bench_cov4)
 
     deallocate(buf)
     !$OMP END PARALLEL

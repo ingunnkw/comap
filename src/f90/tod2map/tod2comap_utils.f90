@@ -43,68 +43,68 @@ module tod2comap_utils
   integer(i4b)             :: azorder_min_cap = 0
 
 ! Hack: Override noise parameters based on premeasured ones
-real(dp), parameter :: hack_sig(364) = [ &
-1.317908e-05, 1.469674e-05, 1.654284e-05, 1.389365e-05, 8.202692e-06, 1.089238e-05, & 
-9.713501e-06, 1.022837e-05, 2.055504e-05, 2.946455e-05, 2.459417e-05, 1.859937e-05, &
-1.638689e-05, 6.068068e-06, 7.817006e-06, 8.391395e-06, 3.380211e-05, 4.448666e-05, &
-0.000000e+00, 4.099501e-05, 1.367600e-05, 8.632024e-06, 2.126063e-05, 2.201586e-05, &
-1.240910e-05, 1.114500e-05, 7.918288e-06, 1.282297e-05, 0.000000e+00, 0.000000e+00, &
-0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, &
-1.847843e-05, 2.399656e-05, 2.306458e-05, 1.580461e-05, 3.997898e-05, 3.595155e-05, &
-4.559174e-05, 3.175894e-05, 6.649299e-06, 1.035415e-05, 8.492875e-06, 7.088927e-06, &
-1.740201e-05, 2.011996e-05, 2.017162e-05, 1.960141e-05, 1.648340e-05, 1.184718e-05, &
-1.591474e-05, 1.045570e-05, 3.246140e-05, 3.130401e-05, 3.574264e-05, 2.304617e-05, &
-1.198408e-05, 1.547838e-05, 1.331151e-05, 8.898580e-06, 4.118595e-05, 4.535109e-05, &
-4.488675e-05, 3.366597e-05, 3.061696e-05, 3.847982e-05, 4.019694e-05, 2.324471e-05, &
-2.942727e-05, 3.866572e-05, 3.791519e-05, 3.302421e-05, 1.947536e-05, 3.123206e-05, &
-2.587007e-05, 2.684453e-05, 3.227430e-05, 4.295871e-05, 3.863807e-05, 2.840108e-05, &
-2.410769e-05, 2.671082e-05, 2.130747e-05, 1.743619e-05, 7.341083e-06, 6.578493e-06, &
-9.520295e-06, 7.637437e-06, 3.511794e-05, 4.093507e-05, 3.362289e-05, 2.350032e-05, &
-0.000000e+00, 1.703753e-05, 0.000000e+00, 1.334378e-05, 4.435525e-05, 5.268130e-05, &
-4.847549e-05, 3.687810e-05, 4.493112e-06, 4.269168e-06, 5.117619e-06, 3.884560e-06, &
-4.777285e-05, 5.061702e-05, 5.771336e-05, 4.038694e-05, 0.000000e+00, 0.000000e+00, &
-0.000000e+00, 0.000000e+00, 2.025979e-05, 2.190597e-05, 2.363376e-05, 1.654174e-05, &
-1.828566e-05, 1.944179e-05, 1.715122e-05, 1.234305e-05, 1.869658e-05, 2.249574e-05, &
-2.862237e-05, 1.769535e-05, 3.943764e-05, 4.634981e-05, 6.745372e-05, 3.419732e-05, &
-3.290565e-05, 3.411817e-05, 2.699083e-05, 2.747793e-05, 5.951269e-06, 6.063515e-06, &
-5.768541e-06, 7.171299e-06, 7.332064e-06, 7.562677e-06, 7.134662e-06, 5.615656e-06, &
-3.550378e-05, 4.623004e-05, 4.681000e-05, 2.614781e-05, 7.778778e-06, 8.196624e-06, &
-1.175505e-05, 6.127354e-06, 0.000000e+00, 6.899604e-06, 7.369077e-06, 4.604605e-06, &
-0.000000e+00, 2.037906e-05, 1.243301e-05, 0.000000e+00, 0.000000e+00, 1.924666e-05, &
-2.577151e-05, 1.892996e-05, 3.644058e-05, 4.976639e-05, 5.328118e-05, 4.074794e-05, &
-0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 1.071492e-05, 1.050225e-05, &
-1.070885e-05, 8.328035e-06, 6.211085e-06, 7.237996e-06, 6.392518e-06, 4.716800e-06, &
-1.831761e-05, 2.110213e-05, 2.995644e-05, 1.750174e-05, 1.057104e-05, 1.202384e-05, &
-1.346820e-05, 8.231896e-06, 2.737784e-05, 3.466611e-05, 2.985199e-05, 2.203867e-05, &
-1.582412e-05, 1.349832e-05, 1.124682e-05, 1.066446e-05, 1.023342e-05, 1.284164e-05, &
-1.228969e-05, 1.071107e-05, 1.795985e-05, 2.058875e-05, 2.061957e-05, 1.743927e-05, &
-1.428268e-05, 2.079493e-05, 1.817553e-05, 1.078450e-05, 2.649010e-05, 2.604140e-05, &
-3.486670e-05, 2.756030e-05, 2.018352e-05, 1.133781e-05, 2.356460e-05, 1.320916e-05, &
-2.009725e-05, 2.442037e-05, 2.164438e-05, 1.569262e-05, 2.987847e-05, 3.168444e-05, &
-3.387629e-05, 3.076669e-05, 1.417790e-05, 1.175154e-05, 1.475985e-05, 9.678346e-06, &
-1.452784e-05, 1.500877e-05, 1.381703e-05, 9.697027e-06, 9.988320e-06, 1.038404e-05, &
-1.234665e-05, 8.958848e-06, 4.773877e-06, 4.112324e-06, 9.776627e-06, 8.674899e-06, &
-2.231653e-05, 1.786833e-05, 1.803863e-05, 1.818045e-05, 9.096671e-06, 1.071475e-05, &
-9.940564e-06, 7.055880e-06, 3.432780e-06, 3.844260e-06, 3.929116e-06, 3.752448e-06, &
-1.139183e-05, 1.359491e-05, 1.428448e-05, 1.368237e-05, 1.013066e-05, 1.247270e-05, &
-1.258489e-05, 1.240198e-05, 7.790799e-06, 1.174374e-05, 1.176131e-05, 1.025224e-05, &
-1.837579e-05, 1.852452e-05, 2.135598e-05, 1.758956e-05, 9.541828e-06, 1.015217e-05, &
-1.077950e-05, 1.912507e-06, 1.850364e-05, 2.832304e-05, 2.833382e-05, 2.308018e-05, &
-1.651000e-05, 8.521985e-06, 1.940733e-05, 1.194678e-05, 2.040567e-05, 2.752866e-05, &
-2.412517e-05, 2.305934e-05, 2.676013e-06, 3.347170e-06, 2.890651e-06, 3.401678e-06, &
-2.066343e-05, 2.352597e-05, 2.306417e-05, 1.799235e-05, 2.647169e-05, 2.998428e-05, &
-3.046657e-05, 2.025698e-05, 3.101791e-05, 3.637777e-05, 4.062692e-05, 2.317002e-05, &
-3.994508e-05, 3.654483e-05, 4.533967e-05, 3.766179e-05, 6.537603e-06, 8.334330e-06, &
-9.441803e-06, 6.205050e-06, 7.681502e-06, 6.276767e-06, 8.401445e-06, 6.111410e-06, &
-3.120531e-05, 3.155417e-05, 3.086934e-05, 2.480939e-05, 3.584718e-05, 4.420871e-05, &
-4.388720e-05, 3.579160e-05, 4.067310e-05, 4.353573e-05, 3.769130e-05, 3.736240e-05, &
-0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 6.237876e-06, 6.769932e-06, &
-8.499995e-06, 5.542190e-06, 2.043629e-05, 2.716968e-05, 2.679320e-05, 2.438654e-05, &
-2.720379e-05, 3.483711e-05, 3.324316e-05, 3.150108e-05, 1.059818e-05, 0.000000e+00, &
-0.000000e+00, 8.253163e-06, 3.949930e-05, 0.000000e+00, 0.000000e+00, 3.152268e-05, &
-6.308765e-05, 0.000000e+00, 0.000000e+00, 6.961662e-05, 5.867689e-05, 0.000000e+00, &
-0.000000e+00, 5.304593e-05, 2.268293e-05, 0.000000e+00, 0.000000e+00, 2.066214e-05, &
-0.000000e+00, 0.000000e+00, 0.000000e+00, 6.552727e-06 ]
+!!$real(dp), parameter :: hack_sig(364) = [ &
+!!$1.317908e-05, 1.469674e-05, 1.654284e-05, 1.389365e-05, 8.202692e-06, 1.089238e-05, & 
+!!$9.713501e-06, 1.022837e-05, 2.055504e-05, 2.946455e-05, 2.459417e-05, 1.859937e-05, &
+!!$1.638689e-05, 6.068068e-06, 7.817006e-06, 8.391395e-06, 3.380211e-05, 4.448666e-05, &
+!!$0.000000e+00, 4.099501e-05, 1.367600e-05, 8.632024e-06, 2.126063e-05, 2.201586e-05, &
+!!$1.240910e-05, 1.114500e-05, 7.918288e-06, 1.282297e-05, 0.000000e+00, 0.000000e+00, &
+!!$0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, &
+!!$1.847843e-05, 2.399656e-05, 2.306458e-05, 1.580461e-05, 3.997898e-05, 3.595155e-05, &
+!!$4.559174e-05, 3.175894e-05, 6.649299e-06, 1.035415e-05, 8.492875e-06, 7.088927e-06, &
+!!$1.740201e-05, 2.011996e-05, 2.017162e-05, 1.960141e-05, 1.648340e-05, 1.184718e-05, &
+!!$1.591474e-05, 1.045570e-05, 3.246140e-05, 3.130401e-05, 3.574264e-05, 2.304617e-05, &
+!!$1.198408e-05, 1.547838e-05, 1.331151e-05, 8.898580e-06, 4.118595e-05, 4.535109e-05, &
+!!$4.488675e-05, 3.366597e-05, 3.061696e-05, 3.847982e-05, 4.019694e-05, 2.324471e-05, &
+!!$2.942727e-05, 3.866572e-05, 3.791519e-05, 3.302421e-05, 1.947536e-05, 3.123206e-05, &
+!!$2.587007e-05, 2.684453e-05, 3.227430e-05, 4.295871e-05, 3.863807e-05, 2.840108e-05, &
+!!$2.410769e-05, 2.671082e-05, 2.130747e-05, 1.743619e-05, 7.341083e-06, 6.578493e-06, &
+!!$9.520295e-06, 7.637437e-06, 3.511794e-05, 4.093507e-05, 3.362289e-05, 2.350032e-05, &
+!!$0.000000e+00, 1.703753e-05, 0.000000e+00, 1.334378e-05, 4.435525e-05, 5.268130e-05, &
+!!$4.847549e-05, 3.687810e-05, 4.493112e-06, 4.269168e-06, 5.117619e-06, 3.884560e-06, &
+!!$4.777285e-05, 5.061702e-05, 5.771336e-05, 4.038694e-05, 0.000000e+00, 0.000000e+00, &
+!!$0.000000e+00, 0.000000e+00, 2.025979e-05, 2.190597e-05, 2.363376e-05, 1.654174e-05, &
+!!$1.828566e-05, 1.944179e-05, 1.715122e-05, 1.234305e-05, 1.869658e-05, 2.249574e-05, &
+!!$2.862237e-05, 1.769535e-05, 3.943764e-05, 4.634981e-05, 6.745372e-05, 3.419732e-05, &
+!!$3.290565e-05, 3.411817e-05, 2.699083e-05, 2.747793e-05, 5.951269e-06, 6.063515e-06, &
+!!$5.768541e-06, 7.171299e-06, 7.332064e-06, 7.562677e-06, 7.134662e-06, 5.615656e-06, &
+!!$3.550378e-05, 4.623004e-05, 4.681000e-05, 2.614781e-05, 7.778778e-06, 8.196624e-06, &
+!!$1.175505e-05, 6.127354e-06, 0.000000e+00, 6.899604e-06, 7.369077e-06, 4.604605e-06, &
+!!$0.000000e+00, 2.037906e-05, 1.243301e-05, 0.000000e+00, 0.000000e+00, 1.924666e-05, &
+!!$2.577151e-05, 1.892996e-05, 3.644058e-05, 4.976639e-05, 5.328118e-05, 4.074794e-05, &
+!!$0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 1.071492e-05, 1.050225e-05, &
+!!$1.070885e-05, 8.328035e-06, 6.211085e-06, 7.237996e-06, 6.392518e-06, 4.716800e-06, &
+!!$1.831761e-05, 2.110213e-05, 2.995644e-05, 1.750174e-05, 1.057104e-05, 1.202384e-05, &
+!!$1.346820e-05, 8.231896e-06, 2.737784e-05, 3.466611e-05, 2.985199e-05, 2.203867e-05, &
+!!$1.582412e-05, 1.349832e-05, 1.124682e-05, 1.066446e-05, 1.023342e-05, 1.284164e-05, &
+!!$1.228969e-05, 1.071107e-05, 1.795985e-05, 2.058875e-05, 2.061957e-05, 1.743927e-05, &
+!!$1.428268e-05, 2.079493e-05, 1.817553e-05, 1.078450e-05, 2.649010e-05, 2.604140e-05, &
+!!$3.486670e-05, 2.756030e-05, 2.018352e-05, 1.133781e-05, 2.356460e-05, 1.320916e-05, &
+!!$2.009725e-05, 2.442037e-05, 2.164438e-05, 1.569262e-05, 2.987847e-05, 3.168444e-05, &
+!!$3.387629e-05, 3.076669e-05, 1.417790e-05, 1.175154e-05, 1.475985e-05, 9.678346e-06, &
+!!$1.452784e-05, 1.500877e-05, 1.381703e-05, 9.697027e-06, 9.988320e-06, 1.038404e-05, &
+!!$1.234665e-05, 8.958848e-06, 4.773877e-06, 4.112324e-06, 9.776627e-06, 8.674899e-06, &
+!!$2.231653e-05, 1.786833e-05, 1.803863e-05, 1.818045e-05, 9.096671e-06, 1.071475e-05, &
+!!$9.940564e-06, 7.055880e-06, 3.432780e-06, 3.844260e-06, 3.929116e-06, 3.752448e-06, &
+!!$1.139183e-05, 1.359491e-05, 1.428448e-05, 1.368237e-05, 1.013066e-05, 1.247270e-05, &
+!!$1.258489e-05, 1.240198e-05, 7.790799e-06, 1.174374e-05, 1.176131e-05, 1.025224e-05, &
+!!$1.837579e-05, 1.852452e-05, 2.135598e-05, 1.758956e-05, 9.541828e-06, 1.015217e-05, &
+!!$1.077950e-05, 1.912507e-06, 1.850364e-05, 2.832304e-05, 2.833382e-05, 2.308018e-05, &
+!!$1.651000e-05, 8.521985e-06, 1.940733e-05, 1.194678e-05, 2.040567e-05, 2.752866e-05, &
+!!$2.412517e-05, 2.305934e-05, 2.676013e-06, 3.347170e-06, 2.890651e-06, 3.401678e-06, &
+!!$2.066343e-05, 2.352597e-05, 2.306417e-05, 1.799235e-05, 2.647169e-05, 2.998428e-05, &
+!!$3.046657e-05, 2.025698e-05, 3.101791e-05, 3.637777e-05, 4.062692e-05, 2.317002e-05, &
+!!$3.994508e-05, 3.654483e-05, 4.533967e-05, 3.766179e-05, 6.537603e-06, 8.334330e-06, &
+!!$9.441803e-06, 6.205050e-06, 7.681502e-06, 6.276767e-06, 8.401445e-06, 6.111410e-06, &
+!!$3.120531e-05, 3.155417e-05, 3.086934e-05, 2.480939e-05, 3.584718e-05, 4.420871e-05, &
+!!$4.388720e-05, 3.579160e-05, 4.067310e-05, 4.353573e-05, 3.769130e-05, 3.736240e-05, &
+!!$0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 6.237876e-06, 6.769932e-06, &
+!!$8.499995e-06, 5.542190e-06, 2.043629e-05, 2.716968e-05, 2.679320e-05, 2.438654e-05, &
+!!$2.720379e-05, 3.483711e-05, 3.324316e-05, 3.150108e-05, 1.059818e-05, 0.000000e+00, &
+!!$0.000000e+00, 8.253163e-06, 3.949930e-05, 0.000000e+00, 0.000000e+00, 3.152268e-05, &
+!!$6.308765e-05, 0.000000e+00, 0.000000e+00, 6.961662e-05, 5.867689e-05, 0.000000e+00, &
+!!$0.000000e+00, 5.304593e-05, 2.268293e-05, 0.000000e+00, 0.000000e+00, 2.066214e-05, &
+!!$0.000000e+00, 0.000000e+00, 0.000000e+00, 6.552727e-06 ]
 
   type common_info
      ! Mpi
@@ -118,7 +118,7 @@ real(dp), parameter :: hack_sig(364) = [ &
      integer(i4b), allocatable :: comps(:)
      ! Status monitor stuff
      type(status_file)         :: status
-     type(benchmarker)  :: bench
+     type(benchmarker)         :: bench
   end type common_info
 
   type mapdata
@@ -143,8 +143,8 @@ real(dp), parameter :: hack_sig(364) = [ &
   end type jk_struct
   
   type report_struct
-     real(dp)     :: tot_obs_time, tot_diode_time, tot_cpu_time
-     integer(i4b) :: num_diode_ces, num_ces, orig_num_diode_ces
+     real(dp)     :: tot_obs_time, tot_det_time, tot_cpu_time
+     integer(i4b) :: num_det_ces, num_ces, orig_num_det_ces
   end type report_struct
 
   interface add_mapdata
@@ -181,27 +181,27 @@ contains
   subroutine initialize_report_struct(summary)
     implicit none
     type(report_struct) :: summary
-    summary%tot_obs_time   = 0.d0
-    summary%tot_cpu_time   = 0.d0
-    summary%tot_diode_time = 0.d0
-    summary%num_diode_ces  = 0
-    summary%num_ces        = 0
-    summary%orig_num_diode_ces = 0
+    summary%tot_obs_time     = 0.d0
+    summary%tot_cpu_time     = 0.d0
+    summary%tot_det_time     = 0.d0
+    summary%num_det_ces      = 0
+    summary%num_ces          = 0
+    summary%orig_num_det_ces = 0
   end subroutine initialize_report_struct
 
-  subroutine update_report_struct(summary, cpu_time, obs_time, num_diode_ces, num_ces, diode_time,orig_num_diode_ces)
+  subroutine update_report_struct(summary, cpu_time, obs_time, num_det_ces, num_ces, det_time,orig_num_det_ces)
     implicit none
 
     type(report_struct), intent(inout)           :: summary
-    real(dp),            intent(in),    optional :: cpu_time, obs_time, diode_time
-    integer(i4b),        intent(in),    optional :: num_diode_ces, num_ces,orig_num_diode_ces
+    real(dp),            intent(in),    optional :: cpu_time, obs_time, det_time
+    integer(i4b),        intent(in),    optional :: num_det_ces, num_ces,orig_num_det_ces
 
     if (present(cpu_time))      summary%tot_cpu_time   = summary%tot_cpu_time   + cpu_time
     if (present(obs_time))      summary%tot_obs_time   = summary%tot_obs_time   + obs_time
-    if (present(diode_time))    summary%tot_diode_time = summary%tot_diode_time + diode_time
-    if (present(num_diode_ces)) summary%num_diode_ces  = summary%num_diode_ces  + num_diode_ces
+    if (present(det_time))      summary%tot_det_time   = summary%tot_det_time   + det_time
+    if (present(num_det_ces))   summary%num_det_ces    = summary%num_det_ces    + num_det_ces
     if (present(num_ces))       summary%num_ces        = summary%num_ces        + num_ces
-    if (present(orig_num_diode_ces)) summary%orig_num_diode_ces  = summary%orig_num_diode_ces  + orig_num_diode_ces
+    if (present(orig_num_det_ces)) summary%orig_num_det_ces  = summary%orig_num_det_ces  + orig_num_det_ces
 
   end subroutine update_report_struct
 
@@ -455,7 +455,7 @@ contains
           mjd   = l3data%time(k)
           do h = 1, nhorn
              p = quiet_horns(m)%groups(h)
-             ! Must manually add diode angle, as level2-files do not contain them.
+             ! Must manually add detector angle, as level2-files do not contain them.
              call coord_convert(l3data%coord_sys, real(l3data%point(1,k,p+1),dp), &
                & real(l3data%point(2,k,p+1),dp), real(l3data%point(3,k,p+1),dp) + &
                & get_diode_angle(di), info%coord, phi, theta,&
@@ -476,10 +476,10 @@ contains
     allocate(assembly%sigma0(ndi), assembly%alpha(ndi), assembly%fknee(ndi))
     allocate(assembly%corr(nfft,ndi,ndi))
     !write(*,*) 'Warning: Multiplying sigma0 by 1.02!!!'
-! TMR: test stuff
-!!$assembly%sigma0(:) = 1.d0
-!!$assembly%fknee(:) = 1.d-5
-!!$assembly%alpha(:) = -5.d0
+    ! TMR: test stuff
+    !!$assembly%sigma0(:) = 1.d0
+    !!$assembly%fknee(:) = 1.d-5
+    !!$assembly%alpha(:) = -5.d0
 
 
     assembly%sigma0 = l3data%sigma0(assembly%diodes_abs) !* 1.02d0 !HACK
@@ -503,13 +503,13 @@ contains
     assembly%fft_low_freq  =min(assembly%fft_low_freq,lowpass_max_cap)
     assembly%az_order      =max(assembly%az_order,azorder_min_cap)
 
-! Hack override noise parameters
-if(info%target == "tau_a") then
-assembly%sigma0 = hack_sig(assembly%diodes_abs)
-assembly%alpha  = -5
-assembly%fknee  = 0.005
-if(info%myid == 0) write(*,*) "Taua noise override"
-end if
+    ! Hack override noise parameters
+    if(info%target == "tau_a") then
+       assembly%sigma0 = hack_sig(assembly%diodes_abs)
+       assembly%alpha  = -5
+       assembly%fknee  = 0.005
+       if(info%myid == 0) write(*,*) "Taua noise override"
+    end if
 
     ! For tod2map to work, sigma0 and gain must be nonzero (especially sigma0),
     ! so check this here.
@@ -526,10 +526,10 @@ end if
     real(dp),       intent(in)  :: freqs(:), srate, corr_in(:,:,:)
     real(dp),       intent(out) :: corr_out(:,:,:)
     real(dp),       allocatable :: x(:), ox(:), variance(:), y(:), y2(:)
-    integer(i4b)                :: d1, d2, ndi, n, i, m
-    ndi = size(corr_in, 2)
-    n   = size(corr_out,1)
-    m   = size(freqs)-1
+    integer(i4b)                :: d1, d2, ndet, n, i, m
+    ndet = size(corr_in, 2)
+    n    = size(corr_out,1)
+    m    = size(freqs)-1
     allocate(x(m),ox(n),variance(m),y(m),y2(m))
     ! Assign measured corr to middle of interaval
     x = (freqs(2:m+1)+freqs(1:m))/2
@@ -541,9 +541,9 @@ end if
     ! logarithmic x
     x = log(x); ox = log(ox)
     ox(1) = ox(2)-(ox(3)-ox(2))
-    do d1 = 1, ndi
+    do d1 = 1, ndet
        corr_out(:,d1,d1) = 1
-       do d2 = d1+1, ndi
+       do d2 = d1+1, ndet
           y = corr_in(2:m,d1,d2)
           !call smooth_spline("inv_var", 1d10, x, y, 1d30, 1d30, y2, variance)
           call spline_plain(x, y, 1d30, 1d30, y2)
@@ -681,120 +681,5 @@ end if
     end do
     deallocate(tokens)
   end subroutine
-
-!  ! Generate a test assembly from scratch. We only generate what we
-!  ! need for our tests.
-!  subroutine get_assembly_test(assembly)
-!    implicit none
-!    type(quiet_assembly)        :: assembly
-!    integer(i4b), parameter     :: n = 16, nf = n/2+1, ndi = 2, ncorr = 1
-!    integer(i4b)                :: i
-!    call free_assembly_data(assembly)
-!    allocate(assembly%diodes_abs(2), assembly%diodes(2,2))
-!    assembly%diodes_abs        = [1,2]
-!    assembly%diodes            = reshape([1,2,1,1],[2,2])
-!    assembly%num_diodes        = size(assembly%diodes_abs)
-!    assembly%numsamp           = n
-!    assembly%samprate          = 25
-!    assembly%scanfreq          = 0.1
-!    assembly%noise_corr_length = ncorr
-!    allocate(assembly%N_corr_real(-ncorr:ncorr,ndi,ndi))
-!    allocate(assembly%N_corr_F_sq_real(-ncorr:ncorr,ndi,ndi))
-!    assembly%N_corr_real = reshape([&
-!     & -2, 4, -2 &
-!     &  1,-2,  1,&
-!     &  1,-2,  1,&
-!     & -2, 4, -2], [2*ncorr+1,ndi,ndi])
-!    assembly%N_corr_F_sq_real = 2*assembly%N_corr_real
-!    allocate(assembly%diode_info(ndi))
-!    do i = 1, ndi
-!       allocate(assembly%diode_info(i)%pix(n))
-!       assembly(diode_info(i)%pix = [1,1,1,2,1,1,2,2,1,2,2,2,2,2,2,2]
-!       allocate(assembly%diode_info
-!
-!    end do
-!
-!
-!     real(dp),    allocatable, dimension(:,:,:) :: point ! ((phi,theta,psi),nsamp,ngroup)
-!     integer(i4b),allocatable, dimension(:,:)   :: pix   ! (ngroup,nsamp)
-!     real(dp),    allocatable, dimension(:)     :: gamp  ! (ngroup)
-!     real(dp),    allocatable, dimension(:)     :: gain  ! (nsamp)
-!
-!
-!
-!             p1 = data%map2mask(assembly%diode_info(d1)%pix(h1,i1))
-!             call bench_start(info%bench, bench_cov1)
-!                   N_phase   = data%phase(d1)%val(:,h1,i1) * corr(d1,d2,k)
-!                   N_phase_sq= data%phase(d1)%val(:,h1,i1) * corr_sq(d1,d2,k)
-!                      p2 = data%map2mask(assembly%diode_info(d2)%pix(h2,i2))
-!                      if(.not. (p2 >= out%col_start .and. p2 <= out%col_stop)) cycle
-!                      do c1 = 1, info%ncomp
-!                         do c2 = 1, info%ncomp
-!                             & N_phase(c1) * data%phase(d2)%val(c2,h2,i2)
-!                             & N_phase_sq(c1) * data%phase(d2)%val(c2,h2,i2)
-!             call bench_stop(info%bench, bench_cov1)
-!             call bench_start(info%bench, bench_cov2)
-!             do col = out%col_start, out%col_stop
-!
-!
-!
-!
-!    ! The pointing must be converted to the right system
-!    do i = 1, ndi
-!       m     = assembly%diodes(i,1)
-!       d     = assembly%diodes(i,2)
-!       di    = assembly%diodes_abs(i)
-!       nhorn = size(quiet_horns(m)%groups)
-!       allocate(assembly%diode_info(i)%point(3,nrow,nhorn))
-!       allocate(assembly%diode_info(i)%pix(nhorn,nrow))
-!       allocate(assembly%diode_info(i)%gain(nrow))
-!       allocate(assembly%diode_info(i)%gamp(nhorn))
-!       assembly%diode_info(i)%gamp = quiet_horns(m)%amps
-!
-!       do k = 1, nrow
-!          mjd   = l3data%time(k)
-!          do h = 1, nhorn
-!             p = quiet_horns(m)%groups(h)
-!             ! Must manually add diode angle, as level2-files do not contain them.
-!             call coord_convert(l3data%coord_sys, real(l3data%point(1,k,p+1),dp), &
-!               & real(l3data%point(2,k,p+1),dp), real(l3data%point(3,k,p+1),dp) + &
-!               & get_diode_angle(di), info%coord, phi, theta,&
-!               & psi, mjd, m, d)
-!             assembly%diode_info(i)%point(:,k,h) = [ phi, theta, psi ]
-!             call ang2pix_nest(info%nside, theta, phi, assembly%diode_info(i)%pix(h,k))
-!          end do
-!       end do
-!    end do
-!
-!    ! Extract the gain from the file, and interpolate it to full resolution
-!    do i = 1, ndi
-!       call lin_interpol(l3data%time_gain, real(l3data%gain(:,assembly%diodes_abs(i)),dp), l3data%time(1:nrow), assembly%diode_info(i)%gain)
-!    end do
-!
-!    ! And fetch the precomputed noise stuff
-!    allocate(assembly%sigma0(ndi), assembly%alpha(ndi), assembly%fknee(ndi))
-!    allocate(assembly%corr(nfft,ndi,ndi))
-!    assembly%sigma0 = l3data%sigma0(assembly%diodes_abs)
-!    assembly%alpha  = l3data%alpha (assembly%diodes_abs)
-!    assembly%fknee  = l3data%fknee (assembly%diodes_abs)
-!    call interpolate_corr(l3data%corr_freqs, l3data%samprate, &
-!     & l3data%corr(:,assembly%diodes_abs,assembly%diodes_abs), assembly%corr)
-!
-!    ! Fetch filter information
-!    allocate(assembly%fft_low_freq(ndi), assembly%fft_low_alpha(ndi))
-!    allocate(assembly%fft_high_freq(ndi), assembly%fft_high_alpha(ndi))
-!    allocate(assembly%az_order(ndi))
-!    assembly%fft_low_freq   = minval(l3data%filter_par(assembly%diodes_abs,FILTER_LOW_NU))
-!    assembly%fft_low_alpha  = minval(l3data%filter_par(assembly%diodes_abs,FILTER_LOW_ALPHA))
-!    assembly%fft_high_freq  = maxval(l3data%filter_par(assembly%diodes_abs,FILTER_HIGH_NU_SCAN) * assembly%scanfreq)
-!    assembly%fft_high_alpha = minval(l3data%filter_par(assembly%diodes_abs,FILTER_HIGH_ALPHA))
-!    assembly%az_order       = maxval(l3data%filter_par(assembly%diodes_abs,FILTER_AZ_ORDER))
-!
-!    ! For tod2map to work, sigma0 and gain must be nonzero (especially sigma0),
-!    ! so check this here.
-!    call assert(.not. any(assembly%sigma0 == 0), "Zero sigma0 in get_assembly_data!")
-!  end subroutine
-
-
 
 end module

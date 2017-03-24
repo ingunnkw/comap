@@ -362,7 +362,7 @@ contains
   end subroutine
 
   subroutine setup_mpi
-    integer(i4b) :: ierr, myid, numprocs
+    integer(i4b) :: ierr, myid, numprocs ! necessary line ??
     ! Initialize MPI environment
     call mpi_init(ierr)
     call mpi_comm_rank(MPI_COMM_WORLD, info%myid, ierr)
@@ -483,7 +483,7 @@ contains
   ! get_next_task was faulty in the cause of multiple procs per covar.
   ! These complications do not really belong in quiet task mod, so I am
   ! making a wrapper here instead.
-  function get_next_task_coop(tasks, comm_coop, i) result(ok)
+  function get_next_task_coop(tasks, i, comm_coop) result(ok)
     implicit none
     type(task_list)  :: tasks
     integer(i4b)     :: i, coid, ierr, comm_coop
@@ -507,7 +507,7 @@ contains
     call bench_start(info%bench, bench_task)
     if(tasks%fd >= 0) then
        if(present(comm_coop)) then
-          ok = get_next_task_coop(tasks, comm_coop, i)
+          ok = get_next_task_coop(tasks, i, comm_coop)
        else
           ok = get_next_task(tasks, i)
        end if
@@ -575,7 +575,7 @@ contains
     call get_accepted_ceses(target%alist, cnums)
     call mkdirs(scan_task_file, .true.)
     call init_task_list_hack(tasklist, scan_task_file, size(cnums), mpi_comm_world, task_method)
-    do while(get_next_task_hack(tasklist, i))
+    do while(get_next_task_hack(tasklist, i)) ! missing comm_coop ??
        call get_ces_info(cnums(i), ces)
        write(*,fmt="(i3,a12,a,i5,a)") info%myid, " scanning", " ces ", ces%cid, " (" // &
         & trim(itoa(i)) // "/" // trim(itoa(size(cnums))) // ")"
@@ -663,7 +663,7 @@ contains
     call get_accepted_ceses(target%alist, cnums)
     call mkdirs(scan_task_file, .true.)
     call init_task_list_hack(tasklist, scan_task_file, size(cnums), mpi_comm_world, task_method)
-    do while(get_next_task_hack(tasklist, i))
+    do while(get_next_task_hack(tasklist, i)) ! missing comm_coop ??
        call get_ces_info(cnums(i), ces)
        write(*,fmt="(i3,a12,a,i5,a)") info%myid, " scanning", " ces ", ces%cid, " (" // &
         & trim(itoa(i)) // "/" // trim(itoa(size(cnums))) // ")"
