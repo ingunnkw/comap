@@ -248,6 +248,7 @@ contains
     type(lx_struct) :: data
     if(allocated(data%time))        deallocate(data%time)
     if(allocated(data%tod))         deallocate(data%tod)
+    if(allocated(data%tod_l1))      deallocate(data%tod_l1)
     if(allocated(data%orig_point))  deallocate(data%orig_point)
     call deallocate_hk_struct(data%hk)
 
@@ -260,7 +261,6 @@ contains
     if(allocated(data%corr))        deallocate(data%corr)
     if(allocated(data%det_stats))   deallocate(data%det_stats)
     if(allocated(data%filter_par))  deallocate(data%filter_par)
-    !if(allocated(data%point_sidelobe))deallocate(data%point_sidelobe)
   end subroutine
 
   subroutine write_l2_file(filename, data)

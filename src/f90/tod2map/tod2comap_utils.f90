@@ -504,12 +504,12 @@ contains
     assembly%az_order      =max(assembly%az_order,azorder_min_cap)
 
     ! Hack override noise parameters
-    if(info%target == "tau_a") then
-       assembly%sigma0 = hack_sig(assembly%diodes_abs)
-       assembly%alpha  = -5
-       assembly%fknee  = 0.005
-       if(info%myid == 0) write(*,*) "Taua noise override"
-    end if
+    !if(info%target == "tau_a") then
+    !   assembly%sigma0 = hack_sig(assembly%diodes_abs)
+    !   assembly%alpha  = -5
+    !   assembly%fknee  = 0.005
+    !   if(info%myid == 0) write(*,*) "Taua noise override"
+    !end if
 
     ! For tod2map to work, sigma0 and gain must be nonzero (especially sigma0),
     ! so check this here.
