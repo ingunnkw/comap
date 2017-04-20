@@ -4,8 +4,6 @@ program tod2comap
 
 !  include "mpif.h"
 
-!  integer(i4b)  :: myid, numprocs, ierr, root
-
   type tod_type ! ???
      real(dp)     :: samprate, Tsys
      integer(i4b) :: numsamp, numdet, numfreq
@@ -28,6 +26,7 @@ program tod2comap
 
   character(len=512) :: filename
   integer(i4b) :: i, j, k
+!  integer(i4b)  :: myid, numprocs, ierr, root
 
 !  call mpi_init(ierr)
 !  call mpi_comm_rank(mpi_comm_world, myid, ierr)
