@@ -15,6 +15,7 @@ module comap_Lx_mod
      real(dp)                                    :: samprate
      type(hk_struct)                             :: hk
      real(dp), allocatable, dimension(:)         :: time
+     real(dp), allocatable, dimension(:,:)       :: nu          ! (freq, sideband)
      real(sp), allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp), allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
      real(sp), allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
