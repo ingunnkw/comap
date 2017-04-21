@@ -50,7 +50,7 @@ export MPCC := mpicc
 
 # Fortran 90 compiler flags
 #export F90FLAGS := -O3 -assume byterecl
-export F90FLAGS := -g -C -vec_report0 -assume byterecl
+export F90FLAGS := -g -C -assume byterecl
 
 # Fortran 77 compiler flags
 export FFLAGS := -O2
@@ -66,7 +66,7 @@ export OPENMP := -qopenmp
 COMMON_FLAGS_DEBUG := -O0 -g
 COMMON_FLAGS_FORTRAN_DEBUG := $(COMMON_FLAGS_DEBUG) $(BOUNDS) -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
 #COMMON_FLAGS_FORTRAN_DEBUG := $(COMMON_FLAGS_DEBUG) -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl
-export F90FLAGS_DEBUG := -vec_report0 $(COMMON_FLAGS_FORTRAN_DEBUG)
+export F90FLAGS_DEBUG := $(COMMON_FLAGS_FORTRAN_DEBUG)
 export FFLAGS_DEBUG := $(COMMON_FLAGS_FORTRAN_DEBUG)
 export CFLAGS_DEBUG := $(COMMON_FLAGS_DEBUG)
 export LDFLAGS_DEBUG := -lm -cxxlib -qopenmp

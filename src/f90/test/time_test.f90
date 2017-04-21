@@ -2,7 +2,7 @@ program time_test
   use comap_Lx_mod
   implicit none
 
-  include "mpif.h"
+  !include "mpif.h"
 
   character(len=1024) :: filename, name2
   character(len=20) :: nr
