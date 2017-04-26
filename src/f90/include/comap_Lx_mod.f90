@@ -22,15 +22,15 @@ module comap_Lx_mod
 
      !! The level3 part, which is only present in level3-files
      integer(i4b)                                 :: coord_sys
-     real(dp)                                     :: scanfreq(2), pixsize, mapsize(2,2)
+     real(dp)                                     :: scanfreq(2), pixsize, point_lim(4)
      real(sp),     allocatable, dimension(:,:,:)  :: point        ! Gal; (phi/theta/psi,time,mod)
 
      real(dp),     allocatable, dimension(:)        :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
      real(dp),     allocatable, dimension(:,:,:,:)  :: corr                 ! (freq, freq, detector, detector)
-     real(dp)                                       :: stats(ST_NUM)
-     real(dp),     allocatable, dimension(:,:,:)    :: det_stats            ! (freq, detector, stat)
+     !real(dp)                                       :: stats(ST_NUM)
+     real(dp),     allocatable, dimension(:,:,:)    :: stats                ! (freq, detector, stat)
      real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
 
   end type Lx_struct
@@ -59,55 +59,6 @@ contains
     !call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
   end subroutine read_l1_file
-
-!!$  subroutine read_l1_mpi(filename, data)
-!!$    implicit none
-!!$    character(len=*), intent(in) :: filename
-!!$    type(lx_struct)              :: data
-!!$    type(hdf_file)               :: file
-!!$    integer(i4b)                 :: nsamp, nfreq, ndet, npoint, nsb, ext(7)
-!!$    integer(i4b)                 :: myid, numprocs, ierr, root
-!!$    integer(i4b), dimension(MPI_STATUS_SIZE) :: status
-!!$    call free_lx_struct(data)
-!!$
-!!$    ! The root process distribute workload ! point, samprate, time, tod
-!!$    if (myid == root) then 
-!!$       do i = 1, numprocs-1
-!!$          call read_l1_file(trim(filename), data)
-!!$          nsamp = size(data%tod,1)
-!!$          nfreq = size(data%tod,2)
-!!$          nsb   = size(data%tod,3)
-!!$          ndet  = size(data%tod,4)
-!!$          npoint = size(data%orig_point,1)
-!!$          ! distribute workload
-!!$          call mpi_send(nsamp, 1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(nfreq, 1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(nsb,   1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(ndet,  1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(npoint,1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(data%tod,   size(data%tod),   MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(data%time,  size(data%time),  MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(data%orig_point, size(data%orig_point), MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$          call mpi_send(data%samprate, 1, MPI_DOUBLE_PRECISION, i, 99, mpi_comm_world, ierr)
-!!$       end do
-!!$    else
-!!$       ! receive workload
-!!$       call mpi_recv(nsamp, 1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(nfreq, 1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(nsb,   1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(ndet,  1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(npoint,  1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(samprate,  1, MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(data%tod,   size(data%tod),   MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(data%time,  size(data%time),  MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       call mpi_recv(data%orig_point, size(data%orig_point), MPI_DOUBLE_PRECISION, root, 99, mpi_comm_world, status, ierr)
-!!$       allocate(data%tod(nsamp,nfreq,nsb,ndet))
-!!$       allocate(data%time(nsamp))
-!!$       allocate(data%orig_point(npoint,nsamp))
-!!$
-!!$    endif
-!!$
-!!$  end subroutine read_l1_mpi
 
 
   subroutine read_l2_file(filename, data)
@@ -183,7 +134,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call read_hdf(file, "scanfreq",  data%scanfreq)    
     call read_hdf(file, "pixsize", data%pixsize)
-    call read_hdf(file, "mapsize", data%mapsize)
+    call read_hdf(file, "point_lim", data%point_lim)
     ! Read pointing
     call get_size_hdf(file, "point", ext)
     nsamp = ext(2); nmod = ext(3)
@@ -205,15 +156,15 @@ contains
     allocate(data%sigma0(nfreq,ndet),data%alpha(nfreq,ndet),data%fknee(nfreq,ndet))
     allocate(data%corr(nfreq,nfreq,ndet,ndet))
     allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
-    call read_hdf(file, "sigma0", data%sigma0)
+    call read_hdf(file, "sigma", data%sigma0)
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)
     call read_hdf(file, "corr",   data%corr)
     ! Read APEX data
-    call read_hk_elem(file, "apex", data%hk%apex)
+    !call read_hk_elem(file, "apex", data%hk%apex)
     ! Read stats
-    call read_hdf(file, "stats",       data%stats)
-    call read_hdf(file, "det_stats", data%det_stats)
+    !call read_hdf(file, "stats",       data%stats)
+    call read_hdf(file, "stats", data%det_stats)
     ! Read filter parameters
     call read_hdf(file, "filter_par",  data%filter_par)
     call close_hdf_file(file)
