@@ -4,26 +4,26 @@ module comap_ces_mod
   use sort_utils
   implicit none
 
-  ! Information about a quiet_ces_info. Only the information that can be
+  ! Information about a comap_ces_info. Only the information that can be
   ! extracted directly from the level2-runlist. Category and object
   ! are indices into name arrays.
-  type quiet_ces_info
+  type comap_ces_info
     integer(i4b)       :: cid
     real(dp)           :: mjd(2), az, el, dk, lat, lon, time_of_day
     character(len=512) :: l2file, l3file, object
     character(len=512), allocatable, dimension(:) :: l1files
-  end type quiet_ces_info
+  end type comap_ces_info
 
-  type quiet_runlist
+  type comap_runlist
      integer(i4b)                               :: n
-     type(quiet_ces_info), dimension(:), allocatable :: ceses
+     type(comap_ces_info), dimension(:), allocatable :: ceses
      integer(i4b),         dimension(:), allocatable :: cidmap
-  end type quiet_runlist
+  end type comap_runlist
 
   integer(i4b), parameter :: PROP_TOD = 1, PROP_AZ = 2, PROP_EL = 3, &
     & PROP_DECK = 4, PROP_DUR = 5, PROP_MJD = 6
 
-  type(quiet_runlist)          :: ces_db
+  type(comap_runlist)          :: ces_db
   integer(i4b),    allocatable :: cid_list(:), cid_sort(:)
   logical(lgt),        private :: initialized = .false.
   character(len=512),  private :: l1dir, l2dir, l3dir
@@ -36,20 +36,13 @@ contains
     implicit none
     character(len=*)       :: parfile
     character(len=512)     :: runlist
-    logical(lgt), optional :: planck
-    logical(lgt)           :: planck_
     if(initialized) return
     call get_parameter(0, parfile, 'RUNLIST',     par_string=runlist)
     call get_parameter(0, parfile, 'LEVEL1_DIR',  par_string=l1dir)
     call get_parameter(0, parfile, 'LEVEL2_DIR',  par_string=l2dir)
     call get_parameter(0, parfile, 'LEVEL3_DIR',  par_string=l3dir)
 
-    planck_ = .false.; if(present(planck)) planck_ = planck
-    if (planck_) then
-       call read_runlist_planck(runlist, l2dir, l3dir, ces_db)
-    else
-       call read_runlist(runlist, l1dir, l2dir, l3dir, ces_db)
-    end if
+    call read_runlist(runlist, l1dir, l2dir, l3dir, ces_db)
     allocate(cid_list(ces_db%n), cid_sort(ces_db%n))
     cid_list = ces_db%ceses%cid
     cid_sort = cid_list
@@ -73,7 +66,7 @@ contains
 
   subroutine get_ces_info(ind, ces)
     implicit none
-    type(quiet_ces_info) :: ces
+    type(comap_ces_info) :: ces
     integer(i4b)    :: ind
     call copy_ces_info(ces_db%ceses(ind), ces)
   end subroutine
@@ -84,7 +77,7 @@ contains
     real(dp),                       intent(out), optional :: az, el, dk, time
     real(dp),         dimension(2), intent(out), optional :: mjd
     character(len=*),               intent(out), optional :: target
-    type(quiet_ces_info) :: info
+    type(comap_ces_info) :: info
 
     if(present(index)) then
        call get_ces_info(index, info)
@@ -116,8 +109,8 @@ contains
     character(len=512) :: name, l1dir, l2dir, l3dir, line
     integer(i4b)       :: unit, nobj, nces, nfile, cid, i, j, k, n, cnum, cmax
     real(dp)           :: mjd(2)
-    type(quiet_runlist):: runlist
-    type(quiet_ces_info)    :: ces
+    type(comap_runlist):: runlist
+    type(comap_ces_info)    :: ces
     n = count_num_ces(file)
     call free_runlist(runlist)
     allocate(runlist%ceses(n))
@@ -156,38 +149,6 @@ contains
     runlist%n = size(runlist%ceses)
   end subroutine read_runlist
 
-  subroutine read_runlist_planck(file, l2dir, l3dir, runlist)
-    implicit none
-    character(len=*)   :: file
-    character(len=512) :: name, l2dir, l3dir
-    integer(i4b)       :: unit, nobj, nces, nfile, cid, i, cmax
-    real(dp)           :: mjd(2)
-    type(quiet_runlist):: runlist
-    type(quiet_ces_info)    :: ces
-    call free_runlist(runlist)
-    unit = getlun()
-    open(unit,file=file,action="read",status="old")
-    read(unit,*) name, nces
-    allocate(runlist%ceses(nces))
-    do i = 1, nces
-       read(unit,*) ces%cid
-       ces%object      = name
-       ces%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(itoa(ces%cid)) // ".h5"
-       ces%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(itoa(ces%cid)) // ".hdf"
-       call copy_ces_info(ces, runlist%ceses(i))
-       call free_ces_info(ces)
-    end do
-    close(unit)
-    ! Set up the cid mapping
-    cmax = maxval(runlist%ceses%cid)
-    allocate(runlist%cidmap(cmax))
-    runlist%cidmap = 0
-    do i = 1, size(runlist%ceses)
-       runlist%cidmap(runlist%ceses(i)%cid) = i
-    end do
-    runlist%n = size(runlist%ceses)
-  end subroutine read_runlist_planck
-
   function count_num_ces(file) result(n)
     implicit none
     character(len=*)   :: file
@@ -213,13 +174,13 @@ contains
 
   subroutine free_ces_info(a)
     implicit none
-    type(quiet_ces_info) :: a
+    type(comap_ces_info) :: a
     if(allocated(a%l1files)) deallocate(a%l1files)
   end subroutine
 
   subroutine copy_ces_info(a, b)
     implicit none
-    type(quiet_ces_info) :: a, b
+    type(comap_ces_info) :: a, b
     call free_ces_info(b)
     allocate(b%l1files(size(a%l1files)))
     b = a
@@ -227,7 +188,7 @@ contains
 
   subroutine free_runlist(runlist)
     implicit none
-    type(quiet_runlist) :: runlist
+    type(comap_runlist) :: runlist
     integer(i4b) :: i
     if(allocated(runlist%ceses)) then
        do i = 1, size(runlist%ceses)
@@ -240,8 +201,8 @@ contains
 
   subroutine copy_runlist(a, b)
     implicit none
-    type(quiet_runlist) :: a
-    type(quiet_runlist) :: b
+    type(comap_runlist) :: a
+    type(comap_runlist) :: b
     integer(i4b)        :: i
     call free_runlist(b)
     allocate(b%ceses(size(a%ceses)))
