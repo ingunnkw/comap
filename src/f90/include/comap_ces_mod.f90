@@ -15,7 +15,7 @@ module comap_ces_mod
   end type comap_ces_info
 
   type comap_runlist
-     integer(i4b)                               :: n
+     integer(i4b) :: n
      type(comap_ces_info), dimension(:), allocatable :: ceses
      integer(i4b),         dimension(:), allocatable :: cidmap
   end type comap_runlist
@@ -67,7 +67,7 @@ contains
   subroutine get_ces_info(ind, ces)
     implicit none
     type(comap_ces_info) :: ces
-    integer(i4b)    :: ind
+    integer(i4b)         :: ind
     call copy_ces_info(ces_db%ceses(ind), ces)
   end subroutine
 
@@ -105,12 +105,12 @@ contains
 
   subroutine read_runlist(file, l1dir, l2dir, l3dir, runlist)
     implicit none
-    character(len=*)   :: file
-    character(len=512) :: name, l1dir, l2dir, l3dir, line
-    integer(i4b)       :: unit, nobj, nces, nfile, cid, i, j, k, n, cnum, cmax
-    real(dp)           :: mjd(2)
-    type(comap_runlist):: runlist
-    type(comap_ces_info)    :: ces
+    character(len=*)     :: file
+    character(len=512)   :: name, l1dir, l2dir, l3dir, line
+    integer(i4b)         :: unit, nobj, nces, nfile, cid, i, j, k, n, cnum, cmax
+    real(dp)             :: mjd(2)
+    type(comap_runlist)  :: runlist
+    type(comap_ces_info) :: ces
     n = count_num_ces(file)
     call free_runlist(runlist)
     allocate(runlist%ceses(n))
