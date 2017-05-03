@@ -32,7 +32,7 @@ contains
 
   ! Public interface: These are meant to be called from outside.
 
-  subroutine initialize_ces_mod(parfile, planck)
+  subroutine initialize_ces_mod(parfile)
     implicit none
     character(len=*)       :: parfile
     character(len=512)     :: runlist

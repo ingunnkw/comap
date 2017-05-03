@@ -1,4 +1,4 @@
-all : tod2comap covbench comaptest #maptest
+all : tod2comap #covbench comaptest #maptest
 
 tod2comap : libtod2map.a tod2comap.o ../include/libquiet.a
 	$(MPF90) -o tod2comap tod2comap.o libtod2map.a $(LINK) $(COMMON_FLAGS)

@@ -15,7 +15,7 @@ module comap_Lx_mod
      real(dp)                                    :: samprate
      type(hk_struct)                             :: hk
      real(dp), allocatable, dimension(:)         :: time
-     real(dp), allocatable, dimension(:,:)       :: nu          ! (freq, sideband)
+     real(dp), allocatable, dimension(:)         :: nu          ! (freq, sideband)
      real(sp), allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp), allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
      real(sp), allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
@@ -23,14 +23,14 @@ module comap_Lx_mod
      !! The level3 part, which is only present in level3-files
      integer(i4b)                                 :: coord_sys
      real(dp)                                     :: scanfreq(2), pixsize, point_lim(4)
-     real(sp),     allocatable, dimension(:,:,:)  :: point        ! Gal; (phi/theta/psi,time,mod)
+     real(sp),     allocatable, dimension(:,:)    :: point        ! Gal; (phi/theta/psi,time,mod)
 
      real(dp),     allocatable, dimension(:)        :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
      real(dp),     allocatable, dimension(:,:,:,:)  :: corr                 ! (freq, freq, detector, detector)
-     !real(dp)                                       :: stats(ST_NUM)
-     real(dp),     allocatable, dimension(:,:,:)    :: stats                ! (freq, detector, stat)
+     real(dp)                                       :: stats(ST_NUM)
+     real(dp),     allocatable, dimension(:,:,:)    :: det_stats                ! (freq, detector, stat)
      real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
 
   end type Lx_struct
@@ -70,57 +70,58 @@ contains
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
-    nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
-    call get_size_hdf(file, "orig_point", ext)
-    npoint = ext(1)
+    nsamp = ext(3); nfreq = ext(2); ndet = ext(1)
     allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet))
-    allocate(data%orig_point(npoint,nsamp))
+    call get_size_hdf(file, "orig_point", ext)
+    npoint = ext(2); nsamp = ext(1)
+    allocate(data%orig_point(npoint,nsamp), data%nu(nfreq))
     call read_hdf(file, "decimation", data%decimation)
     call read_hdf(file, "samprate",   data%samprate)
     call read_hdf(file, "time",       data%time)
+    call read_hdf(file, "nu",         data%nu)
     call read_hdf(file, "tod",        data%tod)
     call read_hdf(file, "orig_point", data%orig_point)
-    call read_hk_hdf(file, data%hk)
+    !call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
 
-  ! Where should this sub logically be?
-  subroutine decimate(time, time_full, tod, tod_full, point, point_full, dec)
-    implicit none
-    integer(i4b)                                      :: n, nfreq, ndet, npt, dec, i, j, k, l, ind
-    real(dp), dimension(:),      intent(inout)        :: time, time_full
-    real(dp), dimension(:,:,:),  intent(inout)        :: tod, tod_full
-    real(dp), dimension(:,:,0:), intent(inout)        :: point, point_full
+  ! ! Where should this sub logically be?
+  ! subroutine decimate(time, time_full, tod, tod_full, point, point_full, dec)
+  !   implicit none
+  !   integer(i4b)                                      :: n, nfreq, ndet, npt, dec, i, j, k, l, ind
+  !   real(dp), dimension(:),      intent(inout)        :: time, time_full
+  !   real(dp), dimension(:,:,:),  intent(inout)        :: tod, tod_full
+  !   real(dp), dimension(:,:,0:), intent(inout)        :: point, point_full
 
-    if (dec>0) then
-       n     = size(tod,1)
-       nfreq = size(tod,2)
-       ndet  = size(tod,3)
-       npt   = size(point,1)
+  !   if (dec>0) then
+  !      n     = size(tod,1)
+  !      nfreq = size(tod,2)
+  !      ndet  = size(tod,3)
+  !      npt   = size(point,1)
 
-       ! Averaging over every (dec) elements of the time dimension of time, tod and pointing arrays
-       ind = 1
-       do i=1,n
-          time(i) = mean(time_full(ind:ind+dec-1))
-          do j=1,ndet
-             do l=1, nfreq
-                tod(i,l,j) = mean(tod_full(ind:ind+dec-1,l,j))
-             end do
-             do k=1,npt
-                ! do I need to make the angles safe?
-                point(k,i,j-1) = mean(point_full(k,ind:ind+dec-1,j-1))
-             end do
-          end do
-          ind = ind + dec
-       end do
+  !      ! Averaging over every (dec) elements of the time dimension of time, tod and pointing arrays
+  !      ind = 1
+  !      do i=1,n
+  !         time(i) = mean(time_full(ind:ind+dec-1))
+  !         do j=1,ndet
+  !            do l=1, nfreq
+  !               tod(i,l,j) = mean(tod_full(ind:ind+dec-1,l,j))
+  !            end do
+  !            do k=1,npt
+  !               ! do I need to make the angles safe?
+  !               point(k,i,j-1) = mean(point_full(k,ind:ind+dec-1,j-1))
+  !            end do
+  !         end do
+  !         ind = ind + dec
+  !      end do
 
-    else
-       time = time_full
-       tod = tod_full
-       point = point_full
-    end if
-  end subroutine decimate
+  !   else
+  !      time = time_full
+  !      tod = tod_full
+  !      point = point_full
+  !   end if
+  ! end subroutine decimate
 
 
   subroutine read_l3_file(filename, data)
@@ -128,18 +129,19 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b) :: npix, nsamp, nfreq, ndet, nmod, ext(7)
+    integer(i4b) :: npoint, nsamp, nfreq, ndet, nmod, ext(7)
     call free_lx_struct(data)
     call read_l2_file(filename, data)
     call open_hdf_file(filename, file, "r")
-    call read_hdf(file, "scanfreq",  data%scanfreq)    
-    call read_hdf(file, "pixsize", data%pixsize)
+    call read_hdf(file, "scan_freq",  data%scanfreq)    
+    !call read_hdf(file, "pixsize", data%pixsize)
     call read_hdf(file, "point_lim", data%point_lim)
     ! Read pointing
     call get_size_hdf(file, "point", ext)
-    nsamp = ext(2); nmod = ext(3)
-    allocate(data%point(3,nsamp,nmod))
+    npoint = ext(2); nsamp = ext(1)!; mod = ext(3)
+    allocate(data%point(npoint,nsamp))
     call read_hdf(file, "point",     data%point)
+    !call read_hdf(file, "coord_sys", data%coord_sys)  
     call read_hdf(file, "coord_sys", data%coord_sys)
     ! Read gain
     call get_size_hdf(file, "time_gain", ext)
@@ -147,19 +149,21 @@ contains
     allocate(data%time_gain(nsamp))
     call read_hdf(file, "time_gain", data%time_gain)
     call get_size_hdf(file, "gain", ext)
-    nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
+    nsamp = ext(3); nfreq = ext(2); ndet = ext(1)
     allocate(data%gain(nsamp,nfreq,ndet))
     call read_hdf(file, "gain", data%gain)
     ! Read noise parameters
-    call get_size_hdf(file, "corr", ext)
-    nfreq = ext(1); ndet = ext(3)
+    !call get_size_hdf(file, "corr", ext)
+    call get_size_hdf(file, "sigma", ext)
+    nfreq = ext(2); ndet = ext(1)
     allocate(data%sigma0(nfreq,ndet),data%alpha(nfreq,ndet),data%fknee(nfreq,ndet))
-    allocate(data%corr(nfreq,nfreq,ndet,ndet))
-    allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
+    !allocate(data%corr(nfreq,nfreq,ndet,ndet))
+    !allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
+    allocate(data%det_stats(ndet,nfreq,1), data%filter_par(4,nfreq,ndet))
     call read_hdf(file, "sigma", data%sigma0)
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)
-    call read_hdf(file, "corr",   data%corr)
+    !call read_hdf(file, "corr",   data%corr)
     ! Read APEX data
     !call read_hk_elem(file, "apex", data%hk%apex)
     ! Read stats
@@ -230,15 +234,12 @@ contains
     call close_hdf_file(file)
   end subroutine
 
-  subroutine write_l3_file(filename, data, planck)
+  subroutine write_l3_file(filename, data)
     implicit none
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
     integer(i4b)                 :: i
-    logical(lgt), optional       :: planck
-    logical(lgt)                 :: planck_
-    planck_  = .false.; if(present(planck)) planck_ = planck
 
     call open_hdf_file(filename, file, "w")
     call write_hdf(file, "time",         data%time)
@@ -247,7 +248,7 @@ contains
     call write_hdf(file, "samprate",     data%samprate)
     call write_hdf(file, "coord_sys",    data%coord_sys)
     call write_hdf(file, "pixsize",      data%pixsize)
-    call write_hdf(file, "mapsize",      data%mapsize)
+    call write_hdf(file, "point_lim",    data%point_lim)
     call write_hdf(file, "tod",          data%tod)
     call write_hdf(file, "orig_point",   data%orig_point)
     call write_hdf(file, "point",        data%point)
@@ -260,11 +261,9 @@ contains
     call write_hdf(file, "stats",        data%stats)
     call write_hdf(file, "det_stats",    data%det_stats)
     call write_hdf(file, "filter_par",   data%filter_par)
-    if (.not. planck_) then
-       call write_hk_hdf(file, data%hk)
-       call create_hdf_group(file, "apex")
-       call write_hk_elem   (file, "apex", data%hk%apex)
-    end if
+    call write_hk_hdf(file, data%hk)
+    call create_hdf_group(file, "apex")
+    call write_hk_elem   (file, "apex", data%hk%apex)
     call close_hdf_file(file)
   end subroutine
 
@@ -324,7 +323,7 @@ contains
     end do
     allocate(out%time(n), out%tod(n,nf,ndet), out%orig_point(3,n))
     if(l3) then
-       allocate(out%point(3,n,size(in(1)%point,3)))
+       allocate(out%point(3,n))!,size(in(1)%point)))
        allocate(out%time_gain(ng), out%gain(ng,nf,ndet))
     end if
     j  = 0
@@ -337,7 +336,7 @@ contains
        out%orig_point (:,1+j:m+j  )   = in(i)%orig_point
        if(l3) then
           mg = size(in(i)%time_gain)
-          out%point(:,1+j:m+j,:)        = in(i)%point
+          out%point(:,1+j:m+j)          = in(i)%point
           out%time_gain(1+jg:mg+jg)     = in(i)%time_gain
           out%gain(1+jg:mg+jg,:,:)      = in(i)%gain
        end if
@@ -351,7 +350,7 @@ contains
     out%coord_sys  = in(1)%coord_sys
     out%scanfreq   = in(1)%scanfreq
     out%pixsize    = in(1)%pixsize
-    out%mapsize    = in(1)%mapsize
+    out%point_lim  = in(1)%point_lim
 
     ! These could actually differ between the files. We make
     ! a weighted average
