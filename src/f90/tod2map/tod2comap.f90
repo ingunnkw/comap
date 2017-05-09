@@ -40,8 +40,10 @@ program tod2comap
   filename = "/mn/stornext/d5/comap/protodir/level3/Ka/lissajous/patch1_1.h5"
   write(*,*) 'Get TOD ...'
   call get_tod(filename, data, tod)
-  !write(*,*) 'Write TOD to file ...'
-  !call output_tod('files/test_tod.dat', 1, tod)
+  write(*,*) 'Write TOD to file ...'
+  call output_tod('files/test', 1, tod) ! DOES NOT CURRENTLY WORK!!
+  !write(*,*) tod%d(1:10,1,1)
+  !write(*,*) tod%d_raw(1:10,1,1)
   write(*,*) 'Compute maps ...'
   call compute_maps(data, tod, map)
   write(*,*) 'Write maps to file ...'
@@ -102,7 +104,7 @@ contains
        do j = 1, tod%nfreq
           do i = 1, tod%nsamp
             ! tod%d_raw(i,j,k) = mean
-             tod%d_raw(i,j,k) = data%tod(i,j,k) ! Does not seem to work?
+             tod%d_raw(i,j,k) = data%tod(i,j,k) ! ??
           end do
           
           ! Apply high pass filter
@@ -117,25 +119,28 @@ contains
   end subroutine get_tod
 
 
-  subroutine output_tod(filename, det, tod)
+  subroutine output_tod(prefix, det, tod)
     implicit none
-    character(len=*), intent(in) :: filename
+    character(len=*), intent(in) :: prefix
     type(tod_type),   intent(in) :: tod
     integer(i4b),     intent(in) :: det
 
+    character(len=512) :: filename
+    character(len=4)   :: jtext
     integer(i4b) :: unit, i, j
 
     unit = getlun()
-
-    open(unit, file=trim(filename), recl=4096)
-    do i = 1, tod%nsamp
-       write(unit, fmt='(f16.8)', advance='no') tod%t(i)
-       do j = 1, tod%nfreq
-          write(unit, fmt='(2f2.8)', advance='no') tod%d(i,j,det), tod%d_raw(i,j,det)
+    do j = 1, tod%nfreq
+       call int2string(j,jtext)
+       filename = trim(prefix) // '_freq' // jtext // '_tod.dat'
+       open(unit, file=trim(filename), recl=4096)
+       do i = 1, tod%nsamp
+          write(unit, fmt='(f16.8)', advance='no') tod%t(i)
+          write(unit, fmt='(2f24.8)', advance='no') tod%d(i,j,det), tod%d_raw(i,j,det)
+          write(unit,*)
        end do
-       write(unit,*)
+       close(unit)
     end do
-    close(unit)
 
   end subroutine output_tod
   
