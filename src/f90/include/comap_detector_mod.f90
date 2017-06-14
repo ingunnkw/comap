@@ -2,14 +2,6 @@
 !
 ! Horn format:
 ! id telescope horn theta phi psi fwhm freq ok
-!
-! The horn and diode arrays are made public instead of having a horde
-! of accessor functions, and this makes array operations simpler.
-! For example, to get the board corresponding to each diode, perhaps for
-! jackknife purposes, you would simply do quiet_horns(quiet_diodes%horn)%board.
-! Diode indices are absolute, but the relative diode number is available as "sub".
-!
-! To translate from (mod,sub) to di, use: quiet_horns(mod)%diodes(sub)
 
 module comap_detector_mod
   use quiet_utils
@@ -33,15 +25,15 @@ contains
     if(initialized) return
     call get_parameter(0, parfile, "DETECTOR_FILE", par_string=dfile)
     call read_detectors(dfile, comap_detectors)
-    call setup_diodes(quiet_horns, quiet_diodes)
     initialized = .true.
   end subroutine
 
   ! Helper functions below
   subroutine read_detectors(filename, detectors)
     implicit none
-    character(len=*),                            intent(in)    :: filename
-    type(quiet_horn), dimension(:), allocatable, intent(inout) :: detectors
+    character(len=*),                                intent(in)    :: filename
+    type(comap_detector), dimension(:), allocatable, intent(inout) :: detectors
+
     character(len=512) :: line
     integer(i4b)       :: i, j, k, m, n, id, unit, telescope, horn
     real(dp)           :: theta, phi, psi, fwhm, freq
@@ -64,15 +56,15 @@ contains
        read(unit,'(a)',end=2) line
        if(line(1:1) == "#" .or. line == "") cycle
        read(line,*) id, telescope, horn, theta, phi, psi, fwhm, freq, ok
-       horns(id)%id        = id
-       horns(id)%telescope = telescope
-       horns(id)%horn      = horn
-       horns(id)%theta     = theta * DEG2RAD          ! Input in deg
-       horns(id)%phi       = phi   * DEG2RAD          ! Input in deg
-       horns(id)%psi       = psi   * DEG2RAD          ! Input in deg
-       horns(id)%fwhm      = fwhm  * DEG2RAD / 60     ! Input in arcmin
-       horns(id)%freq      = freq  * 1d9              ! Input in GHz
-       horns(id)%ok        = ok 
+       detectors(id)%id        = id
+       detectors(id)%telescope = telescope
+       detectors(id)%horn      = horn
+       detectors(id)%theta     = theta * DEG2RAD          ! Input in deg
+       detectors(id)%phi       = phi   * DEG2RAD          ! Input in deg
+       detectors(id)%psi       = psi   * DEG2RAD          ! Input in deg
+       detectors(id)%fwhm      = fwhm  * DEG2RAD / 60     ! Input in arcmin
+       detectors(id)%freq      = freq  * 1d9              ! Input in GHz
+       detectors(id)%ok        = ok 
     end do
     2 close(unit)
   end subroutine
@@ -80,7 +72,7 @@ contains
   function get_num_detectors() result(res)
     implicit none
     integer(i4b) :: res
-    res = size(quiet_detector)
+    res = size(comap_detectors)
   end function
 
   function detector_valid(id) result(res)
@@ -106,7 +98,7 @@ contains
     implicit none
     integer(i4b) :: id
     real(dp)     :: fwhm
-    fwhm = comap_detectors(mod)%fwhm
+    fwhm = comap_detectors(id)%fwhm
   end function
 
   function get_max_fwhm() result(fwhm)
@@ -117,7 +109,7 @@ contains
 
   function get_detector_angle(id) result(res)
     implicit none
-    integer(i4b) :: mod, di
+    integer(i4b) :: id
     real(dp)     :: res
     res = comap_detectors(id)%psi
   end function
@@ -151,7 +143,9 @@ contains
   ! Warning: This routine is slow, so use sparingly
   subroutine detector_abs2rel(telescope, horn, id)
     implicit none
-    integer(i4b) :: diode, mod, di
+    integer(i4b), intent(in)  :: telescope, horn
+    integer(i4b), intent(out) :: id
+    integer(i4b) :: i
     do i = 1, size(comap_detectors)
        if (comap_detectors(i)%telescope == telescope .and. comap_detectors(i)%horn == horn) then
           id = i
