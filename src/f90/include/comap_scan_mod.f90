@@ -57,7 +57,7 @@ contains
     initialized = .true.
   end subroutine
 
-  function get_num_scan() result(res)
+  function get_num_scans() result(res)
     implicit none
     integer(i4b) :: res
     res = size(scan_db%scans)
