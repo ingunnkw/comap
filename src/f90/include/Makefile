@@ -11,7 +11,7 @@ OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_nr_mod.o quiet_utils.o quiet_hdf_mod.o quiet_Lx_mod.o \
 	 comap_defs.o comap_Lx_mod.o comap_ces_mod.o \
          spline_1D_mod.o spline_2D_mod.o sort_utils.o \
-	 quiet_mpi_mod.o fake_mpi_mod.o quiet_pointing_mod.o \
+	 quiet_mpi_mod.o fake_mpi_mod.o quiet_pointing_mod.o comap_pointing_mod.o \
          quiet_apex_mod.o quiet_gain_mod.o quiet_mpi_utils.o \
          quiet_sidelobe_mod.o quiet_fft_mod.o \
          quiet_i2qu_mod.o quiet_mask_mod.o quiet_pmac_mod.o \
@@ -72,6 +72,7 @@ quiet_i2qu.o             : quiet_fileutils.o pix_tools.o
 quiet_assembly_mod.o     : quiet_utils.o
 scalawrap.o              : quiet_mpi_mod.o
 quiet_pointing_mod.o     : quiet_utils.o l1_read_mod.o math_tools.o quiet_pmac_mod.o
+comap_pointing_mod.o     : quiet_utils.o math_tools.o 
 scalautils.o             : quiet_mpi_mod.o scalawrap.o
 quiet_noise_estimation_mod.o : quiet_utils.o quiet_fft_mod.o 
 quiet_module_mod.o       : quiet_utils.o quiet_detector_mod.o
