@@ -131,9 +131,9 @@ contains
              ces%l1files(k) = trim(l1dir) // "/" // trim(get_token(line, " ", 3))
           end do
           ces%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-           & trim(itoa(ces%cid)) // ".hdf"
+           & trim(itoa(ces%cid)) // ".h5"
           ces%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-           & trim(itoa(ces%cid)) // ".hdf"
+           & trim(itoa(ces%cid)) // ".h5"
           call copy_ces_info(ces, runlist%ceses(cnum))
           call free_ces_info(ces)
        end do
