@@ -108,7 +108,7 @@ export FCOMP := $(FFLAGS) -I$(TOPDIR)/src/f90/include $(LAPACK_INCLUDE) $(HEALPI
 export LINK := -L$(TOPDIR)/src/f90/include -lquiet $(HEALPIX_LINK) $(CFITSIO_LINK) $(LAPACK_LINK) $(FFTW_LINK) $(NOVAS_LINK) $(LDFLAGS) $(HDF_LINK) $(LDFLAGS) $(OPENMP)
 export TEMPITA := "$(TOPDIR)/src/python/tempita_proc.py"
 
-all : libquiet libutil l2gen postmap map_editor ces_validate maptool test # ces_detect l3gen tod2map utils_f90
+all : libquiet libutil l2gen postmap map_editor scan_validate maptool test # ces_detect l3gen tod2map utils_f90
 
 full : all libquietscala scalapost map2cl
 
@@ -147,7 +147,7 @@ install : all
 	else \
 	cp src/f90/include/*.mod $(INSTALL)/include; \
 	fi
-	@cp src/f90/ces_validate/ces_validate $(INSTALL)/bin
+	@cp src/f90/scan_validate/scan_validate $(INSTALL)/bin
 	@cp src/f90/l2gen/l2gen $(INSTALL)/bin
 	@cp src/f90/l3gen/l3gen $(INSTALL)/bin
 	@cp src/f90/ces_detect/ces_detect $(INSTALL)/bin
@@ -179,8 +179,8 @@ map_editor :
 tod2map :
 	@cd src/f90/tod2map; $(MAKE)
 
-ces_validate :
-	@cd src/f90/ces_validate; $(MAKE)
+scan_validate :
+	@cd src/f90/scan_validate; $(MAKE)
 
 l3gen :
 	@cd src/f90/l3gen; $(MAKE)
@@ -203,7 +203,7 @@ maptool:
 test :
 	@cd src/f90/test; $(MAKE)
 
-clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_ces_validate clean_l3gen clean_ces_detect clean_l2gen clean_maptool clean_test
+clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_scan_validate clean_l3gen clean_ces_detect clean_l2gen clean_maptool clean_test
 
 clean_postmap :
 	@cd src/f90/postmap; $(MAKE) clean
@@ -220,8 +220,8 @@ clean_map_editor :
 clean_tod2map :
 	@cd src/f90/tod2map; $(MAKE) clean
 
-clean_ces_validate :
-	@cd src/f90/ces_validate; $(MAKE) clean 
+clean_scan_validate :
+	@cd src/f90/scan_validate; $(MAKE) clean 
 
 clean_l3gen :
 	@cd src/f90/l3gen; $(MAKE) clean 
@@ -258,7 +258,7 @@ dist : clean
 	@mkdir -p $(DIR)/src/f90/scalapost
 	@mkdir -p $(DIR)/src/f90/map_editor
 	@mkdir -p $(DIR)/src/f90/tod2map
-	@mkdir -p $(DIR)/src/f90/ces_validate
+	@mkdir -p $(DIR)/src/f90/scan_validate
 	@mkdir -p $(DIR)/src/f90/l3gen
 	@mkdir -p $(DIR)/src/f90/l2gen
 	@mkdir -p $(DIR)/src/f90/ces_detect
@@ -271,7 +271,7 @@ dist : clean
 	@cp src/f90/scalapost/*.f90 src/f90/scalapost/Makefile $(DIR)/src/f90/scalapost
 	@cp src/f90/map_editor/*.f90 src/f90/map_editor/Makefile $(DIR)/src/f90/map_editor
 	@cp src/f90/tod2map/*.f90 src/f90/tod2map/Makefile $(DIR)/src/f90/tod2map
-	@cp src/f90/ces_validate/*.f90 src/f90/ces_validate/Makefile $(DIR)/src/f90/ces_validate
+	@cp src/f90/scan_validate/*.f90 src/f90/scan_validate/Makefile $(DIR)/src/f90/scan_validate
 	@cp src/f90/l3gen/*.f90 src/f90/l3gen/Makefile $(DIR)/src/f90/l3gen
 	@cp src/f90/ces_detect/*.f90 src/f90/ces_detect/Makefile $(DIR)/src/f90/ces_detect
 	@cp src/f90/l2gen/*.f90 src/f90/l2gen/Makefile $(DIR)/src/f90/l2gen
