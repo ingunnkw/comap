@@ -12,7 +12,6 @@ module quiet_fileutils
   use quiet_utils
   use fitstools
   use head_fits
-  use l1_read_mod
   use quiet_hdf_mod
   use quiet_mapfile_mod
   use quiet_covfile_mod
@@ -334,190 +333,190 @@ contains
 
   end subroutine write_cov_mat
 
-  ! Given a list of files and a mjd range, reads out and concatenates level1-data.
-  subroutine l1_read_range(filelist, mjd, mods, sel, data, point, hk, status)
-    character(len=*) :: filelist(:)
-    real(dp)         :: mjd(2)
-    integer(i4b)     :: mods(:), eff(2)
-    type(l1_selector),  optional :: sel
-    type(data_struct),  optional :: data
-    type(point_struct), optional :: point
-    type(hk_struct),    optional :: hk
-    integer(i4b),       optional :: status
-
-    integer(i4b)        :: i, j, k, m, n, nsamp, unit, lr(2), gr(2), samprate, s
-    integer(i4b)        :: nbias, ncryo, nencl, nperi
-    real(dp)            :: start_mjd
-    type(l1_selector)   :: sel_
-    type(data_struct)   :: data_
-    type(point_struct)  :: point_
-    type(hk_struct)     :: hks(size(filelist))
-
-    if(present(sel)) then
-       sel_ = sel
-    else
-       sel_ = l1sel(l1_std)
-    end if
-    if(.not. present(data))  sel_%on(data_all)  = .false.
-    if(.not. present(point)) sel_%on(point_all) = .false.
-    if(.not. present(hk))    sel_%on(hk_all)    = .false.
-    sel_%on(point_time) = .true.
-
-    samprate = 100
-    s        = 24*60*60*samprate
-    nsamp    = int((mjd(2)-mjd(1))*s)
-    if(present(data))  call allocate_data_struct(size(mods), nsamp, data, sel_)
-    if(present(point)) call allocate_point_struct(nsamp, point, sel_)
-
-    ! Hack: Check for uninitialized stuff
-    if(present(point)) point%encoder_elevation = NaN
-    if(present(point)) point%encoder_azimuth   = NaN
-    if(present(point)) point%encoder_deck      = NaN
-
-    ! Housekeeping does not have the same samprate, but take little space, so
-    ! we just read it all in, and figure out the ranges afterwards.
-
-    gr = 0
-    unit = getlun()
-    do i = 1, size(filelist)
-       call l1_read(unit, filelist(i), data_, hks(i), point_, modules=mods, selector=sel_, &
-        & status_code=status)
-       if(present(status)) then; if(status /= 0) then
-          call deallocate_data_struct(data)
-          call deallocate_point_struct(point)
-          do j = 1, i-1
-             call deallocate_hk_struct(hks(j))
-          end do
-          return
-       end if; end if
-
-       ! Argh! A few files have non-monotonous time ranges! Skip these ranges
-       if(i == 1) then
-          do j = size(point_%time), 2, -1
-             if(point_%time(j) < point_%time(j-1)) exit
-          end do
-          eff = [ j, size(point_%time) ]
-       else
-          do j = 1, size(point_%time)-1
-             if(point_%time(j+1) < point_%time(j)) exit
-          end do
-          eff = [ 1, j ]
-       end if
-
-       ! Map the times in the file into indices into range. Because of the possibility
-       ! varying sample rates etc. we loop through.
-       do j = eff(1), eff(2)
-          if(point_%time(j) >= mjd(1)) exit
-       end do
-       lr(1) = j
-       do j = lr(1), eff(2)
-          if(point_%time(j) > mjd(2)) exit
-       end do
-       lr(2) = j-1
-       n = lr(2)-lr(1)+1
-       ! Do we have room for all this?
-       if(gr(2) + n >  nsamp) lr(2) = lr(2) - (gr(2)+n-nsamp)
-       ! Append this to the global range
-       gr = [ gr(2)+1, gr(2)+1+(lr(2)-lr(1)) ]
-
-       if(i == 1) start_mjd = point_%time(lr(1))
-
-
-       ! And finally copy over the interesting parts
-       if(present(point)) then
-          if(allocated(point%time)) point%time(gr(1):gr(2)) = point_%time(lr(1):lr(2))
-          if(allocated(point%mode)) point%mode(gr(1):gr(2)) = point_%mode(lr(1):lr(2))
-
-          if(allocated(point%encoder_azimuth)) &
-           & point%encoder_azimuth  (gr(1):gr(2)) = point_%encoder_azimuth(lr(1):lr(2))
-          if(allocated(point%encoder_elevation)) &
-           & point%encoder_elevation(gr(1):gr(2)) = point_%encoder_elevation(lr(1):lr(2))
-          if(allocated(point%encoder_deck)) &
-           & point%encoder_deck(gr(1):gr(2))      = point_%encoder_deck(lr(1):lr(2))
-
-          if(allocated(point%command_azimuth)) &
-           & point%command_azimuth  (gr(1):gr(2)) = point_%command_azimuth(lr(1):lr(2))
-          if(allocated(point%command_elevation)) &
-           & point%command_elevation(gr(1):gr(2)) = point_%command_elevation(lr(1):lr(2))
-          if(allocated(point%command_deck)) &
-           & point%command_deck(gr(1):gr(2))      = point_%command_deck(lr(1):lr(2))
-       end if
-
-       if(present(data)) then
-          if(allocated(data%time))  data%time(gr(1):gr(2))  = data_%time(lr(1):lr(2))
-          if(allocated(data%phase)) data%phase(gr(1):gr(2)) = data_%phase(lr(1):lr(2))
-          do j = 1, size(data%RQ)
-             if(allocated(data%RQ(j)%demod)) &
-              & data%RQ(j)%demod(:,gr(1):gr(2))        = data_%RQ(j)%demod(:,lr(1):lr(2))
-             if(allocated(data%RQ(j)%avg)) &
-              & data%RQ(j)%avg(:,gr(1):gr(2))          = data_%RQ(j)%avg(:,lr(1):lr(2))
-             if(allocated(data%RQ(j)%quad)) &
-              & data%RQ(j)%quad(:,gr(1):gr(2))         = data_%RQ(j)%quad(:,lr(1):lr(2))
-
-             if(allocated(data%RQ(j)%scale)) &
-              & data%RQ(j)%scale(gr(1):gr(2))          = data_%RQ(j)%scale(lr(1):lr(2))
-             if(allocated(data%RQ(j)%quad_scale)) &
-              & data%RQ(j)%quad_scale(gr(1):gr(2))     = data_%RQ(j)%quad_scale(lr(1):lr(2))
-
-             if(allocated(data%RQ(j)%demod_raw)) &
-              & data%RQ(j)%demod_raw(:,gr(1):gr(2))    = data_%RQ(j)%demod_raw(:,lr(1):lr(2))
-             if(allocated(data%RQ(j)%avg_raw)) &
-              & data%RQ(j)%avg_raw(:,gr(1):gr(2))      = data_%RQ(j)%avg_raw(:,lr(1):lr(2))
-             if(allocated(data%RQ(j)%quad_raw)) &
-              & data%RQ(j)%quad_raw(:,gr(1):gr(2))     = data_%RQ(j)%quad_raw(:,lr(1):lr(2))
-          end do
-       end if
-       call deallocate_data_struct(data_)
-       call deallocate_point_struct(point_)
-    end do
-    if(present(point)) point%start_mjd = start_mjd
-    if(present(data))  data%start_mjd  = start_mjd
-
-    ! Finally deal with the housekeeping. Notice all the duplicate code here.
-    ! This is here because bias, cryo and encl are named members, not array elements.
-    if(present(hk)) then
-       nbias = 0; ncryo = 0; nencl = 0; nperi = 0
-       do i = 1, size(hks)
-          if(.not. allocated(hks(i)%bias%time)) cycle ! File did not contain hk
-          nbias = nbias + count(hks(i)%bias%time >= mjd(1) .and. hks(i)%bias%time < mjd(2))
-          ncryo = ncryo + count(hks(i)%cryo%time >= mjd(1) .and. hks(i)%cryo%time < mjd(2))
-          nencl = nencl + count(hks(i)%encl%time >= mjd(1) .and. hks(i)%encl%time < mjd(2))
-          nperi = nperi + count(hks(i)%peri%time >= mjd(1) .and. hks(i)%peri%time < mjd(2))
-       end do
-       call allocate_hk_struct(nbias, ncryo, nencl, nperi, hk)
-       nbias = 0; ncryo = 0; nencl = 0; nperi = 0
-       do i = 1, size(hks)
-          if(.not. allocated(hks(i)%bias%time)) cycle ! File did not contain hk
-          do j = 1, hks(i)%bias%n_t
-             if(hks(i)%bias%time(j) < mjd(1) .or. hks(i)%bias%time(j) >= mjd(2)) cycle
-             nbias = nbias + 1
-             hk%bias%time(nbias)    = hks(i)%bias%time(j)
-             hk%bias%value(nbias,:) = hks(i)%bias%value(j,:)
-          end do
-          do j = 1, hks(i)%cryo%n_t
-             if(hks(i)%cryo%time(j) < mjd(1) .or. hks(i)%cryo%time(j) >= mjd(2)) cycle
-             ncryo = ncryo + 1
-             hk%cryo%time(ncryo)    = hks(i)%cryo%time(j)
-             hk%cryo%value(ncryo,:) = hks(i)%cryo%value(j,:)
-          end do
-          do j = 1, hks(i)%encl%n_t
-             if(hks(i)%encl%time(j) < mjd(1) .or. hks(i)%encl%time(j) >= mjd(2)) cycle
-             nencl = nencl + 1
-             hk%encl%time(nencl)    = hks(i)%encl%time(j)
-             hk%encl%value(nencl,:) = hks(i)%encl%value(j,:)
-          end do
-          do j = 1, hks(i)%peri%n_t
-             if(hks(i)%peri%time(j) < mjd(1) .or. hks(i)%peri%time(j) >= mjd(2)) cycle
-             nperi = nperi + 1
-             hk%peri%time(nperi)    = hks(i)%peri%time(j)
-             hk%peri%value(nperi,:) = hks(i)%peri%value(j,:)
-          end do
-       end do
-       do i = 1, size(hks)
-          call deallocate_hk_struct(hks(i))
-       end do
-    end if
-  end subroutine
+!!$  ! Given a list of files and a mjd range, reads out and concatenates level1-data.
+!!$  subroutine l1_read_range(filelist, mjd, mods, sel, data, point, hk, status)
+!!$    character(len=*) :: filelist(:)
+!!$    real(dp)         :: mjd(2)
+!!$    integer(i4b)     :: mods(:), eff(2)
+!!$    type(l1_selector),  optional :: sel
+!!$    type(data_struct),  optional :: data
+!!$    type(point_struct), optional :: point
+!!$    type(hk_struct),    optional :: hk
+!!$    integer(i4b),       optional :: status
+!!$
+!!$    integer(i4b)        :: i, j, k, m, n, nsamp, unit, lr(2), gr(2), samprate, s
+!!$    integer(i4b)        :: nbias, ncryo, nencl, nperi
+!!$    real(dp)            :: start_mjd
+!!$    type(l1_selector)   :: sel_
+!!$    type(data_struct)   :: data_
+!!$    type(point_struct)  :: point_
+!!$    type(hk_struct)     :: hks(size(filelist))
+!!$
+!!$    if(present(sel)) then
+!!$       sel_ = sel
+!!$    else
+!!$       sel_ = l1sel(l1_std)
+!!$    end if
+!!$    if(.not. present(data))  sel_%on(data_all)  = .false.
+!!$    if(.not. present(point)) sel_%on(point_all) = .false.
+!!$    if(.not. present(hk))    sel_%on(hk_all)    = .false.
+!!$    sel_%on(point_time) = .true.
+!!$
+!!$    samprate = 100
+!!$    s        = 24*60*60*samprate
+!!$    nsamp    = int((mjd(2)-mjd(1))*s)
+!!$    if(present(data))  call allocate_data_struct(size(mods), nsamp, data, sel_)
+!!$    if(present(point)) call allocate_point_struct(nsamp, point, sel_)
+!!$
+!!$    ! Hack: Check for uninitialized stuff
+!!$    if(present(point)) point%encoder_elevation = NaN
+!!$    if(present(point)) point%encoder_azimuth   = NaN
+!!$    if(present(point)) point%encoder_deck      = NaN
+!!$
+!!$    ! Housekeeping does not have the same samprate, but take little space, so
+!!$    ! we just read it all in, and figure out the ranges afterwards.
+!!$
+!!$    gr = 0
+!!$    unit = getlun()
+!!$    do i = 1, size(filelist)
+!!$       call l1_read(unit, filelist(i), data_, hks(i), point_, modules=mods, selector=sel_, &
+!!$        & status_code=status)
+!!$       if(present(status)) then; if(status /= 0) then
+!!$          call deallocate_data_struct(data)
+!!$          call deallocate_point_struct(point)
+!!$          do j = 1, i-1
+!!$             call deallocate_hk_struct(hks(j))
+!!$          end do
+!!$          return
+!!$       end if; end if
+!!$
+!!$       ! Argh! A few files have non-monotonous time ranges! Skip these ranges
+!!$       if(i == 1) then
+!!$          do j = size(point_%time), 2, -1
+!!$             if(point_%time(j) < point_%time(j-1)) exit
+!!$          end do
+!!$          eff = [ j, size(point_%time) ]
+!!$       else
+!!$          do j = 1, size(point_%time)-1
+!!$             if(point_%time(j+1) < point_%time(j)) exit
+!!$          end do
+!!$          eff = [ 1, j ]
+!!$       end if
+!!$
+!!$       ! Map the times in the file into indices into range. Because of the possibility
+!!$       ! varying sample rates etc. we loop through.
+!!$       do j = eff(1), eff(2)
+!!$          if(point_%time(j) >= mjd(1)) exit
+!!$       end do
+!!$       lr(1) = j
+!!$       do j = lr(1), eff(2)
+!!$          if(point_%time(j) > mjd(2)) exit
+!!$       end do
+!!$       lr(2) = j-1
+!!$       n = lr(2)-lr(1)+1
+!!$       ! Do we have room for all this?
+!!$       if(gr(2) + n >  nsamp) lr(2) = lr(2) - (gr(2)+n-nsamp)
+!!$       ! Append this to the global range
+!!$       gr = [ gr(2)+1, gr(2)+1+(lr(2)-lr(1)) ]
+!!$
+!!$       if(i == 1) start_mjd = point_%time(lr(1))
+!!$
+!!$
+!!$       ! And finally copy over the interesting parts
+!!$       if(present(point)) then
+!!$          if(allocated(point%time)) point%time(gr(1):gr(2)) = point_%time(lr(1):lr(2))
+!!$          if(allocated(point%mode)) point%mode(gr(1):gr(2)) = point_%mode(lr(1):lr(2))
+!!$
+!!$          if(allocated(point%encoder_azimuth)) &
+!!$           & point%encoder_azimuth  (gr(1):gr(2)) = point_%encoder_azimuth(lr(1):lr(2))
+!!$          if(allocated(point%encoder_elevation)) &
+!!$           & point%encoder_elevation(gr(1):gr(2)) = point_%encoder_elevation(lr(1):lr(2))
+!!$          if(allocated(point%encoder_deck)) &
+!!$           & point%encoder_deck(gr(1):gr(2))      = point_%encoder_deck(lr(1):lr(2))
+!!$
+!!$          if(allocated(point%command_azimuth)) &
+!!$           & point%command_azimuth  (gr(1):gr(2)) = point_%command_azimuth(lr(1):lr(2))
+!!$          if(allocated(point%command_elevation)) &
+!!$           & point%command_elevation(gr(1):gr(2)) = point_%command_elevation(lr(1):lr(2))
+!!$          if(allocated(point%command_deck)) &
+!!$           & point%command_deck(gr(1):gr(2))      = point_%command_deck(lr(1):lr(2))
+!!$       end if
+!!$
+!!$       if(present(data)) then
+!!$          if(allocated(data%time))  data%time(gr(1):gr(2))  = data_%time(lr(1):lr(2))
+!!$          if(allocated(data%phase)) data%phase(gr(1):gr(2)) = data_%phase(lr(1):lr(2))
+!!$          do j = 1, size(data%RQ)
+!!$             if(allocated(data%RQ(j)%demod)) &
+!!$              & data%RQ(j)%demod(:,gr(1):gr(2))        = data_%RQ(j)%demod(:,lr(1):lr(2))
+!!$             if(allocated(data%RQ(j)%avg)) &
+!!$              & data%RQ(j)%avg(:,gr(1):gr(2))          = data_%RQ(j)%avg(:,lr(1):lr(2))
+!!$             if(allocated(data%RQ(j)%quad)) &
+!!$              & data%RQ(j)%quad(:,gr(1):gr(2))         = data_%RQ(j)%quad(:,lr(1):lr(2))
+!!$
+!!$             if(allocated(data%RQ(j)%scale)) &
+!!$              & data%RQ(j)%scale(gr(1):gr(2))          = data_%RQ(j)%scale(lr(1):lr(2))
+!!$             if(allocated(data%RQ(j)%quad_scale)) &
+!!$              & data%RQ(j)%quad_scale(gr(1):gr(2))     = data_%RQ(j)%quad_scale(lr(1):lr(2))
+!!$
+!!$             if(allocated(data%RQ(j)%demod_raw)) &
+!!$              & data%RQ(j)%demod_raw(:,gr(1):gr(2))    = data_%RQ(j)%demod_raw(:,lr(1):lr(2))
+!!$             if(allocated(data%RQ(j)%avg_raw)) &
+!!$              & data%RQ(j)%avg_raw(:,gr(1):gr(2))      = data_%RQ(j)%avg_raw(:,lr(1):lr(2))
+!!$             if(allocated(data%RQ(j)%quad_raw)) &
+!!$              & data%RQ(j)%quad_raw(:,gr(1):gr(2))     = data_%RQ(j)%quad_raw(:,lr(1):lr(2))
+!!$          end do
+!!$       end if
+!!$       call deallocate_data_struct(data_)
+!!$       call deallocate_point_struct(point_)
+!!$    end do
+!!$    if(present(point)) point%start_mjd = start_mjd
+!!$    if(present(data))  data%start_mjd  = start_mjd
+!!$
+!!$    ! Finally deal with the housekeeping. Notice all the duplicate code here.
+!!$    ! This is here because bias, cryo and encl are named members, not array elements.
+!!$    if(present(hk)) then
+!!$       nbias = 0; ncryo = 0; nencl = 0; nperi = 0
+!!$       do i = 1, size(hks)
+!!$          if(.not. allocated(hks(i)%bias%time)) cycle ! File did not contain hk
+!!$          nbias = nbias + count(hks(i)%bias%time >= mjd(1) .and. hks(i)%bias%time < mjd(2))
+!!$          ncryo = ncryo + count(hks(i)%cryo%time >= mjd(1) .and. hks(i)%cryo%time < mjd(2))
+!!$          nencl = nencl + count(hks(i)%encl%time >= mjd(1) .and. hks(i)%encl%time < mjd(2))
+!!$          nperi = nperi + count(hks(i)%peri%time >= mjd(1) .and. hks(i)%peri%time < mjd(2))
+!!$       end do
+!!$       call allocate_hk_struct(nbias, ncryo, nencl, nperi, hk)
+!!$       nbias = 0; ncryo = 0; nencl = 0; nperi = 0
+!!$       do i = 1, size(hks)
+!!$          if(.not. allocated(hks(i)%bias%time)) cycle ! File did not contain hk
+!!$          do j = 1, hks(i)%bias%n_t
+!!$             if(hks(i)%bias%time(j) < mjd(1) .or. hks(i)%bias%time(j) >= mjd(2)) cycle
+!!$             nbias = nbias + 1
+!!$             hk%bias%time(nbias)    = hks(i)%bias%time(j)
+!!$             hk%bias%value(nbias,:) = hks(i)%bias%value(j,:)
+!!$          end do
+!!$          do j = 1, hks(i)%cryo%n_t
+!!$             if(hks(i)%cryo%time(j) < mjd(1) .or. hks(i)%cryo%time(j) >= mjd(2)) cycle
+!!$             ncryo = ncryo + 1
+!!$             hk%cryo%time(ncryo)    = hks(i)%cryo%time(j)
+!!$             hk%cryo%value(ncryo,:) = hks(i)%cryo%value(j,:)
+!!$          end do
+!!$          do j = 1, hks(i)%encl%n_t
+!!$             if(hks(i)%encl%time(j) < mjd(1) .or. hks(i)%encl%time(j) >= mjd(2)) cycle
+!!$             nencl = nencl + 1
+!!$             hk%encl%time(nencl)    = hks(i)%encl%time(j)
+!!$             hk%encl%value(nencl,:) = hks(i)%encl%value(j,:)
+!!$          end do
+!!$          do j = 1, hks(i)%peri%n_t
+!!$             if(hks(i)%peri%time(j) < mjd(1) .or. hks(i)%peri%time(j) >= mjd(2)) cycle
+!!$             nperi = nperi + 1
+!!$             hk%peri%time(nperi)    = hks(i)%peri%time(j)
+!!$             hk%peri%value(nperi,:) = hks(i)%peri%value(j,:)
+!!$          end do
+!!$       end do
+!!$       do i = 1, size(hks)
+!!$          call deallocate_hk_struct(hks(i))
+!!$       end do
+!!$    end if
+!!$  end subroutine
 
   subroutine read_ringweights(nside, polarization, weights)
     implicit none

@@ -78,6 +78,7 @@ program tester
 !!$      case("solve");    call covtest2
 !!$      case("test");     call covtest3
 !!$      case("r2c");      call r2c
+      end select
 
 contains
 
