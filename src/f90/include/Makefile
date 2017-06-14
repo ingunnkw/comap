@@ -54,10 +54,11 @@ quiet_status_mod.o       : quiet_system_mod.o quiet_utils.o quiet_shared_output_
 quiet_task_mod.o         : quiet_system_mod.o
 quiet_sidelobe_mod.o     : quiet_utils.o quiet_fileutils.o quiet_module_mod.o
 quiet_system_mod.o       : quiet_system_backend.o
+quiet_acceptlist_mod.o   : quiet_ces_mod.o quiet_module_mod.o
 comap_acceptlist_mod.o   : comap_scan_mod.o comap_detector_mod.o
-quiet_target_mod.o       : quiet_utils.o comap_scan_mod.o comap_acceptlist_mod.o quiet_defs.o
-comap_scan_mod.o          : quiet_utils.o
-comap_ces_mod.o          : quiet_utils.o
+quiet_target_mod.o       : quiet_utils.o quiet_ces_mod.o quiet_acceptlist_mod.o quiet_defs.o
+comap_scan_mod.o         : quiet_utils.o
+quiet_ces_mod.o          : quiet_utils.o
 quiet_Lx_mod.o           : quiet_hdf_mod.o l1_read_comap_mod.o quiet_fft_mod.o
 comap_Lx_mod.o		 : quiet_hdf_mod.o l1_read_comap_mod.o quiet_fft_mod.o
 quiet_filter_mod.o       : quiet_noise_estimation_mod.o quiet_assembly_mod.o
