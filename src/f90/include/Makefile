@@ -41,6 +41,7 @@ quiet_pointing_mod2.o    : quiet_detector_mod.o quiet_utils.o
 quiet_mpi_utils.o        : quiet_mpi_mod.o quiet_utils.o quiet_system_mod.o
 quiet_pmac_mod.o         : quiet_utils.o locate_mod.o quiet_fileutils.o
 quiet_detector_mod.o     : quiet_utils.o
+comap_detector_mod.o     : quiet_utils.o
 quiet_mask_mod.o         : quiet_utils.o quiet_fileutils.o
 quiet_typeb_mod.o        : quiet_utils.o quiet_fft_mod.o quiet_module_mod.o
 quiet_patch_detect_mod.o : quiet_patch_mod.o quiet_module_mod.o quiet_pointing_mod.o
