@@ -138,9 +138,9 @@ contains
              scan%l1files(k) = trim(l1dir) // "/" // trim(get_token(line, " ", 3))
           end do
           scan%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-           & trim(itoa(scan%cid)) // ".hdf"
+           & trim(itoa(scan%cid)) // ".h5"
           scan%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-           & trim(itoa(scan%cid)) // ".hdf"
+           & trim(itoa(scan%cid)) // ".h5"
           call copy_scan_info(scan, runlist%scans(cnum))
           call free_scan_info(scan)
        end do
@@ -173,7 +173,7 @@ contains
        read(unit,*) scan%cid
        scan%object      = name
        scan%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(itoa(scan%cid)) // ".h5"
-       scan%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(itoa(scan%cid)) // ".hdf"
+       scan%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(itoa(scan%cid)) // ".h5"
        call copy_scan_info(scan, runlist%scans(i))
        call free_scan_info(scan)
     end do
