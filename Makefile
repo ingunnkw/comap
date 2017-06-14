@@ -185,8 +185,8 @@ scan_validate :
 l3gen :
 	@cd src/f90/l3gen; $(MAKE)
 
-ces_detect :
-	@cd src/f90/ces_detect; $(MAKE)
+scan_detect :
+	@cd src/f90/scan_detect; $(MAKE)
 
 l2gen :
 	@cd src/f90/l2gen; $(MAKE)
@@ -203,7 +203,7 @@ maptool:
 test :
 	@cd src/f90/test; $(MAKE)
 
-clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_scan_validate clean_l3gen clean_ces_detect clean_l2gen clean_maptool clean_test
+clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_ces_validate clean_l3gen clean_scan_detect clean_l2gen clean_maptool clean_test
 
 clean_postmap :
 	@cd src/f90/postmap; $(MAKE) clean
@@ -226,8 +226,8 @@ clean_scan_validate :
 clean_l3gen :
 	@cd src/f90/l3gen; $(MAKE) clean 
 
-clean_ces_detect :
-	@cd src/f90/ces_detect; $(MAKE) clean 
+clean_scan_detect :
+	@cd src/f90/scan_detect; $(MAKE) clean 
 
 clean_l2gen :
 	@cd src/f90/l2gen; $(MAKE) clean 
@@ -261,7 +261,7 @@ dist : clean
 	@mkdir -p $(DIR)/src/f90/scan_validate
 	@mkdir -p $(DIR)/src/f90/l3gen
 	@mkdir -p $(DIR)/src/f90/l2gen
-	@mkdir -p $(DIR)/src/f90/ces_detect
+	@mkdir -p $(DIR)/src/f90/scan_detect
 	@mkdir -p $(DIR)/src/f90/utils
 	@mkdir -p $(DIR)/src/cpp/utils
 	@cp -r config Makefile $(DIR)
@@ -273,7 +273,7 @@ dist : clean
 	@cp src/f90/tod2map/*.f90 src/f90/tod2map/Makefile $(DIR)/src/f90/tod2map
 	@cp src/f90/scan_validate/*.f90 src/f90/scan_validate/Makefile $(DIR)/src/f90/scan_validate
 	@cp src/f90/l3gen/*.f90 src/f90/l3gen/Makefile $(DIR)/src/f90/l3gen
-	@cp src/f90/ces_detect/*.f90 src/f90/ces_detect/Makefile $(DIR)/src/f90/ces_detect
+	@cp src/f90/scan_detect/*.f90 src/f90/scan_detect/Makefile $(DIR)/src/f90/scan_detect
 	@cp src/f90/l2gen/*.f90 src/f90/l2gen/Makefile $(DIR)/src/f90/l2gen
 	@cp src/f90/utils/*.f90 src/f90/utils/Makefile $(DIR)/src/f90/utils
 	@cp src/cpp/utils/{*.cpp,*.h,patch2img,Makefile} $(DIR)/src/cpp/utils
