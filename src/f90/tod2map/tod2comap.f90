@@ -1,6 +1,6 @@
 program tod2comap
   use comap_lx_mod
-  !use comap_ces_mod
+  use comap_ces_mod
   use quiet_fft_mod
   implicit none
 
@@ -25,10 +25,10 @@ program tod2comap
   type(tod_type)  :: tod
   type(map_type)  :: map
   type(lx_struct) :: data
-  !type(comap_runlist)  :: runlist
+  type(comap_ces_info)  :: scan
 
   character(len=512) :: filename, parfile, acceptfile
-  !integer(i4b) :: i, j, k
+  integer(i4b)       :: nscan, i, j, k
   !integer(i4b)  :: myid, numprocs, ierr, root
 
   !call mpi_init(ierr)
@@ -37,15 +37,28 @@ program tod2comap
   !root = 0
   !call mpi_finalize(ierr)
 
-  filename = "/mn/stornext/d5/comap/protodir/level3/Ka/lissajous/patch1_1.h5"
+  !parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
+
+  !call initialize_ces_mod(parfile)
+
+  !nscan = get_num_ces()
+
+  !do i = 1, nscan 
+     !call get_ces_info(i,scan)
+     !filename = scan%l3file
+  filename = '/mn/stornext/comap/protodir/level3/Ka/lissajous/patch1/patch1_1.h5'
+  write(*,*) i, 'of', nscan
   write(*,*) 'Get TOD ...'
   call get_tod(filename, data, tod)
-  !write(*,*) 'Write TOD to file ...'
-  !call output_tod('files/test', 1, tod)
+  write(*,*) 'Write TOD to file ...'
+  call output_tod('files/test', 1, tod)
   write(*,*) 'Compute maps ...'
   call compute_maps(data, tod, map)
   write(*,*) 'Write maps to file ...'
   call output_maps('files/test', map)
+
+  !end do
+
   write(*,*) 'Done'
 
 contains
@@ -235,7 +248,7 @@ contains
        write(unit,*) '# y   = ', real(map%y,sp)
        do j = 1, map%n_x
           do k = 1, map%n_y
-             write(unit,fmt='(f16.8)',advance='no') map%m(j,k,i)
+             write(unit,fmt='(e16.8)',advance='no') map%m(j,k,i)
           end do
           write(unit,*)
        end do
@@ -253,7 +266,7 @@ contains
        write(unit,*) '# y   = ', real(map%y,sp)
        do j = 1, map%n_x
           do k = 1, map%n_y
-             write(unit,fmt='(f16.8)',advance='no') map%rms(j,k,i)
+             write(unit,fmt='(e16.8)',advance='no') map%rms(j,k,i)
           end do
           write(unit,*)
        end do
@@ -271,7 +284,7 @@ contains
        write(unit,*) '# y   = ', real(map%y,sp)
        do j = 1, map%n_x
           do k = 1, map%n_y
-             write(unit,fmt='(f16.8)',advance='no') map%nhit(j,k,i)
+             write(unit,fmt='(e16.8)',advance='no') map%nhit(j,k,i)
           end do
           write(unit,*)
        end do
@@ -281,11 +294,10 @@ contains
   end subroutine output_maps
 
   
-  !subroutine add_maps(map1, map2)
-  !  implicit none
-  !  type(map_type) :: map1, map2
-  !
-  !end subroutine add_maps
+  subroutine collect_ces_info()
+    implicit none
 
+
+  end subroutine collect_ces_info
  
 end program tod2comap

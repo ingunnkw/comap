@@ -50,7 +50,7 @@ export MPCC := mpicc
 
 # Fortran 90 compiler flags
 #export F90FLAGS := -O3 -assume byterecl
-export F90FLAGS := -g -C -assume byterecl
+export F90FLAGS := -g -C -assume byterecl -traceback -fpe0
 
 # Fortran 77 compiler flags
 export FFLAGS := -O2
