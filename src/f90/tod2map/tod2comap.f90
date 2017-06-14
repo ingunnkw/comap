@@ -27,7 +27,7 @@ program tod2comap
   type(lx_struct) :: data
   !type(comap_runlist)  :: runlist
 
-  character(len=512) :: filename
+  character(len=512) :: filename, parfile, acceptfile
   !integer(i4b) :: i, j, k
   !integer(i4b)  :: myid, numprocs, ierr, root
 
@@ -40,10 +40,8 @@ program tod2comap
   filename = "/mn/stornext/d5/comap/protodir/level3/Ka/lissajous/patch1_1.h5"
   write(*,*) 'Get TOD ...'
   call get_tod(filename, data, tod)
-  write(*,*) 'Write TOD to file ...'
-  call output_tod('files/test', 1, tod) ! DOES NOT CURRENTLY WORK!!
-  !write(*,*) tod%d(1:10,1,1)
-  !write(*,*) tod%d_raw(1:10,1,1)
+  !write(*,*) 'Write TOD to file ...'
+  !call output_tod('files/test', 1, tod)
   write(*,*) 'Compute maps ...'
   call compute_maps(data, tod, map)
   write(*,*) 'Write maps to file ...'
@@ -95,10 +93,13 @@ contains
          & tod%point(3,tod%nsamp), &
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%ndet), &
-         & tod%g(tod%nsamp, tod%nfreq, tod%ndet), &
+         & tod%g(1, tod%nfreq, tod%ndet), &               ! ??
          & tod%rms(tod%nsamp, tod%nfreq, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
+    tod%point = data%point
+    tod%g     = data%gain
+    !write(*,*) shape(data%point), tod%nsamp
 
     do k = 1, tod%ndet
        do j = 1, tod%nfreq
@@ -155,11 +156,15 @@ contains
     real(dp)     :: x_min, x_max, y_min, y_max, pad
 
     ! Set up map grid
-    pad = 0.3d0 ! degrees
+    pad = 0.d0!0.3d0 ! degrees
     map%nfreq = tod%nfreq
     map%dtheta = 5.d0/60.d0 ! Arcmin
-    x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) + pad
-    y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) + pad
+    !write(*,*) data%point_lim
+
+    x_min = minval(tod%point(1,:)) - pad; x_max =  maxval(tod%point(1,:)) + pad
+    y_min = minval(tod%point(2,:)) - pad; y_max =  maxval(tod%point(2,:)) + pad
+    !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) + pad
+    !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) + pad
     map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (x_max-x_min)/map%dtheta+1
     allocate(map%x(map%n_x), map%y(map%n_y))
     do i = 1, map%n_x
@@ -169,6 +174,7 @@ contains
        map%y(i) = y_min + (i-1)*map%dtheta
     end do
 
+    
     ! Set up map structures
     if (.not. allocated(map%dsum)) then
        allocate(map%m(map%n_x, map%n_y, map%nfreq), map%dsum(map%n_x, map%n_y, map%nfreq), &
@@ -178,15 +184,15 @@ contains
        map%nhit = 0.d0
        map%div  = 0.d0
     end if
-
+    
     ! Co-add into maps
     do k = 1, tod%ndet
        do i = 1, tod%nsamp
           p = min(max(int((tod%point(1,i)-x_min)/map%dtheta),1),map%n_x)
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
-             map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(i,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
-             map%div(p,q,j)  = map%div(p,q,j)  + tod%g(i,j,k)**2 / tod%rms(i,j,k)**2
+             map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(1,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
+             map%div(p,q,j)  = map%div(p,q,j)  + tod%g(1,j,k)**2 / tod%rms(i,j,k)**2
              map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
           end do
        end do
@@ -198,7 +204,7 @@ contains
        map%m   = 0.d0
        map%rms = 0.d0
     end where
-
+    
 !!$    ! Report reduced chisquares
 !!$    do i = 1, map%nfreq
 !!$       nu    = count(map%nhit(:,:,i)>0)
@@ -273,6 +279,13 @@ contains
     end do
 
   end subroutine output_maps
+
+  
+  !subroutine add_maps(map1, map2)
+  !  implicit none
+  !  type(map_type) :: map1, map2
+  !
+  !end subroutine add_maps
 
  
 end program tod2comap
