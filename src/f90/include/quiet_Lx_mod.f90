@@ -2,7 +2,6 @@ module quiet_Lx_mod
   use healpix_types
   use quiet_defs
   use quiet_hdf_mod
-  use l1_read_mod
   use quiet_fft_mod
   use quiet_utils
   implicit none
@@ -11,7 +10,6 @@ module quiet_Lx_mod
      !! The level2 part, present in both level2 and level3 files.
      integer(i4b)                            :: decimation
      real(dp)                                :: samprate
-     type(hk_struct)                         :: hk
      real(dp), allocatable, dimension(:)     :: time
      real(sp), allocatable, dimension(:,:)   :: tod, tp     ! (time, diode)
      real(sp), allocatable, dimension(:,:)   :: orig_point  ! Hor; (az/el/dk, time)
@@ -56,7 +54,6 @@ contains
     call read_hdf(file, "tod",        data%tod)
     call read_hdf(file, "tp",         data%tp)
     call read_hdf(file, "orig_point", data%orig_point)
-    call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
   end subroutine read_L2_file
 
@@ -84,7 +81,6 @@ contains
     call read_hdf(file, "time",   time_full)
     call read_hdf(file, "tod",     tod_full)
     call read_hdf(file, "point", point_full)
-!    call read_hk_hdf(file, data%hk) ! no housekeeping as of yet
     call close_hdf_file(file)
 
     ! Scaling time to seconds rather than Planck OBT. Do we need it in MJD?
@@ -239,8 +235,6 @@ contains
     call read_hdf(file, "fknee",  data%fknee)
     call read_hdf(file, "corr",   data%corr)
     call read_hdf(file, "corr_freqs", data%corr_freqs)
-    ! Read APEX data
-    call read_hk_elem(file, "apex", data%hk%apex)
     ! Read stats
     call read_hdf(file, "stats",       data%stats)
     call read_hdf(file, "diode_stats", data%diode_stats)
@@ -249,31 +243,6 @@ contains
     call close_hdf_file(file)
   end subroutine read_L3_file
 
-  subroutine read_hk_hdf(file, hk)
-    implicit none
-    type(hdf_file)  :: file
-    type(hk_struct) :: hk
-    call read_hk_elem(file, "bias", hk%bias)
-    call read_hk_elem(file, "cryo", hk%cryo)
-    call read_hk_elem(file, "encl", hk%encl)
-    call read_hk_elem(file, "peri", hk%peri)
-  end subroutine
-
-  subroutine read_hk_elem(file, name, hkt)
-    implicit none
-    type(hdf_file)   :: file
-    type(hk_type)    :: hkt
-    character(len=*) :: name
-    integer(i4b)     :: nsamp, ntype, ext(7)
-    call get_size_hdf(file, name // "/value", ext)
-    nsamp = ext(1); ntype = ext(2)
-    allocate(hkt%name(ntype), hkt%time(nsamp), hkt%value(nsamp,ntype))
-    hkt%n   = ntype
-    hkt%n_t = nsamp
-    call read_hdf(file, trim(name) // "/time",  hkt%time)
-    call read_hdf(file, trim(name) // "/value", hkt%value)
-  end subroutine
-
   subroutine free_lx_struct(data)
     implicit none
     type(lx_struct) :: data
@@ -281,7 +250,6 @@ contains
     if(allocated(data%tod))         deallocate(data%tod)
     if(allocated(data%tp))          deallocate(data%tp)
     if(allocated(data%orig_point))  deallocate(data%orig_point)
-    call deallocate_hk_struct(data%hk)
 
     if(allocated(data%point))       deallocate(data%point)
     if(allocated(data%pixels))      deallocate(data%pixels)
@@ -310,7 +278,6 @@ contains
     call write_hdf(file, "tod",          data%tod)
     call write_hdf(file, "tp",           data%tp)
     call write_hdf(file, "orig_point",   data%orig_point)
-    call write_hk_hdf(file, data%hk)
     call close_hdf_file(file)
   end subroutine
 
@@ -348,42 +315,8 @@ contains
     if (.not. planck_) then
        call write_hdf(file, "tp",           data%tp)
        call write_hdf(file, "point_objrel", data%point_objrel)
-       call write_hk_hdf(file, data%hk)
-       call create_hdf_group(file, "apex")
-       call write_hk_elem   (file, "apex", data%hk%apex)
     end if
     call close_hdf_file(file)
-  end subroutine
-
-  subroutine write_hk_hdf(file, hk)
-    implicit none
-    type(hdf_file)  :: file
-    type(hk_struct) :: hk
-    if(allocated(hk%bias%time)) then
-      call create_hdf_group(file, "bias")
-      call write_hk_elem   (file, "bias", hk%bias)
-    end if
-    if(allocated(hk%cryo%time)) then
-      call create_hdf_group(file, "cryo")
-      call write_hk_elem   (file, "cryo", hk%cryo)
-    end if
-    if(allocated(hk%encl%time)) then
-      call create_hdf_group(file, "encl")
-      call write_hk_elem   (file, "encl", hk%encl)
-    end if
-    if(allocated(hk%peri%time)) then
-      call create_hdf_group(file, "peri")
-      call write_hk_elem   (file, "peri", hk%peri)
-    end if
-  end subroutine
-
-  subroutine write_hk_elem(file, name, hkt)
-    implicit none
-    type(hdf_file)   :: file
-    type(hk_type)    :: hkt
-    character(len=*) :: name
-    call write_hdf(file, trim(name) // "/time",  hkt%time)
-    call write_hdf(file, trim(name) // "/value", hkt%value)
   end subroutine
 
   ! Concatenate a set of lx_structs. We assume that:
@@ -480,8 +413,6 @@ contains
        deallocate(hit)
     end if
 
-    ! Ok, only housekeeping is left
-    call cat_hk_struct(in%hk, out%hk)
   end subroutine
 
 end module quiet_Lx_mod

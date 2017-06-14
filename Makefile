@@ -203,7 +203,7 @@ maptool:
 test :
 	@cd src/f90/test; $(MAKE)
 
-clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_ces_validate clean_l3gen clean_scan_detect clean_l2gen clean_maptool clean_test
+clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_scan_validate clean_l3gen clean_scan_detect clean_l2gen clean_maptool clean_test
 
 clean_postmap :
 	@cd src/f90/postmap; $(MAKE) clean

@@ -5,7 +5,7 @@
 OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_pixspace_mod.o quiet_module_mod.o comap_detector_mod.o \
          comap_acceptlist_mod.o comap_scan_mod.o \
-         d1mach.o drc3jj.o quiet_l1_defs.o l1_read_comap_mod.o \
+         d1mach.o drc3jj.o quiet_l1_defs.o \
          math_tools.o powell_mod.o quasi_newton_mod.o \
          quiet_fileutils.o quiet_detector_mod.o quiet_mapfile_mod.o \
          quiet_nr_mod.o quiet_utils.o quiet_hdf_mod.o quiet_Lx_mod.o \
@@ -59,11 +59,10 @@ comap_acceptlist_mod.o   : comap_scan_mod.o comap_detector_mod.o
 quiet_target_mod.o       : quiet_utils.o quiet_ces_mod.o quiet_acceptlist_mod.o quiet_defs.o
 comap_scan_mod.o         : quiet_utils.o
 quiet_ces_mod.o          : quiet_utils.o
-quiet_Lx_mod.o           : quiet_hdf_mod.o l1_read_comap_mod.o quiet_fft_mod.o
-comap_Lx_mod.o		 : quiet_hdf_mod.o l1_read_comap_mod.o quiet_fft_mod.o
+quiet_Lx_mod.o           : quiet_hdf_mod.o quiet_fft_mod.o
+comap_Lx_mod.o		 : quiet_hdf_mod.o quiet_fft_mod.o
 quiet_filter_mod.o       : quiet_noise_estimation_mod.o quiet_assembly_mod.o
-quiet_fileutils.o        : l1_read_comap_mod.o quiet_utils.o quiet_hdf_mod.o quiet_mapfile_mod.o quiet_covfile_mod.o
-l1_read_comap_mod.o      : quiet_utils.o quiet_nr_mod.o spline_1D_mod.o quiet_l1_defs.o quiet_apex_mod.o
+quiet_fileutils.o        : quiet_utils.o quiet_hdf_mod.o quiet_mapfile_mod.o quiet_covfile_mod.o
 quiet_nr_mod.o           : math_tools.o
 spline_1D_mod.o          : math_tools.o locate_mod.o
 spline_2D_mod.o          : spline_1D_mod.o
@@ -71,7 +70,7 @@ quiet_utils.o            : sort_utils.o spline_1D_mod.o quiet_system_mod.o quiet
 quiet_i2qu.o             : quiet_fileutils.o pix_tools.o
 quiet_assembly_mod.o     : quiet_utils.o
 scalawrap.o              : quiet_mpi_mod.o
-quiet_pointing_mod.o     : quiet_utils.o l1_read_mod.o math_tools.o quiet_pmac_mod.o
+quiet_pointing_mod.o     : quiet_utils.o math_tools.o quiet_pmac_mod.o
 comap_pointing_mod.o     : quiet_utils.o math_tools.o 
 scalautils.o             : quiet_mpi_mod.o scalawrap.o
 quiet_noise_estimation_mod.o : quiet_utils.o quiet_fft_mod.o 
