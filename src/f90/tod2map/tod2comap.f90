@@ -37,28 +37,27 @@ program tod2comap
   !root = 0
   !call mpi_finalize(ierr)
 
-  !parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
+  parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
   acceptfile = '/mn/stornext/d5/comap/protodir/acceptlist.txt'
 
-  !call initialize_scan_mod(parfile)
+  call initialize_scan_mod(parfile)
 
-  !nscan = get_num_scan()
+  nscan = get_num_scan()
 
-  !do i = 1, nscan 
-     !call get_scan_info(i,scan)
-     !filename = scan%l3file
-  filename = '/mn/stornext/comap/protodir/level3/Ka/lissajous/patch1/patch1_1.h5'
-  write(*,*) i, 'of', nscan
-  write(*,*) 'Get TOD ...'
-  call get_tod(filename, data, tod)
-  write(*,*) 'Write TOD to file ...'
-  call output_tod('files/test', 1, tod)
-  write(*,*) 'Compute maps ...'
-  call compute_maps(data, tod, map)
-  write(*,*) 'Write maps to file ...'
-  call output_maps('files/test', map)
-
-  !end do
+  do i = 1, nscan 
+     call get_scan_info(i,scan)
+     filename = scan%l3file
+     !filename = '/mn/stornext/comap/protodir/level3/Ka/lissajous/patch1/patch1_1.h5'
+     write(*,*) i, 'of', nscan
+     write(*,*) 'Get TOD ...'
+     call get_tod(filename, data, tod)
+     write(*,*) 'Write TOD to file ...'
+     call output_tod('files/test', 1, tod)
+     write(*,*) 'Compute maps ...'
+     call compute_maps(data, tod, map)
+     write(*,*) 'Write maps to file ...'
+     call output_maps('files/test', map)
+  end do
 
   write(*,*) 'Done'
 

@@ -52,7 +52,7 @@ contains
     allocate(data%time(nsamp), data%nu_l1(nsamp,nsb))
     allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     allocate(data%orig_point(npoint,nsamp))
-    allocate(data%status(nsamp))
+    allocate(data%flag(nsamp))
     call read_hdf(file, "decimation_time", data%decimation_time)
     call read_hdf(file, "decimation_nu",   data%decimation_nu)
     call read_hdf(file, "samprate",        data%samprate)
@@ -60,7 +60,7 @@ contains
     call read_hdf(file, "nu",              data%nu_l1)
     call read_hdf(file, "tod",             data%tod_l1)
     call read_hdf(file, "point",           data%orig_point)
-    call read_hdf(file, "status",          data%status)
+    call read_hdf(file, "flag",            data%flag)
     call close_hdf_file(file)
   end subroutine read_l1_file
 
@@ -75,7 +75,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet), data%status(nsamp))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet), data%flag(nsamp))
     call get_size_hdf(file, "orig_point", ext)
     npoint = ext(1); nsamp = ext(2)
     allocate(data%orig_point(npoint,nsamp), data%nu(nfreq))
@@ -86,7 +86,7 @@ contains
     call read_hdf(file, "nu",               data%nu)
     call read_hdf(file, "tod",              data%tod)
     call read_hdf(file, "orig_point",       data%orig_point)
-    call read_hdf(file, "status",           data%status)
+    call read_hdf(file, "flag",             data%flag)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
