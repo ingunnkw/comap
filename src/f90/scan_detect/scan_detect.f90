@@ -30,10 +30,10 @@
 program scan_detect
   use healpix_types
   use quiet_fileutils
-!  use quiet_pointing_mod
+  use comap_pointing_mod
   use comap_detector_mod
   use quiet_shared_output_mod
-!  use quiet_patch_detect_mod
+  use comap_patch_detect_mod
   use l1_read_comap_mod
   implicit none
 
@@ -155,8 +155,9 @@ program scan_detect
 
   ces_delay = ces_delay/24/60/60
   call init_detector_mod(parfile)
-!  call initialize_quiet_pointing_mod(parfile, .false.)
-!  call initialize_patch_detect_mod(parfile)
+
+  call initialize_comap_pointing_mod(parfile)
+  call initialize_patch_detect_mod(parfile)
 !  isun = lookup_patch("sun", patches)
 
   call read_alloc_filelist(listfile, filelist)
@@ -246,28 +247,28 @@ contains
        orange = val%ces_range
        if(val%type == "ces") call adjust_range(orange, val%ces_delay)
        if(orange(2)-orange(1) >= val%mindur/24/60/60) then
-!!$          call vec2ang(val%avg_hvec, avgel,    avgaz)
-!!$          call vec2ang(val%avg_gvec, avgtheta, avgphi)
-!!$          call swap_coordinate_convention(avgaz, avgel,    val%avgdk, COORD_HOR)
-!!$          call swap_coordinate_convention(avgphi,avgtheta, avgpsi,    COORD_GAL)
-!!$          objname = "unknown"
-!!$          if(val%object > 0) objname = patches(val%object)%name
-!!$          if(ifile >= val%filebeg) then
-!!$             write(line,fmt="(2f14.7,5f9.3,a)") orange, avgaz*RAD2DEG, &
-!!$              & avgel*RAD2DEG, val%avgdk*RAD2DEG, avgphi*RAD2DEG, &
-!!$              & avgtheta*RAD2DEG, " " // trim(objname)
-!!$             write(*,fmt="(i4,a4,a)") myid, " " // val%type, trim(line)
-!!$             call write_shared_ofile(val%ces_ofile, trim(line))
-!!$             call flush_shared_ofile(val%ces_ofile)
-!!$             call get_overlaps(iterator%iterator%ranges, orange, matches)
-!!$             do i = 1, size(matches)
-!!$                write(line,fmt="(2f14.7,a)") iterator%iterator%ranges(matches(i),:), &
-!!$                 & " " // trim(iterator%iterator%files(matches(i)))
-!!$                call write_shared_ofile(val%range_ofile, trim(line))
-!!$                call flush_shared_ofile(val%range_ofile)
-!!$             end do
-!!$             deallocate(matches)
-!!$          end if
+          call vec2ang(val%avg_hvec, avgel,    avgaz)
+          call vec2ang(val%avg_gvec, avgtheta, avgphi)
+          call swap_coordinate_convention(avgaz, avgel,    val%avgdk, COORD_HOR)
+          call swap_coordinate_convention(avgphi,avgtheta, avgpsi,    COORD_GAL)
+          objname = "unknown"
+          if(val%object > 0) objname = patches(val%object)%name
+          if(ifile >= val%filebeg) then
+             write(line,fmt="(2f14.7,5f9.3,a)") orange, avgaz*RAD2DEG, &
+              & avgel*RAD2DEG, val%avgdk*RAD2DEG, avgphi*RAD2DEG, &
+              & avgtheta*RAD2DEG, " " // trim(objname)
+             write(*,fmt="(i4,a4,a)") myid, " " // val%type, trim(line)
+             call write_shared_ofile(val%ces_ofile, trim(line))
+             call flush_shared_ofile(val%ces_ofile)
+             call get_overlaps(iterator%iterator%ranges, orange, matches)
+             do i = 1, size(matches)
+                write(line,fmt="(2f14.7,a)") iterator%iterator%ranges(matches(i),:), &
+                 & " " // trim(iterator%iterator%files(matches(i)))
+                call write_shared_ofile(val%range_ofile, trim(line))
+                call flush_shared_ofile(val%range_ofile)
+             end do
+             deallocate(matches)
+          end if
        end if
        val%avg_hvec = 0
        val%avg_gvec = 0
@@ -288,16 +289,16 @@ contains
        if(.not. val%in_ces) val%ces_range(1) = chunk%time(1)
        do i = 1, chunk%n, 7
           az = chunk%az(i); el = chunk%el(i); dk = chunk%dk(i)
-!!$          call swap_coordinate_convention(az, el, dk, COORD_HOR)
-!!$          call coord_convert(COORD_HOR, az, el, dk, COORD_GAL, phi, theta, psi, chunk%time(i))
-!!$          call ang2vec(el,    az,  hvec)
-!!$          call ang2vec(theta, phi, gvec)
-!!$          val%avg_hvec = val%avg_hvec + hvec
-!!$          val%avg_gvec = val%avg_gvec + gvec
-!!$          val%avgdk    = dk
-!!$          call angdist2(val%avg_gvec,gvec,dist)
-!!$          val%dev  = val%dev + dist**2
-!!$          val%samples  = val%samples+1
+          call swap_coordinate_convention(az, el, dk, COORD_HOR)
+          call coord_convert(COORD_HOR, az, el, dk, COORD_GAL, phi, theta, psi, chunk%time(i))
+          call ang2vec(el,    az,  hvec)
+          call ang2vec(theta, phi, gvec)
+          val%avg_hvec = val%avg_hvec + hvec
+          val%avg_gvec = val%avg_gvec + gvec
+          val%avgdk    = dk
+          call angdist2(val%avg_gvec,gvec,dist)
+          val%dev  = val%dev + dist**2
+          val%samples  = val%samples+1
        end do
        val%ces_range(2) = chunk%time(chunk%n)
 !       if(object_detect) call find_object(chunk, patches, val%object)
@@ -626,6 +627,34 @@ contains
     end do
   end subroutine
 
+  subroutine validate_liss(chunk, val, ok, split)
+    implicit none
+    type(chunk_type) :: chunk
+    type(validator)  :: val
+    logical(lgt)     :: ok, split
+    real(dp), dimension(:), allocatable :: work, subtracted_data
+    integer(i4b)     :: nstall, nstall_tmp
+    split = iterator%icont == 1
+    ok = .false.
+    val%reason = 1
+    if(any(chunk%mode /= 3)) return
+    val%reason = 2
+    if(any(chunk%el < -pi/2) .or. any(chunk%el > pi/2))    return
+    val%reason = 3
+    if(stalled(chunk%az, az_stall_lim, az_stall_timeout))             return
+    val%reason = 4
+    if(stalled(chunk%el, el_stall_lim, el_stall_timeout))         return
+    val%reason = 5
+    !allocate(subtracted_data(chunk%n))
+    call remove_sinusoid(chunk%el, chunk%time, chunk%n, subtracted_data)
+    if(.not. angle_const(subtracted_data, val%el_helper, max_el_dev)) return
+    call remove_sinusoid(chunk%az, chunk%time, chunk%n, subtracted_data)
+    if(.not. angle_const(subtracted_data, val%az_helper, max_az_dev)) return
+   
+    val%reason = 0
+    ok = .true.
+  end subroutine
+
   subroutine validate_ces(chunk, val, ok, split)
     implicit none
     type(chunk_type) :: chunk
@@ -828,80 +857,80 @@ contains
        ok = .true.
     end if
   end function
-!!$
-!!$  ! This routine is heavy, because it needs to do a full coordinate
-!!$  ! conversion, but identifies the object being
-!!$  ! scanned with high accuracy. Since a chunk is pretty short,
-!!$  ! we only use 1 sample for ephemeris. In a way it would make
-!!$  ! more sense to do this object detection in l3gen, since
-!!$  ! pointing conversions depend on the mount model, which we might
-!!$  ! want to change often. But we only need approximate pointing here.
-!!$  subroutine find_object(chunk, patches, obj)
-!!$    implicit none
-!!$    type(chunk_type) :: chunk
-!!$    type(patch_info) :: patches(:)
-!!$    integer(i4b)     :: obj, i, j, k, m, n, mod, nmod, red, tobj
-!!$    real(dp)         :: patch_pos(3,1,size(patches)), fprad
-!!$    real(dp)         :: op(3), np(3), mat(3,3), red_blur, samprate, maxbeam, beam_rad
-!!$    logical(lgt)     :: mask(size(patches))
-!!$    real(dp),     dimension(:,:,:), allocatable :: mats
-!!$    real(dp),     dimension(:,:),   allocatable :: point
-!!$    integer(i4b), dimension(:),     allocatable :: mobjs, objs, inds
-!!$    call get_patch_pos_multi(patches, [chunk%time(1)], COORD_GAL, patch_pos)
-!!$    nmod     = get_num_modules()
-!!$    samprate = 100
-!!$    red      = 4
-!!$    n        = (chunk%n-1)/red+1
-!!$    red_blur = 2.0*red/samprate/2*pi/180 ! 2 degree per second scanning
-!!$    fprad    = get_focalplane_rad()
-!!$    maxbeam  = get_max_fwhm()*fwhm2sigma*5;
-!!$    allocate(mobjs(0:nmod-1), objs(n), point(3,n), mats(3,3,n))
-!!$    j = 0
-!!$    do i = 1, chunk%n, red
-!!$      j = j+1
-!!$      op = [ chunk%az(i), chunk%el(i), chunk%dk(i) ]
-!!$      call swap_coordinate_convention(op(1), op(2), op(3), COORD_TELE)
-!!$      call coord_convert(COORD_TELE, op(1), op(2), op(3), &
-!!$       & COORD_GAL, np(1), np(2), np(3), mjd=chunk%time(i), euler=mats(:,:,j))
-!!$      point(:,j) = np
-!!$    end do
-!!$    ! Find the distance to each object, so that we can exclude some of them
-!!$    call get_patch_hits(patches, patch_pos, point(1,:), point(2,:), &
-!!$     & fprad + red_blur + maxbeam, objs)
-!!$    ! Which patches are relevant?
-!!$    mask = .false.
-!!$    do i = 1, n
-!!$       if(objs(i) == 0) cycle
-!!$       mask(objs(i)) = .true.
-!!$    end do
-!!$    m = count(mask)
-!!$    allocate(inds(0:m))
-!!$    inds = 0
-!!$    j    = 0
-!!$    do i = 1, size(mask)
-!!$       if(.not. mask(i)) cycle
-!!$       j = j+1
-!!$       inds(j) = i
-!!$    end do
-!!$    ! Ok, from now on, only consider those in inds.
-!!$    tobj = 0
-!!$    if(m > 0) then
-!!$       do mod = 0, nmod-1
-!!$          do j = 1, n
-!!$             call rot2angles(matmul(mats(:,:,j), rot_module2boresight(mod,-1)), &
-!!$              & point(1,j),point(2,j),point(3,j))
-!!$          end do
-!!$          beam_rad = get_module_fwhm(mod)*fwhm2sigma*5
-!!$          call get_patch_hits(patches(inds(1:)), patch_pos(:,:,inds(1:)), point(1,:), &
-!!$           & point(2,:), beam_rad+red_blur, objs)
-!!$          mobjs(mod) = inds(reduce_hits(patches, objs))
-!!$       end do
-!!$       tobj   = reduce_hits(patches, mobjs)
-!!$    end if
-!!$    obj = reduce_hits(patches, [obj,tobj])
-!!$    deallocate(point,mobjs,objs,mats,inds)
-!!$  end subroutine
-!!$
+
+  ! This routine is heavy, because it needs to do a full coordinate
+  ! conversion, but identifies the object being
+  ! scanned with high accuracy. Since a chunk is pretty short,
+  ! we only use 1 sample for ephemeris. In a way it would make
+  ! more sense to do this object detection in l3gen, since
+  ! pointing conversions depend on the mount model, which we might
+  ! want to change often. But we only need approximate pointing here.
+  subroutine find_object(chunk, patches, obj)
+    implicit none
+    type(chunk_type) :: chunk
+    type(patch_info) :: patches(:)
+    integer(i4b)     :: obj, i, j, k, m, n, mod, nmod, red, tobj
+    real(dp)         :: patch_pos(3,1,size(patches)), fprad
+    real(dp)         :: op(3), np(3), mat(3,3), red_blur, samprate, maxbeam, beam_rad
+    logical(lgt)     :: mask(size(patches))
+    real(dp),     dimension(:,:,:), allocatable :: mats
+    real(dp),     dimension(:,:),   allocatable :: point
+    integer(i4b), dimension(:),     allocatable :: mobjs, objs, inds
+    call get_patch_pos_multi(patches, [chunk%time(1)], COORD_GAL, patch_pos)
+    nmod     = get_num_detectors()
+    samprate = 100
+    red      = 4
+    n        = (chunk%n-1)/red+1
+    red_blur = 2.0*red/samprate/2*pi/180 ! 2 degree per second scanning
+    fprad    = get_focalplane_radius()
+    maxbeam  = get_max_fwhm()*fwhm2sigma*5;
+    allocate(mobjs(0:nmod-1), objs(n), point(3,n), mats(3,3,n))
+    j = 0
+    do i = 1, chunk%n, red
+      j = j+1
+      op = [ chunk%az(i), chunk%el(i), chunk%dk(i) ]
+      call swap_coordinate_convention(op(1), op(2), op(3), COORD_TELE)
+      call coord_convert(COORD_TELE, op(1), op(2), op(3), &
+       & COORD_GAL, np(1), np(2), np(3), mjd=chunk%time(i), euler=mats(:,:,j))
+      point(:,j) = np
+    end do
+    ! Find the distance to each object, so that we can exclude some of them
+    call get_patch_hits(patches, patch_pos, point(1,:), point(2,:), &
+     & fprad + red_blur + maxbeam, objs)
+    ! Which patches are relevant?
+    mask = .false.
+    do i = 1, n
+       if(objs(i) == 0) cycle
+       mask(objs(i)) = .true.
+    end do
+    m = count(mask)
+    allocate(inds(0:m))
+    inds = 0
+    j    = 0
+    do i = 1, size(mask)
+       if(.not. mask(i)) cycle
+       j = j+1
+       inds(j) = i
+    end do
+    ! Ok, from now on, only consider those in inds.
+    tobj = 0
+    if(m > 0) then
+       do mod = 0, nmod-1
+          do j = 1, n
+             call rot2angles(matmul(mats(:,:,j), rot_detector2boresight(mod)), &
+              & point(1,j),point(2,j),point(3,j))
+          end do
+          beam_rad = get_detector_fwhm(mod)*fwhm2sigma*5
+          call get_patch_hits(patches(inds(1:)), patch_pos(:,:,inds(1:)), point(1,:), &
+           & point(2,:), beam_rad+red_blur, objs)
+          mobjs(mod) = inds(reduce_hits(patches, objs))
+       end do
+       tobj   = reduce_hits(patches, mobjs)
+    end if
+    obj = reduce_hits(patches, [obj,tobj])
+    deallocate(point,mobjs,objs,mats,inds)
+  end subroutine
+
 !!$  subroutine read_pswitch(file, data)
 !!$    implicit none
 !!$    character(len=*), intent(in)                :: file
@@ -972,4 +1001,42 @@ contains
     helper%last   = safe(size(safe))
   end subroutine
 
+  subroutine remove_sinusoid(func, x, n, func2)
+        implicit none
+        REAL(dp), PARAMETER :: PI = 3.1415926535
+        integer(i4b)                                         :: i, n_periods, n
+        real(dp), intent(in)                                 :: func(:), x(:)
+        real(dp)                                             :: mean, max_val, min_val, intersect, omega, omega_calc, first_intersect, dx
+        logical                                              :: is_first
+        real(dp), intent(out), allocatable, dimension(:)     :: func2
+        if (allocated(func2)) deallocate(func2)
+        allocate(func2(n))
+        max_val = maxval(func)
+        mean = max_val - 0.5 * (max_val - minval(func))
+
+!        write(*,*) "Mean: ", mean
+        n_periods = -1
+        is_first  = .true.
+        do i=1,n
+            func2(i) = func(i) - mean
+
+            if ((func2(i) * func2(i-1) < 0) .and. (func2(i)>func2(i-1))) then
+                n_periods = n_periods + 1
+                intersect = x(i) - func2(i)/(func2(i) - func2(i-1))*dx
+                if (is_first) then
+                    first_intersect = intersect
+                    is_first = .false.
+                end if
+            end if
+        end do
+        omega_calc = 2.0 * PI / ((intersect - first_intersect)/n_periods)
+        !write(*,*) "Omega compare", omega_calc, 1.33333
+
+        do i=1,n
+            func2(i) = func2(i) - (max_val - mean) * sin(omega_calc * (x(i) - first_intersect))
+!            if (mod(i,100) == 0) then
+!                write(*,*) func2(i)
+!            end if
+        end do
+    end subroutine
 end program scan_detect
