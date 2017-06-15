@@ -464,14 +464,14 @@ contains
     end do
   end subroutine setup_detector_euler_matrices
 
-  subroutine verify_module(det_id)
+  subroutine verify_detector(det_id)
     implicit none
     integer(i4b), intent(in) :: det_id
     if (det_id < 0 .or. det_id > get_num_detectors()) then
        write(*,*) 'comap_pointing_mod: ERROR -- requested module does not exist:', det_id
        stop
     end if
-  end subroutine verify_module
+  end subroutine verify_detector
 
   ! Hack: Let pointing mod know that pointing information might have changed
   subroutine update_pointing_mod
