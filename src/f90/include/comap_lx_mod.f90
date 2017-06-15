@@ -1,4 +1,4 @@
-module comap_Lx_mod
+module comap_lx_mod
   use healpix_types
   use comap_defs
   use quiet_hdf_mod
@@ -8,7 +8,7 @@ module comap_Lx_mod
 
   include "mpif.h"
 
-  type Lx_struct
+  type lx_struct
      !! The level1 and level2 part, present in all files.
      integer(i4b)                                    :: decimation_time, decimation_nu
      real(dp)                                        :: samprate
@@ -18,22 +18,22 @@ module comap_Lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
-     integer(i4b), allocatable, dimension(:)         :: status      ! Status flag per time sample
+     integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
 
      !! The level3 part, which is only present in level3-files
-     integer(i4b)                                 :: coord_sys
-     real(dp)                                     :: scanfreq(2), pixsize, point_lim(4)
-     real(sp),     allocatable, dimension(:,:)    :: point        ! Gal; (phi/theta/psi,time,mod)
+     integer(i4b)                                   :: coord_sys
+     real(dp)                                       :: scanfreq(2), pixsize, point_lim(4)
+     real(sp),     allocatable, dimension(:,:)      :: point     ! Gal; (phi/theta/psi,time,mod)
 
      real(dp),     allocatable, dimension(:)        :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
      real(dp),     allocatable, dimension(:,:,:,:)  :: corr                 ! (freq, freq, detector, detector)
      real(dp)                                       :: stats(ST_NUM)
-     real(dp),     allocatable, dimension(:,:,:)    :: det_stats                ! (freq, detector, stat)
+     real(dp),     allocatable, dimension(:,:,:)    :: det_stats            ! (freq, detector, stat)
      real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
 
-  end type Lx_struct
+  end type lx_struct
 
 contains
 
@@ -313,5 +313,5 @@ contains
   end subroutine
 
 
-end module comap_Lx_mod
+end module comap_lx_mod
 
