@@ -73,17 +73,11 @@ program l2gen
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
 
-     write(*,*) 'c'
-
      ! If necessary, decimate L2 file in both time and frequency
      call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
 
-     write(*,*) 'd'
-
      ! Write L2 file to disk
      call write_l2_file(scan%l2file, data_l2_decimated)
-
-     write(*,*) 'e'
 
      ! Clean up data structures
      do i = 1, num_l1_files
@@ -93,7 +87,6 @@ program l2gen
      call free_lx_struct(data_l2_decimated)
      call free_lx_struct(data_l2_fullres)
 
-     write(*,*) 'f'
   end do
   call mpi_finalize(ierr)
 
@@ -149,7 +142,6 @@ contains
        end if
 
        ! Check that there are some valid samples inside current L1 file
-       write(*,*) size(data_l1(i)%time), nsamp, minval(data_l1(i)%time), maxval(data_l1(i)%time)
        if (mjd(1) > data_l1(i)%time(nsamp) .or. mjd(2) < data_l1(i)%time(1)) then
           ! No acceptable samples
           ind(i,:) = -1
