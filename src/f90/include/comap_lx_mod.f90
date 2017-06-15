@@ -215,13 +215,17 @@ contains
     type(lx_struct)              :: data
     type(hdf_file)               :: file
     call open_hdf_file(filename, file, "w")
-    call write_hdf(file, "time",              data%time)
+    call write_hdf(file, "samprate",          data%samprate)
+    call write_hdf(file, "mjd_start",         data%mjd_start)
+    call write_hdf(file, "scanmode",          data%scanmode)
     call write_hdf(file, "decimation_time",   data%decimation_time)
     call write_hdf(file, "decimation_nu",     data%decimation_nu)
-    call write_hdf(file, "samprate",          data%samprate)
+    call write_hdf(file, "time",              data%time)
+    call write_hdf(file, "nu",                data%nu)
     call write_hdf(file, "tod",               data%tod)
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point_tel",         data%point_tel)
+    call write_hdf(file, "flag",              data%flag)
     call close_hdf_file(file)
   end subroutine
 

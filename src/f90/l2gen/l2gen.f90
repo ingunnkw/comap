@@ -21,7 +21,7 @@ program l2gen
 
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',         par_dp=samprate)
-  call get_parameter(unit, parfile, 'L2_NUMFREQ',          par_int=numfreq)
+  call get_parameter(unit, parfile, 'NUMFREQ',             par_int=numfreq)
   call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES', par_lgt=reprocess)
   call get_parameter(unit, parfile, 'DEBUG',               par_int=debug)
 
@@ -45,17 +45,20 @@ program l2gen
      call get_scan_info(snum, scan)
      inquire(file=scan%l2file,exist=exist)
      if(exist .and. .not. reprocess) then
-        if(check_existing) then
-           ! Check if the file is as long as it should be
-           call get_l2_time_stats(scan%l2file, mjd, dt_error)
-           gonext = dt_error < 0.25 .and. (mjd(2) - scan%mjd(2) < mjd_tol .or. scan%mjd(1) - mjd(1) < mjd_tol)
-        else
-           gonext = .true.
-        end if
+        gonext = .true.
+!!$        if(check_existing) then
+!!$           ! Check if the file is as long as it should be
+!!$           call get_l2_time_stats(scan%l2file, mjd, dt_error)
+!!$           gonext = dt_error < 0.25 .and. (mjd(2) - scan%mjd(2) < mjd_tol .or. scan%mjd(1) - mjd(1) < mjd_tol)
+!!$        else
+!!$           gonext = .true.
+!!$        end if
         if(gonext) then
            write(*,fmt="(i3,a,2i5,a)") myid, " skipping already finished scan:", snum, scan%cid
            cycle
         end if
+     else if (exist .and. reprocess) then
+        call rm(scan%l2file)
      end if
      write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%cid, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
      call dmem("scan start")
@@ -64,14 +67,12 @@ program l2gen
      num_l1_files = size(scan%l1files)
      allocate(data_l1(num_l1_files))
      do i = 1, num_l1_files
-        write(*,*) 'a', i
         call read_l1_file(scan%l1files(i), data_l1(i))
-        write(*,*) 'b', i
      end do
 
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
-     
+
      write(*,*) 'c'
 
      ! If necessary, decimate L2 file in both time and frequency
@@ -88,6 +89,7 @@ program l2gen
      do i = 1, num_l1_files
         call free_lx_struct(data_l1(i))
      end do
+     deallocate(data_l1)
      call free_lx_struct(data_l2_decimated)
      call free_lx_struct(data_l2_fullres)
 
@@ -147,6 +149,7 @@ contains
        end if
 
        ! Check that there are some valid samples inside current L1 file
+       write(*,*) size(data_l1(i)%time), nsamp, minval(data_l1(i)%time), maxval(data_l1(i)%time)
        if (mjd(1) > data_l1(i)%time(nsamp) .or. mjd(2) < data_l1(i)%time(1)) then
           ! No acceptable samples
           ind(i,:) = -1
@@ -155,42 +158,50 @@ contains
 
        ! Find start position
        ind(i,1) = 1
-       do while (mjd(1) > data_l1(i)%time(ind(i,1)) .and. ind(i,1) <= nsamp)
+       do while (data_l1(i)%time(ind(i,1)) < mjd(1) .and. ind(i,1) <= nsamp)
           ind(i,1) = ind(i,1) + 1
        end do
 
        ! Find end position
        ind(i,2) = nsamp
-       do while (mjd(2) < data_l1(i)%time(ind(i,2)) .and. ind(i,2) >= 1)
-          ind(i,1) = ind(i,1) + 1
+       do while (data_l1(i)%time(ind(i,2)) > mjd(2) .and. ind(i,2) >= 1)
+          ind(i,2) = ind(i,2) - 1
        end do
 
        nsamp_tot = nsamp_tot + ind(i,2)-ind(i,1)+1
     end do
 
+    call assert(any(ind(:,1) /= -1) .and. any(ind(:,2) /= -1), 'No valid ranges in L1 files')
+
     ! Allocate full-resolution L2 structure
-    allocate(data_l2_fullres%time(nsamp_tot))
-    allocate(data_l2_fullres%nu(nsb*nfreq))
-    allocate(data_l2_fullres%tod(nsamp_tot, nsb*nfreq, ndet))
-    allocate(data_l2_fullres%orig_point(nsamp_tot, 3))
+    allocate(data_l2%time(nsamp_tot))
+    allocate(data_l2%nu(nsb*nfreq))
+    allocate(data_l2%tod(nsamp_tot, nsb*nfreq, ndet))
+    allocate(data_l2%point_tel(3,nsamp_tot))
+    allocate(data_l2%point_cel(3,nsamp_tot))
+    allocate(data_l2%flag(nsamp_tot))
 
     ! Merge L1 data
-    data_l2_fullres%decimation_time = 1
-    data_l2_fullres%decimation_nu   = 1
-    data_l2_fullres%samprate        = samprate
+    data_l2%decimation_time = 1
+    data_l2%decimation_nu   = 1
+    data_l2%samprate        = samprate
+    data_l2%scanmode        = data_l1(1)%scanmode_l1(1)
     j                               = 1
     do i = 1, num_l1_files
-       nsamp = size(data_l1(i)%time)
-       data_l2_fullres%time(j:j+nsamp-1)         = data_l1(i)%time(ind(i,1):ind(i,2))
-       data_l2_fullres%orig_point(j:j+nsamp-1,:) = data_l1(i)%orig_point(ind(i,1):ind(i,2),:)
+       nsamp = ind(i,2)-ind(i,1)+1
+       data_l2%time(j:j+nsamp-1)        = data_l1(i)%time(ind(i,1):ind(i,2))
+       data_l2%flag(j:j+nsamp-1)        = data_l1(i)%flag(ind(i,1):ind(i,2))
+       data_l2%point_tel(:,j:j+nsamp-1) = data_l1(i)%point_tel(:,ind(i,1):ind(i,2))
+       data_l2%point_cel(:,j:j+nsamp-1) = data_l1(i)%point_cel(:,ind(i,1):ind(i,2))
        k = 1
        do m = 1, nsb
           do n = 1, nfreq
-             if (i == 1) data_l2_fullres%nu(k)    = data_l1(i)%nu_l1(n,m)
-             data_l2_fullres%tod(j:j+nsamp-1,k,:) = data_l1(i)%tod_l1(ind(i,1):ind(i,2),n,m,:)
+             if (i == 1) data_l2%nu(k)    = data_l1(i)%nu_l1(n,m)
+             data_l2%tod(j:j+nsamp-1,k,:) = data_l1(i)%tod_l1(ind(i,1):ind(i,2),n,m,:)
              k                                    = k+1
           end do
        end do
+       call assert(all(data_l1(i)%scanmode_l1 == data_l2%scanmode), 'Varying scanmode within L1 files!')
        j = j + nsamp
     end do
 
@@ -209,7 +220,6 @@ contains
 
     ndet                     = size(data_in%tod,3)
     data_out%samprate        = samprate_out
-
     dt                       = nint(samprate_out/data_in%samprate)
     data_out%decimation_time = dt
     call assert(data_out%decimation_time >= 1, 'Cannot ask for higher output sample rate than input')
@@ -223,17 +233,25 @@ contains
     allocate(data_out%time(nsamp_out))
     allocate(data_out%nu(numfreq_out))
     allocate(data_out%tod(nsamp_out, numfreq_out, ndet))
-    allocate(data_out%orig_point(nsamp_out, 3))
+    allocate(data_out%point_tel(3,nsamp_out))
+    allocate(data_out%point_cel(3,nsamp_out))
+    allocate(data_out%flag(nsamp_out))
 
     ! Make angles safe for averaging
-    call make_angles_safe(data_in%orig_point(:,1), real(2.d0*pi,sp)) ! Phi
-    call make_angles_safe(data_in%orig_point(:,3), real(2.d0*pi,sp)) ! Psi
+    call make_angles_safe(data_in%point_tel(:,1), real(2.d0*pi,sp)) ! Phi
+    call make_angles_safe(data_in%point_tel(:,3), real(2.d0*pi,sp)) ! Psi
+    call make_angles_safe(data_in%point_cel(:,1), real(2.d0*pi,sp)) ! Phi
+    call make_angles_safe(data_in%point_cel(:,3), real(2.d0*pi,sp)) ! Psi
 
     do i = 1, nsamp_out
        data_out%time(i) = mean(data_in%time((i-1)*dt+1:i*dt))  ! Time
-       data_out%orig_point(i,1) = mean(data_in%orig_point((i-1)*dt+1:i*dt,1)) ! Phi
-       data_out%orig_point(i,2) = mean(data_in%orig_point((i-1)*dt+1:i*dt,2)) ! Theta
-       data_out%orig_point(i,3) = mean(data_in%orig_point((i-1)*dt+1:i*dt,3)) ! Psi
+       data_out%flag(i) = data_in%time((i-1)*dt+1)             ! Pick first flag in segment
+       data_out%point_tel(1,i) = mean(data_in%point_tel(1,(i-1)*dt+1:i*dt)) ! Phi
+       data_out%point_tel(2,i) = mean(data_in%point_tel(2,(i-1)*dt+1:i*dt)) ! Theta
+       data_out%point_tel(3,i) = mean(data_in%point_tel(3,(i-1)*dt+1:i*dt)) ! Psi
+       data_out%point_cel(1,i) = mean(data_in%point_cel(1,(i-1)*dt+1:i*dt)) ! Phi
+       data_out%point_cel(2,i) = mean(data_in%point_cel(2,(i-1)*dt+1:i*dt)) ! Theta
+       data_out%point_cel(3,i) = mean(data_in%point_cel(3,(i-1)*dt+1:i*dt)) ! Psi
 
        do k = 1, numfreq_out
           if (i == 1) data_out%nu(k) = mean(data_in%nu((k-1)*dnu+1:k*dnu)) ! Frequency
