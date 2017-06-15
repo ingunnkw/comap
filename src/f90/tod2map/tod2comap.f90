@@ -42,7 +42,6 @@ program tod2comap
   parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
 
   call initialize_scan_mod(parfile)
-
   nscan = get_num_scans()
 
   do i = 1, nscan 
@@ -50,15 +49,15 @@ program tod2comap
      filename = scan%l3file
      prefix = 'files/'//trim(scan%object)//'_'//trim(itoa(scan%cid)) ! patchID_scanID
      write(*,*) i, 'of', nscan
-     !write(*,*) 'Get TOD ...'
+     ! Get TOD / read level 3 file
      call get_tod(trim(filename), data, tod)
      allocate(alist%status(tod%nfreq,tod%ndet,nscan))
-     alist%status = 0
-     !write(*,*) 'Write TOD to file ...'
+     alist%status = 0 ! TODO: check if any parts of the scan has been rejected
+     ! Write TOD to file
      call output_tod(trim(prefix), 1, tod, alist, i)
-     !write(*,*) 'Compute maps ...'
+     ! Compute maps
      call compute_maps(data, tod, map, alist, i)
-     !write(*,*) 'Write maps to file ...'
+     ! Write maps to file (includes rms and hit count)
      call output_maps(trim(prefix), map)
   end do
 
@@ -212,7 +211,7 @@ contains
           p = min(max(int((tod%point(1,i)-x_min)/map%dtheta),1),map%n_x)
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
-             if (alist%status(j,k,scan_nr)) then
+             if (alist%status(j,k,scan_nr) == 0) then
                 map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(1,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
                 map%div(p,q,j)  = map%div(p,q,j)  + tod%g(1,j,k)**2 / tod%rms(i,j,k)**2
                 map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
