@@ -90,14 +90,14 @@ contains
        if(trim(theta) == "x" .or. trim(phi) == "x") then
           pinfo(i)%pos = 0
           pinfo(i)%fixed = .false.
-          pinfo(i)%eph = name2eph(name)
+!          pinfo(i)%eph = name2eph(name)
        else
           read(theta,*) pinfo(i)%pos(2)
           read(phi,*)   pinfo(i)%pos(1)
           pinfo(i)%pos = pinfo(i)%pos * DEG2RAD
           pinfo(i)%pos(2) = PI/2 - pinfo(i)%pos(2)
           pinfo(i)%fixed = .true.
-          pinfo(i)%eph = 0
+ !         pinfo(i)%eph = 0
        end if
        pinfo(i)%noise_dominated = pinfo(i)%priority <  1
        pinfo(i)%ignore          = pinfo(i)%priority <= 0
