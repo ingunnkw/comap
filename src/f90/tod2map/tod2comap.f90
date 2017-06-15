@@ -1,6 +1,7 @@
 program tod2comap
   use comap_lx_mod
   use comap_scan_mod
+  use comap_acceptlist_mod
   use quiet_fft_mod
   implicit none
 
@@ -26,6 +27,7 @@ program tod2comap
   type(map_type)  :: map
   type(lx_struct) :: data
   type(comap_scan_info)  :: scan
+  type(acceptlist)       :: alist
 
   character(len=512) :: filename, parfile, acceptfile, prefix
   integer(i4b)       :: nscan, i, j, k
@@ -38,7 +40,6 @@ program tod2comap
   !call mpi_finalize(ierr)
 
   parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
-  !acceptfile = '/mn/stornext/d5/comap/protodir/acceptlist.txt'
 
   call initialize_scan_mod(parfile)
 
@@ -47,14 +48,16 @@ program tod2comap
   do i = 1, nscan 
      call get_scan_info(i,scan)
      filename = scan%l3file
-     prefix = 'files/'//scan%object//'_'//trim(itoa(scan%cid)) ! patchID_scanID
+     prefix = 'files/'//trim(scan%object)//'_'//trim(itoa(scan%cid)) ! patchID_scanID
      write(*,*) i, 'of', nscan
      !write(*,*) 'Get TOD ...'
      call get_tod(trim(filename), data, tod)
+     allocate(alist%status(tod%nfreq,tod%ndet,nscan))
+     alist%status = 0
      !write(*,*) 'Write TOD to file ...'
-     call output_tod(trim(prefix), 1, tod)
+     call output_tod(trim(prefix), 1, tod, alist, i)
      !write(*,*) 'Compute maps ...'
-     call compute_maps(data, tod, map)
+     call compute_maps(data, tod, map, alist, i)
      !write(*,*) 'Write maps to file ...'
      call output_maps(trim(prefix), map)
   end do
@@ -133,11 +136,12 @@ contains
   end subroutine get_tod
 
 
-  subroutine output_tod(prefix, det, tod)
+  subroutine output_tod(prefix, det, tod, alist, scan_nr)
     implicit none
     character(len=*), intent(in) :: prefix
     type(tod_type),   intent(in) :: tod
-    integer(i4b),     intent(in) :: det
+    type(acceptlist), intent(in) :: alist
+    integer(i4b),     intent(in) :: det, scan_nr
 
     character(len=512) :: filename
     character(len=4)   :: jtext
@@ -145,25 +149,29 @@ contains
 
     unit = getlun()
     do j = 1, tod%nfreq
-       call int2string(j,jtext)
-       filename = trim(prefix) // '_freq' // jtext // '_tod.dat'
-       open(unit, file=trim(filename), recl=4096)
-       do i = 1, tod%nsamp
-          write(unit, fmt='(f16.8)', advance='no') tod%t(i)
-          write(unit, fmt='(2f24.8)', advance='no') tod%d(i,j,det), tod%d_raw(i,j,det)
-          write(unit,*)
-       end do
-       close(unit)
+       if (alist%status(j,det,scan_nr) == 0) then
+          call int2string(j,jtext)
+          filename = trim(prefix) // '_freq' // jtext // '_tod.dat'
+          open(unit, file=trim(filename), recl=4096)
+          do i = 1, tod%nsamp
+             write(unit, fmt='(f16.8)', advance='no') tod%t(i)
+             write(unit, fmt='(2f24.8)', advance='no') tod%d(i,j,det), tod%d_raw(i,j,det)
+             write(unit,*)
+          end do
+          close(unit)
+       end if
     end do
 
   end subroutine output_tod
   
 
-  subroutine compute_maps(data, tod, map)
+  subroutine compute_maps(data, tod, map, alist, scan_nr)
     implicit none
-    type(lx_struct), intent(in)    :: data
-    type(tod_type),  intent(in)    :: tod
-    type(map_type),  intent(inout) :: map
+    type(lx_struct),  intent(in)    :: data
+    type(tod_type),   intent(in)    :: tod
+    type(map_type),   intent(inout) :: map
+    type(acceptlist), intent(in)    :: alist
+    integer(i4b),     intent(in)    :: scan_nr
     
     integer(i4b) :: i, j, k, p, q
     real(dp)     :: x_min, x_max, y_min, y_max, pad
@@ -204,9 +212,11 @@ contains
           p = min(max(int((tod%point(1,i)-x_min)/map%dtheta),1),map%n_x)
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
-             map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(1,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
-             map%div(p,q,j)  = map%div(p,q,j)  + tod%g(1,j,k)**2 / tod%rms(i,j,k)**2
-             map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
+             if (alist%status(j,k,scan_nr)) then
+                map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(1,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
+                map%div(p,q,j)  = map%div(p,q,j)  + tod%g(1,j,k)**2 / tod%rms(i,j,k)**2
+                map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
+             end if
           end do
        end do
     end do
