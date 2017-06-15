@@ -9,6 +9,7 @@ module comap_acceptlist_mod
   use quiet_utils
   use comap_scan_mod
   use comap_detector_mod
+  use comap_frequency_mod
   implicit none
 
   interface is_accepted_scan_any
@@ -16,8 +17,8 @@ module comap_acceptlist_mod
   end interface
 
   type acceptlist
-     integer(i4b) :: ndet, nscan
-     integer(i4b), dimension(:,:), allocatable :: status
+     integer(i4b) :: nfreq, ndet, nscan
+     integer(i4b), dimension(:,:,:), allocatable :: status !(nfreq, ndet, nscan)
   end type acceptlist
 
   logical(lgt), private :: initialized = .false.
@@ -29,9 +30,10 @@ contains
     implicit none
     type(acceptlist)            :: alist
     call deallocate_acceptlist(alist)
+    alist%nfreq = get_num_freqs()
     alist%ndet  = get_num_detectors()
     alist%nscan = get_num_scans()
-    allocate(alist%status(1:alist%ndet,1:alist%nscan))
+    allocate(alist%status(1:alist%nfreq,1:alist%ndet,1:alist%nscan))
   end subroutine allocate_acceptlist
 
   subroutine deallocate_acceptlist(alist)
@@ -46,13 +48,13 @@ contains
     integer(i4b), dimension(:), allocatable :: snums
     integer(i4b)                            :: i, n
     n = 0
-    do i = 1, size(alist%status,2)
-       if(any(alist%status(:,i) == REJECTED_NONE)) n = n+1
+    do i = 1, size(alist%status,3)
+       if(any(alist%status(:,:,i) == REJECTED_NONE)) n = n+1
     end do
     allocate(snums(n))
     n = 0
-    do i = 1, size(alist%status,2)
-       if(any(alist%status(:,i) == REJECTED_NONE)) then
+    do i = 1, size(alist%status,3)
+       if(any(alist%status(:,:,i) == REJECTED_NONE)) then
           n = n+1
           snums(n) = i
        end if
@@ -66,9 +68,9 @@ contains
     integer(i4b), dimension(:), allocatable :: snums
     integer(i4b)                            :: i, j, n
     n = 0
-    do i = 1, size(alists(1)%status,2)
+    do i = 1, size(alists(1)%status,3)
        do j = 1, size(alists)
-          if(any(alists(j)%status(:,i) == REJECTED_NONE)) then
+          if(any(alists(j)%status(:,:,i) == REJECTED_NONE)) then
              n = n+1
              exit
           end if
@@ -76,9 +78,9 @@ contains
     end do
     allocate(snums(n))
     n = 0
-    do i = 1, size(alists(1)%status,2)
+    do i = 1, size(alists(1)%status,3)
        do j = 1, size(alists)
-          if(any(alists(j)%status(:,i) == REJECTED_NONE)) then
+          if(any(alists(j)%status(:,:,i) == REJECTED_NONE)) then
              n = n+1
              snums(n) = i
              exit
@@ -87,61 +89,74 @@ contains
     end do
   end subroutine
 
-  function is_accepted(alist, sid, det) result(res)
+  function is_accepted(alist, sid, freq, det) result(res)
     implicit none
     type(acceptlist)       :: alist
     integer(i4b)           :: sid, snum
-    integer(i4b), optional :: det
+    integer(i4b), optional :: det, freq
     logical(lgt)           :: res
     snum = lookup_scan(sid)
-    if (present(det)) then
-       res  = alist%status(det,snum) == REJECTED_NONE
-     else 
-       res  = any(alist%status(:,snum) == REJECTED_NONE)
+    if (present(freq) .and. present(det)) then
+       res  = alist%status(freq,det,snum) == REJECTED_NONE
+    else if (present(freq)) then
+       res  = any(alist%status(freq,:,snum)   == REJECTED_NONE)
+    else if (present(det)) then
+       res  = any(alist%status(:,det,snum)    == REJECTED_NONE)
+    else 
+       res  = any(alist%status(:,:,snum)  == REJECTED_NONE)
     end if
   end function is_accepted
 
-  subroutine accept(alist, sid, det)
+  subroutine accept(alist, sid, freq, det)
     implicit none
-    type(acceptlist)  :: alist
-    integer(i4b), optional :: sid, det
-    integer(i4b)      :: snum
+    type(acceptlist)       :: alist
+    integer(i4b), optional :: sid, freq, det
+    integer(i4b)           :: snum
     if (.not. present(sid)) then
        alist%status = REJECTED_NONE
        return
     end if
     snum = lookup_scan(sid)
     if (snum < 1 .or. snum > alist%nscan) return
-    if (present(det)) then
-       alist%status(det,snum) = REJECTED_NONE
-    else 
-       alist%status(:,snum)    = REJECTED_NONE
+    if (present(freq) .and. present(det)) then
+       alist%status(freq,det,snum) = REJECTED_NONE
+    else if (present(freq)) then
+       alist%status(freq,:,snum)   = REJECTED_NONE
+    else if (present(det)) then
+       alist%status(:,det,snum)    = REJECTED_NONE
+    else
+       alist%status(:,:,snum)      = REJECTED_NONE
     end if
   end subroutine accept
 
-  subroutine reject(alist, sid, det, reason)
+  subroutine reject(alist, sid, freq, det, reason)
     implicit none
-    type(acceptlist)  :: alist
-    integer(i4b), optional :: sid, det, reason
-    integer(i4b)      :: r, snum
+    type(acceptlist)       :: alist
+    integer(i4b), optional :: sid, freq, det, reason
+    integer(i4b)           :: r, snum
     snum = lookup_scan(sid)
     if (snum < 1 .or. snum > alist%nscan) return
     r = REJECTED_NOREASON; if(present(reason)) r = reason
-    if (present(det)) then
-       alist%status(det,snum) = r
+    if (present(freq) .and. present(det)) then
+       alist%status(freq,det,snum) = r
+    else if (present(freq)) then
+       alist%status(freq,:,snum)   = r
+    else if (present(det)) then
+       alist%status(:,det,snum)    = r
     else if (present(sid)) then
-       alist%status(:,snum)   = r
+       alist%status(:,:,snum)      = r
     else
-       alist%status           = r
+       alist%status                = r
     end if
   end subroutine reject
 
   subroutine initialize_accept_list(filename, alist, default)
     implicit none
-    character(len=*)    :: filename
-    type(acceptlist)    :: alist
-    character(len=1024) :: line
-    integer(i4b) :: i, unit, sid, det, snum, status, defval
+    character(len=*)       :: filename
+    type(acceptlist)       :: alist
+    character(len=1024)    :: line
+    integer(i4b)           :: i, j, unit, sid, det, snum, status, defval
+    integer(i4b)           :: numscans, numdets, numrej, freq 
     integer(i4b), optional :: default
     integer(i4b), dimension(:,:), allocatable :: rejects
     ! Is this a dummy wildcard file? If so, don't add anything, but
@@ -158,41 +173,28 @@ contains
     open(unit,file=filename,action="read")
     do
        read(unit,fmt="(a)",end=2) line
-       if(line(1:1) == '#') cycle
-       read(line,*) sid, det, status
-       if (status == 1) then
-          call accept(alist, sid, det)
+       if(line(1:1) == '#') then 
+          cycle
        else
-          call reject(alist, sid, det, REJECTED_ALIST)
+          read(line,*) numscans
+          exit
        end if
     end do
-2   close(unit)
-  end subroutine initialize_accept_list
 
-  subroutine append_accept_list(filename, sid, alist)
-    implicit none
-    character(len=*)    :: filename
-    integer(i4b)        :: sid
-    type(acceptlist)    :: alist
-
-    character(len=4096) :: line
-    integer(i4b)        :: i, unit, snum
-
-    snum = lookup_scan(sid)
-    if (snum < 1 .or. snum > alist%nscan) return
-
-    ! Write line to file
-    unit = getlun()
-    open(unit,file=filename,action="write",position="append",recl=4096)
-    do i = 1, alist%ndet
-       if (alist%status(i,snum) == REJECTED_NONE) then
-          write(*,fmt='(i7,i5,i3,i3)') sid, i, 1
-       else
-          write(*,fmt='(i7,i5,i3,i3)') sid, i, 0
-       end if
-    end do
-    close(unit)
-
-  end subroutine append_accept_list
+    do i = 1, numscans
+       read(unit,*) sid, numdets
+       do j =1, numdets
+          read(unit,fmt="(a)",end=2) line
+          ! Then chunk line
+          ! read(line,*) det, numrej, ++
+          if (numrej == 0) then
+             call accept(alist, sid, det)
+          else
+             call reject(alist, sid, det, REJECTED_ALIST) ! add which freqs
+          end if
+        end do
+     end do
+2    close(unit)
+   end subroutine initialize_accept_list
 
 end module comap_acceptlist_mod
