@@ -28,7 +28,8 @@ module comap_lx_mod
 
      ! Level 3 fields
      integer(i4b)                                    :: coord_sys
-     real(dp)                                        :: scanfreq(2), pixsize, point_lim(4)
+     real(dp)                                        :: scanfreq(2), pixsize 
+     real(dp)                                        :: point_lim(4)         ! (RA_min, RA_max, dec_min, dec_max)
      real(dp),     allocatable, dimension(:)         :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)       :: sigma0, alpha, fknee ! (freq, detector)
@@ -238,6 +239,7 @@ contains
 
     call open_hdf_file(filename, file, "w")
     call write_hdf(file, "time",              data%time)
+    call write_hdf(file, "nu",                data%nu)
     call write_hdf(file, "decimation_time",   data%decimation_time)
     call write_hdf(file, "decimation_nu",     data%decimation_nu)
     call write_hdf(file, "scanfreq",          data%scanfreq)
@@ -257,6 +259,7 @@ contains
     call write_hdf(file, "stats",             data%stats)
     call write_hdf(file, "det_stats",         data%det_stats)
     call write_hdf(file, "filter_par",        data%filter_par)
+    call write_hdf(file, "flag",              data%flag)
     call close_hdf_file(file)
   end subroutine
 
