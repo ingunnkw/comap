@@ -2,7 +2,6 @@ module comap_Lx_mod
   use healpix_types
   use comap_defs
   use quiet_hdf_mod
-  use l1_read_mod
   use quiet_fft_mod
   use quiet_utils
   implicit none
@@ -11,14 +10,15 @@ module comap_Lx_mod
 
   type Lx_struct
      !! The level1 and level2 part, present in all files.
-     integer(i4b)                                :: decimation
-     real(dp)                                    :: samprate
-     type(hk_struct)                             :: hk
-     real(dp), allocatable, dimension(:)         :: time
-     real(dp), allocatable, dimension(:)         :: nu          ! (freq, sideband)
-     real(sp), allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
-     real(sp), allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
-     real(sp), allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
+     integer(i4b)                                    :: decimation_time, decimation_nu
+     real(dp)                                        :: samprate
+     real(dp),     allocatable, dimension(:)         :: time
+     real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
+     real(dp),     allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
+     real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
+     real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
+     integer(i4b), allocatable, dimension(:)         :: status      ! Status flag per time sample
 
      !! The level3 part, which is only present in level3-files
      integer(i4b)                                 :: coord_sys
@@ -51,12 +51,10 @@ contains
     npoint = ext(2)
     allocate(data%time(nsamp), data%tod_l1(nsamp,nfreq,nsb,ndet))
     allocate(data%orig_point(npoint,nsamp))
-    !call read_hdf(file, "decimation", data%decimation)
     call read_hdf(file, "samprate",   data%samprate)
     call read_hdf(file, "time",       data%time)
     call read_hdf(file, "tod",        data%tod_l1)
     call read_hdf(file, "point", data%orig_point)
-    !call read_hk_hdf(file, data%hk)
     call close_hdf_file(file)
   end subroutine read_l1_file
 
@@ -75,13 +73,13 @@ contains
     call get_size_hdf(file, "orig_point", ext)
     npoint = ext(1); nsamp = ext(2)
     allocate(data%orig_point(npoint,nsamp), data%nu(nfreq))
-    call read_hdf(file, "decimation", data%decimation)
-    call read_hdf(file, "samprate",   data%samprate)
-    call read_hdf(file, "time",       data%time)
-    call read_hdf(file, "nu",         data%nu)
-    call read_hdf(file, "tod",        data%tod)
-    call read_hdf(file, "orig_point", data%orig_point)
-    !call read_hk_hdf(file, data%hk)
+    call read_hdf(file, "decimation_time",  data%decimation_time)
+    call read_hdf(file, "decimation_nu",    data%decimation_nu)
+    call read_hdf(file, "samprate",         data%samprate)
+    call read_hdf(file, "time",             data%time)
+    call read_hdf(file, "nu",               data%nu)
+    call read_hdf(file, "tod",              data%tod)
+    call read_hdf(file, "orig_point",       data%orig_point)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -164,8 +162,6 @@ contains
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)
     !call read_hdf(file, "corr",   data%corr)
-    ! Read APEX data
-    !call read_hk_elem(file, "apex", data%hk%apex)
     ! Read stats
     !call read_hdf(file, "stats",       data%stats)
     call read_hdf(file, "stats", data%det_stats)
@@ -174,31 +170,6 @@ contains
     call close_hdf_file(file)
   end subroutine read_l3_file
 
-  subroutine read_hk_hdf(file, hk)
-    implicit none
-    type(hdf_file)  :: file
-    type(hk_struct) :: hk
-    call read_hk_elem(file, "bias", hk%bias)
-    call read_hk_elem(file, "cryo", hk%cryo)
-    call read_hk_elem(file, "encl", hk%encl)
-    call read_hk_elem(file, "peri", hk%peri)
-  end subroutine
-
-  subroutine read_hk_elem(file, name, hkt)
-    implicit none
-    type(hdf_file)   :: file
-    type(hk_type)    :: hkt
-    character(len=*) :: name
-    integer(i4b)     :: nsamp, ntype, ext(7)
-    call get_size_hdf(file, name // "/value", ext)
-    nsamp = ext(1); ntype = ext(2)
-    allocate(hkt%name(ntype), hkt%time(nsamp), hkt%value(nsamp,ntype))
-    hkt%n   = ntype
-    hkt%n_t = nsamp
-    call read_hdf(file, trim(name) // "/time",  hkt%time)
-    call read_hdf(file, trim(name) // "/value", hkt%value)
-  end subroutine
-
   subroutine free_lx_struct(data)
     implicit none
     type(lx_struct) :: data
@@ -206,7 +177,6 @@ contains
     if(allocated(data%tod))         deallocate(data%tod)
     if(allocated(data%tod_l1))      deallocate(data%tod_l1)
     if(allocated(data%orig_point))  deallocate(data%orig_point)
-    call deallocate_hk_struct(data%hk)
 
     if(allocated(data%point))       deallocate(data%point)
     if(allocated(data%time_gain))   deallocate(data%time_gain)
@@ -225,12 +195,12 @@ contains
     type(lx_struct)              :: data
     type(hdf_file)               :: file
     call open_hdf_file(filename, file, "w")
-    call write_hdf(file, "time",         data%time)
-    call write_hdf(file, "decimation",   data%decimation)
-    call write_hdf(file, "samprate",     data%samprate)
-    call write_hdf(file, "tod",          data%tod)
-    call write_hdf(file, "orig_point",   data%orig_point)
-    call write_hk_hdf(file, data%hk)
+    call write_hdf(file, "time",              data%time)
+    call write_hdf(file, "decimation_time",   data%decimation_time)
+    call write_hdf(file, "decimation_nu",     data%decimation_nu)
+    call write_hdf(file, "samprate",          data%samprate)
+    call write_hdf(file, "tod",               data%tod)
+    call write_hdf(file, "orig_point",        data%orig_point)
     call close_hdf_file(file)
   end subroutine
 
@@ -242,60 +212,27 @@ contains
     integer(i4b)                 :: i
 
     call open_hdf_file(filename, file, "w")
-    call write_hdf(file, "time",         data%time)
-    call write_hdf(file, "decimation",   data%decimation)
-    call write_hdf(file, "scanfreq",     data%scanfreq)
-    call write_hdf(file, "samprate",     data%samprate)
-    call write_hdf(file, "coord_sys",    data%coord_sys)
-    call write_hdf(file, "pixsize",      data%pixsize)
-    call write_hdf(file, "point_lim",    data%point_lim)
-    call write_hdf(file, "tod",          data%tod)
-    call write_hdf(file, "orig_point",   data%orig_point)
-    call write_hdf(file, "point",        data%point)
-    call write_hdf(file, "sigma0",       data%sigma0)
-    call write_hdf(file, "alpha",        data%alpha)
-    call write_hdf(file, "fknee",        data%fknee)
-    call write_hdf(file, "corr",         data%corr)
-    call write_hdf(file, "time_gain",    data%time_gain)
-    call write_hdf(file, "gain",         data%gain)
-    call write_hdf(file, "stats",        data%stats)
-    call write_hdf(file, "det_stats",    data%det_stats)
-    call write_hdf(file, "filter_par",   data%filter_par)
-    call write_hk_hdf(file, data%hk)
-    call create_hdf_group(file, "apex")
-    call write_hk_elem   (file, "apex", data%hk%apex)
+    call write_hdf(file, "time",              data%time)
+    call write_hdf(file, "decimation_time",   data%decimation_time)
+    call write_hdf(file, "decimation_nu",     data%decimation_nu)
+    call write_hdf(file, "scanfreq",          data%scanfreq)
+    call write_hdf(file, "samprate",          data%samprate)
+    call write_hdf(file, "coord_sys",         data%coord_sys)
+    call write_hdf(file, "pixsize",           data%pixsize)
+    call write_hdf(file, "point_lim",         data%point_lim)
+    call write_hdf(file, "tod",               data%tod)
+    call write_hdf(file, "orig_point",        data%orig_point)
+    call write_hdf(file, "point",             data%point)
+    call write_hdf(file, "sigma0",            data%sigma0)
+    call write_hdf(file, "alpha",             data%alpha)
+    call write_hdf(file, "fknee",             data%fknee)
+    call write_hdf(file, "corr",              data%corr)
+    call write_hdf(file, "time_gain",         data%time_gain)
+    call write_hdf(file, "gain",              data%gain)
+    call write_hdf(file, "stats",             data%stats)
+    call write_hdf(file, "det_stats",         data%det_stats)
+    call write_hdf(file, "filter_par",        data%filter_par)
     call close_hdf_file(file)
-  end subroutine
-
-  subroutine write_hk_hdf(file, hk)
-    implicit none
-    type(hdf_file)  :: file
-    type(hk_struct) :: hk
-    if(allocated(hk%bias%time)) then
-      call create_hdf_group(file, "bias")
-      call write_hk_elem   (file, "bias", hk%bias)
-    end if
-    if(allocated(hk%cryo%time)) then
-      call create_hdf_group(file, "cryo")
-      call write_hk_elem   (file, "cryo", hk%cryo)
-    end if
-    if(allocated(hk%encl%time)) then
-      call create_hdf_group(file, "encl")
-      call write_hk_elem   (file, "encl", hk%encl)
-    end if
-    if(allocated(hk%peri%time)) then
-      call create_hdf_group(file, "peri")
-      call write_hk_elem   (file, "peri", hk%peri)
-    end if
-  end subroutine
-
-  subroutine write_hk_elem(file, name, hkt)
-    implicit none
-    type(hdf_file)   :: file
-    type(hk_type)    :: hkt
-    character(len=*) :: name
-    call write_hdf(file, trim(name) // "/time",  hkt%time)
-    call write_hdf(file, trim(name) // "/value", hkt%value)
   end subroutine
 
   ! Concatenate a set of lx_structs. We assume that:
@@ -345,12 +282,13 @@ contains
     end do
 
     ! These have fixed length
-    out%decimation = in(1)%decimation
-    out%samprate   = in(1)%samprate
-    out%coord_sys  = in(1)%coord_sys
-    out%scanfreq   = in(1)%scanfreq
-    out%pixsize    = in(1)%pixsize
-    out%point_lim  = in(1)%point_lim
+    out%decimation_time = in(1)%decimation_time
+    out%decimation_nu   = in(1)%decimation_nu
+    out%samprate        = in(1)%samprate
+    out%coord_sys       = in(1)%coord_sys
+    out%scanfreq        = in(1)%scanfreq
+    out%pixsize         = in(1)%pixsize
+    out%point_lim       = in(1)%point_lim
 
     ! These could actually differ between the files. We make
     ! a weighted average
@@ -372,8 +310,6 @@ contains
        end do
     end if
 
-    ! Ok, only housekeeping is left
-    call cat_hk_struct(in%hk, out%hk)
   end subroutine
 
 

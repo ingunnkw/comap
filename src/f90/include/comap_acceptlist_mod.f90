@@ -40,105 +40,99 @@ contains
     if (allocated(alist%status)) deallocate(alist%status)
   end subroutine deallocate_acceptlist
 
-  subroutine get_accepted_scans(alist, cnums)
+  subroutine get_accepted_scans(alist, snums)
     implicit none
     type(acceptlist)                        :: alist
-    integer(i4b), dimension(:), allocatable :: cnums
+    integer(i4b), dimension(:), allocatable :: snums
     integer(i4b)                            :: i, n
     n = 0
-    do i = 1, size(alist%status,3)
-       if(any(alist%status(:,:,i) == REJECTED_NONE)) n = n+1
+    do i = 1, size(alist%status,2)
+       if(any(alist%status(:,i) == REJECTED_NONE)) n = n+1
     end do
-    allocate(cnums(n))
+    allocate(snums(n))
     n = 0
-    do i = 1, size(alist%status,3)
-       if(any(alist%status(:,:,i) == REJECTED_NONE)) then
+    do i = 1, size(alist%status,2)
+       if(any(alist%status(:,i) == REJECTED_NONE)) then
           n = n+1
-          cnums(n) = i
+          snums(n) = i
        end if
     end do
   end subroutine
 
   ! Like above, but is seen as accepted if any of the alists accept it
-  subroutine get_accepted_scans_multi(alists, cnums)
+  subroutine get_accepted_scans_multi(alists, snums)
     implicit none
     type(acceptlist)                        :: alists(:)
-    integer(i4b), dimension(:), allocatable :: cnums
+    integer(i4b), dimension(:), allocatable :: snums
     integer(i4b)                            :: i, j, n
     n = 0
-    do i = 1, size(alists(1)%status,3)
+    do i = 1, size(alists(1)%status,2)
        do j = 1, size(alists)
-          if(any(alists(j)%status(:,:,i) == REJECTED_NONE)) then
+          if(any(alists(j)%status(:,i) == REJECTED_NONE)) then
              n = n+1
              exit
           end if
        end do
     end do
-    allocate(cnums(n))
+    allocate(snums(n))
     n = 0
-    do i = 1, size(alists(1)%status,3)
+    do i = 1, size(alists(1)%status,2)
        do j = 1, size(alists)
-          if(any(alists(j)%status(:,:,i) == REJECTED_NONE)) then
+          if(any(alists(j)%status(:,i) == REJECTED_NONE)) then
              n = n+1
-             cnums(n) = i
+             snums(n) = i
              exit
           end if
        end do
     end do
   end subroutine
 
-  function is_accepted(alist, cid, mod, di) result(res)
+  function is_accepted(alist, sid, det) result(res)
     implicit none
     type(acceptlist)       :: alist
-    integer(i4b)           :: cid, cnum
-    integer(i4b), optional :: mod, di
+    integer(i4b)           :: sid, snum
+    integer(i4b), optional :: det
     logical(lgt)           :: res
-    cnum = lookup_scan(cid)
-    if (present(di)) then
-       res  = alist%status(di,mod,cnum) == REJECTED_NONE
-    else if (present(mod)) then
-       res  = any(alist%status(:,mod,cnum) == REJECTED_NONE)
-    else 
-       res  = any(alist%status(:,:,cnum) == REJECTED_NONE)
+    snum = lookup_scan(sid)
+    if (present(det)) then
+       res  = alist%status(det,snum) == REJECTED_NONE
+     else 
+       res  = any(alist%status(:,snum) == REJECTED_NONE)
     end if
   end function is_accepted
 
-  subroutine accept(alist, cid, mod, di)
+  subroutine accept(alist, sid, det)
     implicit none
     type(acceptlist)  :: alist
-    integer(i4b), optional :: cid, mod, di
-    integer(i4b)      :: cnum
-    if (.not. present(cid)) then
+    integer(i4b), optional :: sid, det
+    integer(i4b)      :: snum
+    if (.not. present(sid)) then
        alist%status = REJECTED_NONE
        return
     end if
-    cnum = lookup_scan(cid)
-    if (cnum < 1 .or. cnum > alist%nscan) return
-    if (present(di)) then
-       alist%status(di,mod,cnum) = REJECTED_NONE
-    else if (present(mod)) then
-       alist%status(:,mod,cnum)  = REJECTED_NONE
+    snum = lookup_scan(sid)
+    if (snum < 1 .or. snum > alist%nscan) return
+    if (present(det)) then
+       alist%status(det,snum) = REJECTED_NONE
     else 
-       alist%status(:,:,cnum)    = REJECTED_NONE
+       alist%status(:,snum)    = REJECTED_NONE
     end if
   end subroutine accept
 
-  subroutine reject(alist, cid, mod, di, reason)
+  subroutine reject(alist, sid, det, reason)
     implicit none
     type(acceptlist)  :: alist
-    integer(i4b), optional :: cid, mod, di, reason
-    integer(i4b)      :: r, cnum
-    cnum = lookup_scan(cid)
-    if (cnum < 1 .or. cnum > alist%nscan) return
+    integer(i4b), optional :: sid, det, reason
+    integer(i4b)      :: r, snum
+    snum = lookup_scan(sid)
+    if (snum < 1 .or. snum > alist%nscan) return
     r = REJECTED_NOREASON; if(present(reason)) r = reason
-    if (present(di)) then
-       alist%status(di,mod,cnum) = r
-    else if (present(mod)) then
-       alist%status(:,mod,cnum)  = r
-    else if (present(cid)) then
-       alist%status(:,:,cnum)    = r
+    if (present(det)) then
+       alist%status(det,snum) = r
+    else if (present(sid)) then
+       alist%status(:,snum)   = r
     else
-       alist%status              = r
+       alist%status           = r
     end if
   end subroutine reject
 
@@ -147,7 +141,7 @@ contains
     character(len=*)    :: filename
     type(acceptlist)    :: alist
     character(len=1024) :: line
-    integer(i4b) :: i, unit, cid, mod, di, cnum, status, defval
+    integer(i4b) :: i, unit, sid, det, snum, status, defval
     integer(i4b), optional :: default
     integer(i4b), dimension(:,:), allocatable :: rejects
     ! Is this a dummy wildcard file? If so, don't add anything, but
@@ -165,36 +159,36 @@ contains
     do
        read(unit,fmt="(a)",end=2) line
        if(line(1:1) == '#') cycle
-       read(line,*) cid, mod, di, status
+       read(line,*) sid, det, status
        if (status == 1) then
-          call accept(alist, cid, mod, di)
+          call accept(alist, sid, det)
        else
-          call reject(alist, cid, mod, di, REJECTED_ALIST)
+          call reject(alist, sid, det, REJECTED_ALIST)
        end if
     end do
 2   close(unit)
   end subroutine initialize_accept_list
 
-  subroutine append_accept_list(filename, cid, alist)
+  subroutine append_accept_list(filename, sid, alist)
     implicit none
     character(len=*)    :: filename
-    integer(i4b)        :: cid
+    integer(i4b)        :: sid
     type(acceptlist)    :: alist
 
-    character(len=4096) :: line, diode
-    integer(i4b)        :: i, unit, cnum
+    character(len=4096) :: line
+    integer(i4b)        :: i, unit, snum
 
-    cnum = lookup_scan(cid)
-    if (cnum < 1 .or. cnum > alist%nscan) return
+    snum = lookup_scan(sid)
+    if (snum < 1 .or. snum > alist%nscan) return
 
     ! Write line to file
     unit = getlun()
     open(unit,file=filename,action="write",position="append",recl=4096)
     do i = 1, alist%ndet
-       if (alist%status(j,i,cnum) == REJECTED_NONE) then
-          write(*,fmt='(i7,i5,i3,i3)') cid, i, 1
+       if (alist%status(i,snum) == REJECTED_NONE) then
+          write(*,fmt='(i7,i5,i3,i3)') sid, i, 1
        else
-          write(*,fmt='(i7,i5,i3,i3)') cid, i, 0
+          write(*,fmt='(i7,i5,i3,i3)') sid, i, 0
        end if
     end do
     close(unit)

@@ -91,17 +91,6 @@ module l1_read_mod
      type(RQ_struct), allocatable, dimension(:)   :: RQ
   end type data_struct
 
-  type hk_type
-     integer(i4b)                                    :: n, n_t
-     character(len=128), allocatable, dimension(:)   :: name
-     real(dp),           allocatable, dimension(:)   :: time
-     real(dp),           allocatable, dimension(:,:) :: value
-  end type hk_type
-
-  type hk_struct
-     type(hk_type) :: bias, cryo, encl, peri, apex
-  end type hk_struct
-
   type point_struct
      real(dp)                                :: start_mjd
      integer(i2b), allocatable, dimension(:) :: mode
@@ -112,9 +101,6 @@ module l1_read_mod
   end type point_struct
 
   integer(i4b), parameter :: default_scale = 6880
-
-  ! Definition of housekeepking variables
-  integer(i4b), parameter :: num_biasmon = 24
 
   ! This would look better with an enumeration. Do those exist in fortran?
   integer(i4b), parameter :: point_mode = 1

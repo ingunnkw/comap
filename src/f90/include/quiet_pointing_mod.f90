@@ -3,7 +3,7 @@ module quiet_pointing_mod
   use pix_tools
   use quiet_utils
   use math_tools
-  use l1_read_mod
+  !use l1_read_mod
   use quiet_module_mod
   use quiet_pmac_mod
   !use quiet_ces_mod
