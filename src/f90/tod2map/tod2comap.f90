@@ -1,6 +1,6 @@
 program tod2comap
   use comap_lx_mod
-  use comap_ces_mod
+  use comap_scan_mod
   use quiet_fft_mod
   implicit none
 
@@ -27,7 +27,7 @@ program tod2comap
   type(lx_struct) :: data
   type(comap_scan_info)  :: scan
 
-  character(len=512) :: filename, parfile, acceptfile
+  character(len=512) :: filename, parfile, acceptfile, prefix
   integer(i4b)       :: nscan, i, j, k
   !integer(i4b)  :: myid, numprocs, ierr, root
 
@@ -38,25 +38,25 @@ program tod2comap
   !call mpi_finalize(ierr)
 
   parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
-  acceptfile = '/mn/stornext/d5/comap/protodir/acceptlist.txt'
+  !acceptfile = '/mn/stornext/d5/comap/protodir/acceptlist.txt'
 
   call initialize_scan_mod(parfile)
 
-  nscan = get_num_scan()
+  nscan = get_num_scans()
 
   do i = 1, nscan 
      call get_scan_info(i,scan)
      filename = scan%l3file
-     !filename = '/mn/stornext/comap/protodir/level3/Ka/lissajous/patch1/patch1_1.h5'
+     prefix = 'files/'//scan%object//'_'//trim(itoa(scan%cid)) ! patchID_scanID
      write(*,*) i, 'of', nscan
-     write(*,*) 'Get TOD ...'
-     call get_tod(filename, data, tod)
-     write(*,*) 'Write TOD to file ...'
-     call output_tod('files/test', 1, tod)
-     write(*,*) 'Compute maps ...'
+     !write(*,*) 'Get TOD ...'
+     call get_tod(trim(filename), data, tod)
+     !write(*,*) 'Write TOD to file ...'
+     call output_tod(trim(prefix), 1, tod)
+     !write(*,*) 'Compute maps ...'
      call compute_maps(data, tod, map)
-     write(*,*) 'Write maps to file ...'
-     call output_maps('files/test', map)
+     !write(*,*) 'Write maps to file ...'
+     call output_maps(trim(prefix), map)
   end do
 
   write(*,*) 'Done'
