@@ -1,4 +1,4 @@
-module comap_Lx_mod
+module comap_lx_mod
   use healpix_types
   use comap_defs
   use quiet_hdf_mod
@@ -8,7 +8,7 @@ module comap_Lx_mod
 
   include "mpif.h"
 
-  type Lx_struct
+  type lx_struct
      !! The level1 and level2 part, present in all files.
      integer(i4b)                                    :: decimation_time, decimation_nu
      real(dp)                                        :: samprate
@@ -18,22 +18,22 @@ module comap_Lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
-     integer(i4b), allocatable, dimension(:)         :: status      ! Status flag per time sample
+     integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
 
      !! The level3 part, which is only present in level3-files
-     integer(i4b)                                 :: coord_sys
-     real(dp)                                     :: scanfreq(2), pixsize, point_lim(4)
-     real(sp),     allocatable, dimension(:,:)    :: point        ! Gal; (phi/theta/psi,time,mod)
+     integer(i4b)                                   :: coord_sys
+     real(dp)                                       :: scanfreq(2), pixsize, point_lim(4)
+     real(sp),     allocatable, dimension(:,:)      :: point     ! Gal; (phi/theta/psi,time,mod)
 
      real(dp),     allocatable, dimension(:)        :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
      real(dp),     allocatable, dimension(:,:,:,:)  :: corr                 ! (freq, freq, detector, detector)
      real(dp)                                       :: stats(ST_NUM)
-     real(dp),     allocatable, dimension(:,:,:)    :: det_stats                ! (freq, detector, stat)
+     real(dp),     allocatable, dimension(:,:,:)    :: det_stats            ! (freq, detector, stat)
      real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
 
-  end type Lx_struct
+  end type lx_struct
 
 contains
 
@@ -46,15 +46,21 @@ contains
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
-    ndet = ext(1); nsb = ext(2); nfreq = ext(3); nsamp = ext(4)
+    nsamp = ext(4); nfreq = ext(3) ; nsb = ext(2); ndet = ext(1)
     call get_size_hdf(file, "point", ext)
     npoint = ext(2)
-    allocate(data%time(nsamp), data%tod_l1(nsamp,nfreq,nsb,ndet))
+    allocate(data%time(nsamp), data%nu_l1(nsamp,nsb))
+    allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     allocate(data%orig_point(npoint,nsamp))
-    call read_hdf(file, "samprate",   data%samprate)
-    call read_hdf(file, "time",       data%time)
-    call read_hdf(file, "tod",        data%tod_l1)
-    call read_hdf(file, "point", data%orig_point)
+    allocate(data%flag(nsamp))
+    call read_hdf(file, "decimation_time", data%decimation_time)
+    call read_hdf(file, "decimation_nu",   data%decimation_nu)
+    call read_hdf(file, "samprate",        data%samprate)
+    call read_hdf(file, "time",            data%time)
+    call read_hdf(file, "nu",              data%nu_l1)
+    call read_hdf(file, "tod",             data%tod_l1)
+    call read_hdf(file, "point",           data%orig_point)
+    call read_hdf(file, "flag",            data%flag)
     call close_hdf_file(file)
   end subroutine read_l1_file
 
@@ -69,7 +75,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet), data%flag(nsamp))
     call get_size_hdf(file, "orig_point", ext)
     npoint = ext(1); nsamp = ext(2)
     allocate(data%orig_point(npoint,nsamp), data%nu(nfreq))
@@ -80,6 +86,7 @@ contains
     call read_hdf(file, "nu",               data%nu)
     call read_hdf(file, "tod",              data%tod)
     call read_hdf(file, "orig_point",       data%orig_point)
+    call read_hdf(file, "flag",             data%flag)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -313,5 +320,5 @@ contains
   end subroutine
 
 
-end module comap_Lx_mod
+end module comap_lx_mod
 
