@@ -10,7 +10,6 @@ module comap_lx_mod
   type lx_struct
      ! Level 1 fields
      real(dp)                                        :: mjd_start
-     integer(i4b)                                    :: decimation_time, decimation_nu
      real(dp)                                        :: samprate
      real(dp),     allocatable, dimension(:)         :: time
      real(dp),     allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
@@ -22,20 +21,20 @@ module comap_lx_mod
 
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
+     integer(i4b)                                    :: decimation_time, decimation_nu
      real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
      real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp),     allocatable, dimension(:,:)       :: point       ! Sky coordinates; (phi/theta/psi,time)
 
      ! Level 3 fields
-     integer(i4b)                                   :: coord_sys
-     real(dp)                                       :: scanfreq(2), pixsize, point_lim(4)
-
-     real(dp),     allocatable, dimension(:)        :: time_gain            ! (time)
-     real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
-     real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
-     real(dp)                                       :: stats(ST_NUM)
-     real(dp),     allocatable, dimension(:,:,:)    :: det_stats            ! (freq, detector, stat)
-     real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
+     integer(i4b)                                    :: coord_sys
+     real(dp)                                        :: scanfreq(2), pixsize, point_lim(4)
+     real(dp),     allocatable, dimension(:)         :: time_gain            ! (time)
+     real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (time, freq, detector)
+     real(dp),     allocatable, dimension(:,:)       :: sigma0, alpha, fknee ! (freq, detector)
+     real(dp)                                        :: stats(ST_NUM)
+     real(dp),     allocatable, dimension(:,:,:)     :: det_stats            ! (freq, detector, stat)
+     real(dp),     allocatable, dimension(:,:,:)     :: filter_par           ! (freq, detector, param)
 
   end type lx_struct
 
@@ -52,26 +51,22 @@ contains
     all = .true.; if (present(only_point)) all = .not. only_point
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
-    call get_size_hdf(file, "tod", ext)
-    nsamp = ext(4); nfreq = ext(3) ; nsb = ext(2); ndet = ext(1)
-    call get_size_hdf(file, "point", ext)
-    npoint = ext(2)
+    call get_size_hdf(file, "tod_l1", ext)
+    nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
              allocate(data%time(nsamp))
-             allocate(data%point_tel(npoint,nsamp))
-             allocate(data%point_cel(npoint,nsamp))
+             allocate(data%point_tel(3,nsamp))
+             allocate(data%point_cel(3,nsamp))
     if (all) allocate(data%nu_l1(nsamp,nsb))
     if (all) allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
     if (all) allocate(data%scanmode_l1(nsamp))
-    call read_hdf(file, "start_mjd",            data%decimation_time)
-    call read_hdf(file, "decimation_time",      data%decimation_time)
-    call read_hdf(file, "decimation_nu",        data%decimation_nu)
+    call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
     call read_hdf(file, "time",                 data%time)
-    call read_hdf(file, "point_tel",            data%point_tel)
+    !call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
-    if (all) call read_hdf(file, "nu",          data%nu_l1)
-    if (all) call read_hdf(file, "tod",         data%tod_l1)
+    if (all) call read_hdf(file, "nu_l1",       data%nu_l1)
+    if (all) call read_hdf(file, "tod_l1",      data%tod_l1)
     if (all) call read_hdf(file, "flag",        data%flag)
     if (all) call read_hdf(file, "scanmode_l1", data%flag)
     call close_hdf_file(file)
