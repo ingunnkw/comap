@@ -74,6 +74,7 @@ quiet_pointing_mod.o     : quiet_utils.o math_tools.o quiet_pmac_mod.o
 comap_pointing_mod.o     : quiet_utils.o math_tools.o 
 scalautils.o             : quiet_mpi_mod.o scalawrap.o
 quiet_noise_estimation_mod.o : quiet_utils.o quiet_fft_mod.o 
+comap_noise_estimation_mod.o : quiet_utils.o quiet_fft_mod.o 
 quiet_module_mod.o       : quiet_utils.o quiet_detector_mod.o
 quiet_todsim_mod.o       : quiet_gain_mod.o quiet_assembly_mod.o ziggurat.o
 quiet_stat_mod.o         : math_tools.o
