@@ -32,24 +32,17 @@ contains
 
   ! Public interface: These are meant to be called from outside.
 
-  subroutine initialize_scan_mod(parfile, planck)
+  subroutine initialize_scan_mod(parfile)
     implicit none
     character(len=*)       :: parfile
     character(len=512)     :: runlist
-    logical(lgt), optional :: planck
-    logical(lgt)           :: planck_
     if(initialized) return
     call get_parameter(0, parfile, 'RUNLIST',     par_string=runlist)
     call get_parameter(0, parfile, 'LEVEL1_DIR',  par_string=l1dir)
     call get_parameter(0, parfile, 'LEVEL2_DIR',  par_string=l2dir)
     call get_parameter(0, parfile, 'LEVEL3_DIR',  par_string=l3dir)
 
-    planck_ = .false.; if(present(planck)) planck_ = planck
-    if (planck_) then
-       call read_runlist_planck(runlist, l2dir, l3dir, scan_db)
-    else
-       call read_runlist(runlist, l1dir, l2dir, l3dir, scan_db)
-    end if
+    call read_runlist(runlist, l1dir, l2dir, l3dir, scan_db)
     allocate(cid_list(scan_db%n), cid_sort(scan_db%n))
     cid_list = scan_db%scans%cid
     cid_sort = cid_list
@@ -155,38 +148,6 @@ contains
     end do
     runlist%n = size(runlist%scans)
   end subroutine read_runlist
-
-  subroutine read_runlist_planck(file, l2dir, l3dir, runlist)
-    implicit none
-    character(len=*)   :: file
-    character(len=512) :: name, l2dir, l3dir
-    integer(i4b)       :: unit, nobj, nscan, nfile, cid, i, cmax
-    real(dp)           :: mjd(2)
-    type(comap_runlist):: runlist
-    type(comap_scan_info)    :: scan
-    call free_runlist(runlist)
-    unit = getlun()
-    open(unit,file=file,action="read",status="old")
-    read(unit,*) name, nscan
-    allocate(runlist%scans(nscan))
-    do i = 1, nscan
-       read(unit,*) scan%cid
-       scan%object      = name
-       scan%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(itoa(scan%cid)) // ".h5"
-       scan%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(itoa(scan%cid)) // ".h5"
-       call copy_scan_info(scan, runlist%scans(i))
-       call free_scan_info(scan)
-    end do
-    close(unit)
-    ! Set up the cid mapping
-    cmax = maxval(runlist%scans%cid)
-    allocate(runlist%cidmap(cmax))
-    runlist%cidmap = 0
-    do i = 1, size(runlist%scans)
-       runlist%cidmap(runlist%scans(i)%cid) = i
-    end do
-    runlist%n = size(runlist%scans)
-  end subroutine read_runlist_planck
 
   function count_num_scan(file) result(n)
     implicit none
