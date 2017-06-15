@@ -1,12 +1,11 @@
 module comap_lx_mod
   use healpix_types
   use comap_defs
+  use quiet_mpi_mod
   use quiet_hdf_mod
   use quiet_fft_mod
   use quiet_utils
   implicit none
-
-  include "mpif.h"
 
   type lx_struct
      !! The level1 and level2 part, present in all files.
