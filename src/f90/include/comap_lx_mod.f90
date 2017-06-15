@@ -190,9 +190,13 @@ contains
     implicit none
     type(lx_struct) :: data
     if(allocated(data%time))        deallocate(data%time)
+    if(allocated(data%nu))          deallocate(data%nu)
+    if(allocated(data%nu_l1))       deallocate(data%nu_l1)
     if(allocated(data%tod))         deallocate(data%tod)
     if(allocated(data%tod_l1))      deallocate(data%tod_l1)
     if(allocated(data%orig_point))  deallocate(data%orig_point)
+    if(allocated(data%scanmode_l1)) deallocate(data%scanmode_l1)
+    if(allocated(data%flag))        deallocate(data%flag)
 
     if(allocated(data%point))       deallocate(data%point)
     if(allocated(data%time_gain))   deallocate(data%time_gain)
