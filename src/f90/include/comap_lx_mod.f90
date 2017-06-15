@@ -52,9 +52,9 @@ contains
     all = .true.; if (present(only_point)) all = .not. only_point
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
-    call get_size_hdf(file, "tod", ext)
+    call get_size_hdf(file, "tod_l1", ext)
     nsamp = ext(4); nfreq = ext(3) ; nsb = ext(2); ndet = ext(1)
-    call get_size_hdf(file, "point", ext)
+    call get_size_hdf(file, "point_tel", ext)
     npoint = ext(2)
              allocate(data%time(nsamp))
              allocate(data%point_tel(npoint,nsamp))
@@ -73,7 +73,7 @@ contains
     if (all) call read_hdf(file, "nu_l1",          data%nu_l1)
     if (all) call read_hdf(file, "tod_l1",         data%tod_l1)
     if (all) call read_hdf(file, "flag",        data%flag)
-    if (all) call read_hdf(file, "scanmode_l1", data%flag)
+    if (all) call read_hdf(file, "scanmode_l1", data%scanmode_l1)
     call close_hdf_file(file)
   end subroutine read_l1_file
 
