@@ -8,29 +8,31 @@ module comap_lx_mod
   implicit none
 
   type lx_struct
-     !! The level1 and level2 part, present in all files.
+     ! Level 1 fields
      real(dp)                                        :: mjd_start
      integer(i4b)                                    :: decimation_time, decimation_nu
-     integer(i4b)                                    :: scanmode
      real(dp)                                        :: samprate
      real(dp),     allocatable, dimension(:)         :: time
-     real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
      real(dp),     allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
-     real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
-     real(sp),     allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
+     real(sp),     allocatable, dimension(:,:)       :: point_cel   ! Celestial; (RA/dec/psi, time)
+     real(sp),     allocatable, dimension(:,:)       :: point_tel   ! Horizon; (az/el/dk, time)
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
 
-     !! The level3 part, which is only present in level3-files
+     ! Level 2 fields
+     integer(i4b)                                    :: scanmode
+     real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
+     real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
+     real(sp),     allocatable, dimension(:,:)       :: point       ! Sky coordinates; (phi/theta/psi,time)
+
+     ! Level 3 fields
      integer(i4b)                                   :: coord_sys
      real(dp)                                       :: scanfreq(2), pixsize, point_lim(4)
-     real(sp),     allocatable, dimension(:,:)      :: point     ! Gal; (phi/theta/psi,time,mod)
 
      real(dp),     allocatable, dimension(:)        :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:)    :: gain                 ! (time, freq, detector)
      real(dp),     allocatable, dimension(:,:)      :: sigma0, alpha, fknee ! (freq, detector)
-     real(dp),     allocatable, dimension(:,:,:,:)  :: corr                 ! (freq, freq, detector, detector)
      real(dp)                                       :: stats(ST_NUM)
      real(dp),     allocatable, dimension(:,:,:)    :: det_stats            ! (freq, detector, stat)
      real(dp),     allocatable, dimension(:,:,:)    :: filter_par           ! (freq, detector, param)
@@ -55,7 +57,8 @@ contains
     call get_size_hdf(file, "point", ext)
     npoint = ext(2)
              allocate(data%time(nsamp))
-             allocate(data%orig_point(npoint,nsamp))
+             allocate(data%point_tel(npoint,nsamp))
+             allocate(data%point_cel(npoint,nsamp))
     if (all) allocate(data%nu_l1(nsamp,nsb))
     if (all) allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
@@ -65,7 +68,8 @@ contains
     call read_hdf(file, "decimation_nu",        data%decimation_nu)
     call read_hdf(file, "samprate",             data%samprate)
     call read_hdf(file, "time",                 data%time)
-    call read_hdf(file, "orig_point",           data%orig_point)
+    call read_hdf(file, "point_tel",            data%point_tel)
+    call read_hdf(file, "point_cel",            data%point_cel)
     if (all) call read_hdf(file, "nu",          data%nu_l1)
     if (all) call read_hdf(file, "tod",         data%tod_l1)
     if (all) call read_hdf(file, "flag",        data%flag)
@@ -85,16 +89,17 @@ contains
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
     allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet), data%flag(nsamp))
-    call get_size_hdf(file, "orig_point", ext)
+    call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
-    allocate(data%orig_point(npoint,nsamp), data%nu(nfreq))
+    allocate(data%point_tel(npoint,nsamp), data%point_cel(npoint,nsamp), data%nu(nfreq))
     call read_hdf(file, "decimation_time",  data%decimation_time)
     call read_hdf(file, "decimation_nu",    data%decimation_nu)
     call read_hdf(file, "samprate",         data%samprate)
     call read_hdf(file, "time",             data%time)
     call read_hdf(file, "nu",               data%nu)
     call read_hdf(file, "tod",              data%tod)
-    call read_hdf(file, "orig_point",       data%orig_point)
+    call read_hdf(file, "point_tel",        data%point_tel)
+    call read_hdf(file, "point_cel",        data%point_cel)
     call read_hdf(file, "flag",             data%flag)
     call close_hdf_file(file)
   end subroutine read_l2_file
@@ -194,7 +199,8 @@ contains
     if(allocated(data%nu_l1))       deallocate(data%nu_l1)
     if(allocated(data%tod))         deallocate(data%tod)
     if(allocated(data%tod_l1))      deallocate(data%tod_l1)
-    if(allocated(data%orig_point))  deallocate(data%orig_point)
+    if(allocated(data%point_tel))   deallocate(data%point_tel)
+    if(allocated(data%point_cel))   deallocate(data%point_cel)
     if(allocated(data%scanmode_l1)) deallocate(data%scanmode_l1)
     if(allocated(data%flag))        deallocate(data%flag)
 
@@ -204,7 +210,6 @@ contains
     if(allocated(data%sigma0))      deallocate(data%sigma0)
     if(allocated(data%alpha))       deallocate(data%alpha)
     if(allocated(data%fknee))       deallocate(data%fknee)
-    if(allocated(data%corr))        deallocate(data%corr)
     if(allocated(data%det_stats))   deallocate(data%det_stats)
     if(allocated(data%filter_par))  deallocate(data%filter_par)
   end subroutine
@@ -220,7 +225,8 @@ contains
     call write_hdf(file, "decimation_nu",     data%decimation_nu)
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "tod",               data%tod)
-    call write_hdf(file, "orig_point",        data%orig_point)
+    call write_hdf(file, "point_cel",         data%point_cel)
+    call write_hdf(file, "point_tel",         data%point_tel)
     call close_hdf_file(file)
   end subroutine
 
@@ -241,12 +247,12 @@ contains
     call write_hdf(file, "pixsize",           data%pixsize)
     call write_hdf(file, "point_lim",         data%point_lim)
     call write_hdf(file, "tod",               data%tod)
-    call write_hdf(file, "orig_point",        data%orig_point)
+    call write_hdf(file, "point_tel",         data%point_tel)
+    call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point",             data%point)
     call write_hdf(file, "sigma0",            data%sigma0)
     call write_hdf(file, "alpha",             data%alpha)
     call write_hdf(file, "fknee",             data%fknee)
-    call write_hdf(file, "corr",              data%corr)
     call write_hdf(file, "time_gain",         data%time_gain)
     call write_hdf(file, "gain",              data%gain)
     call write_hdf(file, "stats",             data%stats)
@@ -278,7 +284,7 @@ contains
       n = n + size(in(i)%time)
       if(l3) ng = ng + size(in(i)%time_gain)
     end do
-    allocate(out%time(n), out%tod(n,nf,ndet), out%orig_point(3,n))
+    allocate(out%time(n), out%tod(n,nf,ndet), out%point_tel(3,n), out%point_cel(3,n))
     if(l3) then
        allocate(out%point(3,n))!,size(in(1)%point)))
        allocate(out%time_gain(ng), out%gain(ng,nf,ndet))
@@ -290,7 +296,8 @@ contains
        m  = size(in(i)%time)
        out%time       (  1+j:m+j  )   = in(i)%time
        out%tod        (  1+j:m+j,:,:) = in(i)%tod
-       out%orig_point (:,1+j:m+j  )   = in(i)%orig_point
+       out%point_tel  (:,1+j:m+j  )   = in(i)%point_tel
+       out%point_cel  (:,1+j:m+j  )   = in(i)%point_cel
        if(l3) then
           mg = size(in(i)%time_gain)
           out%point(:,1+j:m+j)          = in(i)%point
@@ -313,17 +320,16 @@ contains
     ! These could actually differ between the files. We make
     ! a weighted average
     if(l3) then
-       allocate(out%sigma0(nf,ndet), out%alpha(nf,ndet), out%fknee(nf,ndet), out%corr(nf,nf,ndet,ndet))
+       allocate(out%sigma0(nf,ndet), out%alpha(nf,ndet), out%fknee(nf,ndet))
        allocate(out%det_stats(ndet,nf,size(in(1)%det_stats,2)))
        allocate(out%filter_par(ndet,nf,size(in(1)%filter_par,2)))
-       out%sigma0 = 0; out%alpha = 0; out%fknee = 0; out%corr = 0
+       out%sigma0 = 0; out%alpha = 0; out%fknee = 0
        out%stats  = 0; out%det_stats = 0; out%filter_par = 0
        do i = 1, size(in)
           f = real(size(in(i)%time),dp)/n
           out%sigma0 = out%sigma0 + in(i)%sigma0 * f
           out%alpha  = out%alpha  + in(i)%alpha  * f
           out%fknee  = out%fknee  + in(i)%fknee  * f
-          out%corr   = out%corr   + in(i)%corr   * f
           out%stats  = out%stats  + in(i)%stats  * f
           out%det_stats  = out%det_stats  + in(i)%det_stats*f
           out%filter_par = out%filter_par + in(i)%filter_par*f
