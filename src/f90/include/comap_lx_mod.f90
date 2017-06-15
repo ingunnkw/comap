@@ -10,7 +10,9 @@ module comap_lx_mod
 
   type lx_struct
      !! The level1 and level2 part, present in all files.
+     real(dp)                                        :: mjd_start
      integer(i4b)                                    :: decimation_time, decimation_nu
+     integer(i4b)                                    :: scanmode
      real(dp)                                        :: samprate
      real(dp),     allocatable, dimension(:)         :: time
      real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
@@ -18,6 +20,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
+     integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
 
      !! The level3 part, which is only present in level3-files
@@ -37,12 +40,14 @@ module comap_lx_mod
 
 contains
 
-  subroutine read_l1_file(filename, data)
+  subroutine read_l1_file(filename, data, only_point)
     implicit none
-    character(len=*), intent(in) :: filename
-    type(lx_struct)              :: data
-    type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, nfreq, ndet, npoint, nsb, ext(7)
+    character(len=*), intent(in)           :: filename
+    logical(lgt),     intent(in), optional :: only_point
+    type(lx_struct)                        :: data
+    type(hdf_file)                         :: file
+    integer(i4b)                           :: nsamp, nfreq, ndet, npoint, nsb, ext(7)
+    logical(lgt)                           
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
