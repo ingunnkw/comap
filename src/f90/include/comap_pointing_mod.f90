@@ -79,7 +79,7 @@ contains
     if(initialized) return
     call initialize_simple_pointing
     call init_detector_mod(paramfile)
-    call setup_diode_euler_matrices(diode_euler)
+    call setup_detector_euler_matrices(diode_euler)
 
     next_step = &
       & transpose(reshape((/ &
@@ -276,7 +276,6 @@ contains
     integer(i4b), intent(in)           :: det_id
     real(dp), dimension(3,3)           :: mat
     integer(i4b)                       :: di
-    call verify_detector(det_id)
     mat = diode_euler(:,:,det_id)
   end function
 
@@ -460,7 +459,7 @@ contains
     allocate(mats(3,3,0:ndet))
     call compute_euler_matrix_zyz(-pi, 0d0, pi, mats(:,:,0))
     do i = 1, ndet
-       call get_module_pos(i, theta, phi)
+       call get_detector_pos(i, theta, phi)
        call compute_euler_matrix_zyz(phi-pi, theta, -phi+pi, mats(:,:,i))
     end do
   end subroutine setup_detector_euler_matrices
@@ -478,7 +477,7 @@ contains
   subroutine update_pointing_mod
     implicit none
     deallocate(diode_euler)
-    call setup_diode_euler_matrices(diode_euler)
+    call setup_detector_euler_matrices(diode_euler)
   end subroutine
 
 end module comap_pointing_mod
