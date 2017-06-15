@@ -16,12 +16,12 @@ OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_sidelobe_mod.o quiet_fft_mod.o \
          quiet_i2qu_mod.o quiet_mask_mod.o quiet_pmac_mod.o \
          quiet_assembly_mod.o quiet_filter_mod.o quiet_postutils.o \
-         quiet_noise_estimation_mod.o quiet_patch_mod.o quiet_todsim_mod.o \
+         quiet_noise_estimation_mod.o comap_patch_mod.o quiet_todsim_mod.o \
          quiet_glitchy_noise_mod.o quiet_task_mod.o \
          quiet_system_mod.o quiet_system_backend.o \
          quiet_shared_output_mod.o ziggurat.o sdeOOF.o quiet_status_mod.o \
          quiet_stat_mod.o quiet_ephem_backend.o locate_mod.o \
-         quiet_constrained_mod.o quiet_patch_detect_mod.o quiet_typeb_mod.o \
+         quiet_constrained_mod.o comap_patch_detect_mod.o quiet_typeb_mod.o \
          quiet_pointing_mod2.o quiet_covfile_mod.o quiet_angcorr_mod.o  \
          quiet_ephem_mod.o ../../cpp/ephcom/ephcom.o ../../cpp/ephcom/gnulliver.o wmap_beam_mod.o \
 
@@ -43,10 +43,10 @@ quiet_pmac_mod.o         : quiet_utils.o locate_mod.o quiet_fileutils.o
 quiet_detector_mod.o     : quiet_utils.o
 comap_detector_mod.o     : quiet_utils.o
 quiet_mask_mod.o         : quiet_utils.o quiet_fileutils.o
-quiet_patch_detect_mod.o : quiet_patch_mod.o comap_detector_mod.o quiet_pointing_mod.o
-quiet_patch_mod.o        : quiet_utils.o quiet_ephem_mod.o
+comap_patch_detect_mod.o : comap_patch_mod.o comap_detector_mod.o quiet_pointing_mod.o
+comap_patch_mod.o        : quiet_utils.o quiet_ephem_mod.o
 quiet_constrained_mod.o  : quiet_utils.o quiet_fft_mod.o math_tools.o
-quiet_ephem_mod.o        : quiet_pointing_mod.o
+quiet_ephem_mod.o        : comap_pointing_mod.o
 quiet_healpix_mod.o      : quiet_utils.o quiet_system_mod.o
 quiet_pixspace_mod.o     : quiet_utils.o quiet_fileutils.o math_tools.o spline_1D_mod.o
 quiet_shared_output_mod.o : quiet_system_mod.o quiet_utils.o quiet_mpi_mod.o
