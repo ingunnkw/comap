@@ -42,6 +42,26 @@ module quiet_utils
      module procedure dump_matrix_mat, dump_matrix_vec
   end interface
 
+  interface make_angles_safe
+     module procedure make_angles_safe_sp, make_angles_safe_dp
+  end interface
+
+  interface normalize_angles
+     module procedure normalize_angles_sp, normalize_angles_dp
+  end interface
+
+  interface fmod
+     module procedure fmod_sp, fmod_dp
+  end interface
+
+  interface mean
+     module procedure mean_sp, mean_dp
+  end interface
+
+  interface variance
+     module procedure variance_sp, variance_dp
+  end interface
+
   integer(i4b), parameter, private :: benchmax = 1024, benchomp = 32
   type benchmarker
      character(len=32) :: name(benchmax)
@@ -1023,17 +1043,29 @@ contains
     deallocate(tmp)
   end function
 
-  function mean(array) result(res)
+  function mean_dp(array) result(res)
     implicit none
     real(dp) :: array(:), res
     res = sum(array)/size(array)
-  end function mean
+  end function mean_dp
 
-  function variance(array) result(res)
+  function variance_dp(array) result(res)
     implicit none
     real(dp) :: array(:), res
     res = sum((array-mean(array))**2)/(size(array)-1)
-  end function
+  end function variance_dp
+
+  function mean_sp(array) result(res)
+    implicit none
+    real(sp) :: array(:), res
+    res = sum(array)/size(array)
+  end function mean_sp
+
+  function variance_sp(array) result(res)
+    implicit none
+    real(sp) :: array(:), res
+    res = sum((array-mean(array))**2)/(size(array)-1)
+  end function variance_sp
 
   subroutine median_filter(iarr, oarr, width, thinning)
     implicit none
@@ -1694,13 +1726,19 @@ contains
     res = s*res
   end function
 
-  function fmod(a,b) result(c)
+  function fmod_dp(a,b) result(c)
     implicit none
     real(dp) :: a, b, c
     c = a - floor(a/b)*b
   end function
 
-  subroutine normalize_angles(array, maxang)
+  function fmod_sp(a,b) result(c)
+    implicit none
+    real(sp) :: a, b, c
+    c = a - floor(a/b)*b
+  end function
+
+  subroutine normalize_angles_dp(array, maxang)
     implicit none
     real(dp) :: array(:), maxang
     integer(i4b) :: i
@@ -1709,9 +1747,39 @@ contains
     end do
   end subroutine
 
-  subroutine make_angles_safe(array, maxang)
+  subroutine normalize_angles_sp(array, maxang)
+    implicit none
+    real(sp) :: array(:), maxang
+    integer(i4b) :: i
+    do i = 1, size(array)
+      array(i) = fmod(array(i), maxang)
+    end do
+  end subroutine
+
+  subroutine make_angles_safe_dp(array, maxang)
     implicit none
     real(dp) :: array(:), offset, maxang, tol, tmp
+    integer(i4b) :: i
+    call normalize_angles(array, maxang)
+    tol = maxang/4
+    offset = 0
+    do i = 2, size(array)
+       tmp = array(i)+offset-array(i-1)
+       if(abs(tmp) > tol) then
+          if(tmp > 0) then
+             offset = offset - maxang
+          else
+             offset = offset + maxang
+          end if
+       end if
+       array(i) = array(i) + offset
+    end do
+  end subroutine
+
+  subroutine make_angles_safe_sp(array, maxang)
+    implicit none
+    real(sp) :: array(:), maxang
+    real(dp) :: offset, tol, tmp
     integer(i4b) :: i
     call normalize_angles(array, maxang)
     tol = maxang/4
