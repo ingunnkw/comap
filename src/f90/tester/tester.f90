@@ -23,6 +23,7 @@ program tester
    use quiet_noise_estimation_mod
    use quiet_healpix_mod
    use alm_tools
+   use l1_read_comap_mod
    implicit none
 
    real(dp)              :: powell_dk_real(4)
@@ -39,10 +40,11 @@ program tester
 
    call getarg(1, cmd)
    select case(cmd)
+      case("hw"); call hello_world
       !case("indexsmooth"); call indexsmooth
       !case("sample_pol_multipole"); call sample_pol_multipole
       !case("print_fg_spectra"); call print_fg_spectra
-      case("chisq_test"); call chisq_test
+!!$      case("chisq_test"); call chisq_test
 !!$      case("rdhdf");    call rdhdf
 !!$      case("rdfits");   call rdfits
 !!$      case("mkhdf");    call mkhdf
@@ -78,16 +80,26 @@ program tester
 !!$      case("solve");    call covtest2
 !!$      case("test");     call covtest3
 !!$      case("r2c");      call r2c
-
+      end select
 contains
 
-  subroutine chisq_test
-    implicit none
-
-    type(planck_rng) :: handle
-    integer(i4b)     :: n, i, j, l, m
-    real(dp)         :: cl, cl_theory, dl, dl_theory
-    real(dp), dimension(100) :: s
+  subroutine hello_world
+    type(point_type)      :: mypoint
+    integer(i4b)          :: st
+    !call allocate_point_type(100, mypoint)
+    write(*,*) "Hello World"
+    call l1_read_point("/mn/stornext/d5/comap/protodir/level1/2017/01/data_20h_1046_lvl1.h5", pointing=mypoint, status_code=st)
+    write(*,*) mypoint%time(43)
+    !call deallocate_point_type(mypoint)
+  end subroutine hello_world
+!!$
+!!$  subroutine chisq_test
+!!$    implicit none
+!!$
+!!$    type(planck_rng) :: handle
+!!$    integer(i4b)     :: n, i, j, l, m
+!!$    real(dp)         :: cl, cl_theory, dl, dl_theory
+!!$    real(dp), dimension(100) :: s
 
 !!$    n         = 1000000
 !!$    l         = 2
@@ -105,160 +117,160 @@ contains
 !!$       write(58,*) i, dl
 !!$    end do
 !!$    close(58)
-
-    n = 100000
-    m = 100
-    call rand_init(handle, 3741)
-    open(58,file='samples.dat')
-    do i = 1, n
-       do j = 1, m
-          s(j) = rand_gauss(handle)
-       end do
-       write(58,*) i, mean(s(1:78)*sqrt(78.d0)), mean(s(1:93)*sqrt(93.d0))
-    end do
-    close(58)
-
-    
-  end subroutine chisq_test
-  
-  subroutine sample_pol_multipole
-    implicit none
-
-    integer(i4b), parameter :: nmaps = 3
-    integer(i4b) :: i, j, k, n, l, ierr
-    real(dp)     :: C(nmaps,nmaps), sqrtC(nmaps,nmaps), eta(nmaps,1), cl(nmaps,nmaps)
-    type(planck_rng) :: handle
-
-    l = 2
-    n = 1000000
-    call rand_init(handle, 9841)
-
-    C      = 0.d0
-    C(1,1) = 1000.d0
-    if (nmaps == 3) then
-       C(1,2) = 1.d0
-       C(2,1) = C(1,2)
-       C(2,2) = 0.1d0
-       C(3,3) = 0.01d0
-    end if
-    call cholesky_decompose(C, sqrtC)
-
-    open(58,file='samples.dat')
-    do i = 1, n
-       cl = 0.d0
-       do k = 1, 2*l+1
-          do j = 1, nmaps
-             eta(j,1) = rand_gauss(handle)
-          end do
-          eta = matmul(sqrtC, eta)
-          cl = cl + matmul(eta,transpose(eta))
-       end do
-       cl = cl / (2*l+1)
-       if (nmaps == 1) then
-          write(58,fmt='(i10,4f16.8)') i, cl(1,1)
-       else
-          write(58,fmt='(i10,4f16.8)') i, cl(1,1), cl(1,2), cl(2,2), cl(3,3)
-       end if
-    end do
-    close(58)
-
-  end subroutine sample_pol_multipole
-
-  subroutine indexsmooth
-    implicit none
-    
-    integer(i4b)     :: numband, n, i, j, k, m, numsim
-    real(dp)         :: A, A_rms, beta, beta_rms, fwhm, sigma, dx, xmin, xmax, A0, beta0, r, beam, w
-    real(dp)         :: A_ref, beta_ref
-    type(planck_rng) :: handle
-    real(dp), allocatable, dimension(:)     :: x, nu_log, nu, f_smooth
-    real(dp), allocatable, dimension(:,:)   :: bias
-    real(dp), allocatable, dimension(:,:,:) :: f
-    
-    numband = 6
-    fwhm    = 30d0
-    xmin    = -90.d0
-    xmax    =  90.d0
-    n       = 11
-    dx      = (xmax-xmin) / (n-1)
-    sigma   = fwhm / sqrt(8.d0*log(2.d0))
-    numsim  = 1000
-
-    A        = 100.d0
-    A_rms    = 10.d0
-    beta     = -3.d0
-    beta_rms = 0.2d0
-
-    call rand_init(handle, 481141)
-
-    allocate(x(n), f(n,n,numband), nu(numband), f_smooth(numband), bias(numband,numsim))
-    nu     = [30.d0, 44.d0, 70.d0, 100.d0, 143.d0, 217.d0]
-    do i = 1, n
-       x(i) = xmin + (i-1)*dx
-    end do
-
-    open(58,file='smoothspec.dat')    
-    do m = 1, numsim
-
-       ! Set up high-resolution field
-       A_ref    = 0.d0
-       beta_ref = 0.d0
-       w        = 0.d0
-       do i = 1, n
-          do j = 1, n
-             r    = sqrt(x(i)**2 + x(j)**2)
-             beam = exp(-0.5*(r/sigma)**2)
-             w    = w + beam
-
-             A0    = A    + A_rms    * rand_gauss(handle)
-             beta0 = beta + beta_rms * rand_gauss(handle)
-
-             A_ref    = A_ref    + A0    * beam
-             beta_ref = beta_ref + beta0 * beam
-             do k = 1, numband
-                f(i,j,k) = A0 * (nu(k) / nu(1))**beta0
-             end do
-          end do
-       end do
-       A_ref    = A_ref / w
-       beta_ref = beta_ref / w
-       
-       ! Do the smoothing
-       f_smooth = 0.d0
-       w        = 0.d0
-       do i = 1, n
-          do j = 1, n
-             r    = sqrt(x(i)**2 + x(j)**2)
-             beam = exp(-0.5*(r/sigma)**2)
-             w    = w + beam
-             do k = 1, numband
-                f_smooth(k) = f_smooth(k) + f(i,j,k) * beam
-             end do
-          end do
-       end do
-       f_smooth = f_smooth / w
-       
-       ! Fit a power law
-       beta0    = (numband * sum(log(nu)*log(f_smooth)) - sum(log(nu))*sum(log(f_smooth))) / &
-            & (numband * sum(log(nu)**2) - (sum(log(nu)))**2)
-       A0       = (sum(log(f_smooth)) - beta0*sum(log(nu))) / numband
-       write(*,*) m, nu(1)**beta0 * exp(A0), beta0
-
-       do k = 1, numband
-          bias(k,m) = f_smooth(k) / (A_ref * (nu(k)/nu(1))**beta_ref)
-          !write(58,*) nu(k), f_smooth(k)
-          !write(58,*) nu(k), f_smooth(k) / (A * (nu(k)/nu(1))**beta)
-       end do
-       !write(58,*) 
-
-    end do
-    close(58)
-       
-    open(58,file='bias.dat')
-    do k = 1, numband
-       write(58,*) nu(k), mean(bias(k,:)), sqrt(variance(bias(k,:)))
-    end do
-    close(58)
+!!$
+!!$    n = 100000
+!!$    m = 100
+!!$    call rand_init(handle, 3741)
+!!$    open(58,file='samples.dat')
+!!$    do i = 1, n
+!!$       do j = 1, m
+!!$          s(j) = rand_gauss(handle)
+!!$       end do
+!!$       write(58,*) i, mean(s(1:78)*sqrt(78.d0)), mean(s(1:93)*sqrt(93.d0))
+!!$    end do
+!!$    close(58)
+!!$
+!!$    
+!!$  end subroutine chisq_test
+!!$  
+!!$  subroutine sample_pol_multipole
+!!$    implicit none
+!!$
+!!$    integer(i4b), parameter :: nmaps = 3
+!!$    integer(i4b) :: i, j, k, n, l, ierr
+!!$    real(dp)     :: C(nmaps,nmaps), sqrtC(nmaps,nmaps), eta(nmaps,1), cl(nmaps,nmaps)
+!!$    type(planck_rng) :: handle
+!!$
+!!$    l = 2
+!!$    n = 1000000
+!!$    call rand_init(handle, 9841)
+!!$
+!!$    C      = 0.d0
+!!$    C(1,1) = 1000.d0
+!!$    if (nmaps == 3) then
+!!$       C(1,2) = 1.d0
+!!$       C(2,1) = C(1,2)
+!!$       C(2,2) = 0.1d0
+!!$       C(3,3) = 0.01d0
+!!$    end if
+!!$    call cholesky_decompose(C, sqrtC)
+!!$
+!!$    open(58,file='samples.dat')
+!!$    do i = 1, n
+!!$       cl = 0.d0
+!!$       do k = 1, 2*l+1
+!!$          do j = 1, nmaps
+!!$             eta(j,1) = rand_gauss(handle)
+!!$          end do
+!!$          eta = matmul(sqrtC, eta)
+!!$          cl = cl + matmul(eta,transpose(eta))
+!!$       end do
+!!$       cl = cl / (2*l+1)
+!!$       if (nmaps == 1) then
+!!$          write(58,fmt='(i10,4f16.8)') i, cl(1,1)
+!!$       else
+!!$          write(58,fmt='(i10,4f16.8)') i, cl(1,1), cl(1,2), cl(2,2), cl(3,3)
+!!$       end if
+!!$    end do
+!!$    close(58)
+!!$
+!!$  end subroutine sample_pol_multipole
+!!$
+!!$  subroutine indexsmooth
+!!$    implicit none
+!!$    
+!!$    integer(i4b)     :: numband, n, i, j, k, m, numsim
+!!$    real(dp)         :: A, A_rms, beta, beta_rms, fwhm, sigma, dx, xmin, xmax, A0, beta0, r, beam, w
+!!$    real(dp)         :: A_ref, beta_ref
+!!$    type(planck_rng) :: handle
+!!$    real(dp), allocatable, dimension(:)     :: x, nu_log, nu, f_smooth
+!!$    real(dp), allocatable, dimension(:,:)   :: bias
+!!$    real(dp), allocatable, dimension(:,:,:) :: f
+!!$    
+!!$    numband = 6
+!!$    fwhm    = 30d0
+!!$    xmin    = -90.d0
+!!$    xmax    =  90.d0
+!!$    n       = 11
+!!$    dx      = (xmax-xmin) / (n-1)
+!!$    sigma   = fwhm / sqrt(8.d0*log(2.d0))
+!!$    numsim  = 1000
+!!$
+!!$    A        = 100.d0
+!!$    A_rms    = 10.d0
+!!$    beta     = -3.d0
+!!$    beta_rms = 0.2d0
+!!$
+!!$    call rand_init(handle, 481141)
+!!$
+!!$    allocate(x(n), f(n,n,numband), nu(numband), f_smooth(numband), bias(numband,numsim))
+!!$    nu     = [30.d0, 44.d0, 70.d0, 100.d0, 143.d0, 217.d0]
+!!$    do i = 1, n
+!!$       x(i) = xmin + (i-1)*dx
+!!$    end do
+!!$
+!!$    open(58,file='smoothspec.dat')    
+!!$    do m = 1, numsim
+!!$
+!!$       ! Set up high-resolution field
+!!$       A_ref    = 0.d0
+!!$       beta_ref = 0.d0
+!!$       w        = 0.d0
+!!$       do i = 1, n
+!!$          do j = 1, n
+!!$             r    = sqrt(x(i)**2 + x(j)**2)
+!!$             beam = exp(-0.5*(r/sigma)**2)
+!!$             w    = w + beam
+!!$
+!!$             A0    = A    + A_rms    * rand_gauss(handle)
+!!$             beta0 = beta + beta_rms * rand_gauss(handle)
+!!$
+!!$             A_ref    = A_ref    + A0    * beam
+!!$             beta_ref = beta_ref + beta0 * beam
+!!$             do k = 1, numband
+!!$                f(i,j,k) = A0 * (nu(k) / nu(1))**beta0
+!!$             end do
+!!$          end do
+!!$       end do
+!!$       A_ref    = A_ref / w
+!!$       beta_ref = beta_ref / w
+!!$       
+!!$       ! Do the smoothing
+!!$       f_smooth = 0.d0
+!!$       w        = 0.d0
+!!$       do i = 1, n
+!!$          do j = 1, n
+!!$             r    = sqrt(x(i)**2 + x(j)**2)
+!!$             beam = exp(-0.5*(r/sigma)**2)
+!!$             w    = w + beam
+!!$             do k = 1, numband
+!!$                f_smooth(k) = f_smooth(k) + f(i,j,k) * beam
+!!$             end do
+!!$          end do
+!!$       end do
+!!$       f_smooth = f_smooth / w
+!!$       
+!!$       ! Fit a power law
+!!$       beta0    = (numband * sum(log(nu)*log(f_smooth)) - sum(log(nu))*sum(log(f_smooth))) / &
+!!$            & (numband * sum(log(nu)**2) - (sum(log(nu)))**2)
+!!$       A0       = (sum(log(f_smooth)) - beta0*sum(log(nu))) / numband
+!!$       write(*,*) m, nu(1)**beta0 * exp(A0), beta0
+!!$
+!!$       do k = 1, numband
+!!$          bias(k,m) = f_smooth(k) / (A_ref * (nu(k)/nu(1))**beta_ref)
+!!$          !write(58,*) nu(k), f_smooth(k)
+!!$          !write(58,*) nu(k), f_smooth(k) / (A * (nu(k)/nu(1))**beta)
+!!$       end do
+!!$       !write(58,*) 
+!!$
+!!$    end do
+!!$    close(58)
+!!$       
+!!$    open(58,file='bias.dat')
+!!$    do k = 1, numband
+!!$       write(58,*) nu(k), mean(bias(k,:)), sqrt(variance(bias(k,:)))
+!!$    end do
+!!$    close(58)
 
     ! Output spectra
 
@@ -272,7 +284,7 @@ contains
 !!$    end do
 !!$    close(58)
 
-  end subroutine indexsmooth
+!!  end subroutine indexsmooth
 
 !!$   subroutine mkfits
 !!$     implicit none

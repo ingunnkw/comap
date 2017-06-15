@@ -82,7 +82,7 @@ contains
     real(dp) :: phi1, theta1, psi1, phi2, theta2, psi2, mjd
     if(initialized) return
     call initialize_simple_pointing
-    call initialize_detector_mod(paramfile)
+    call init_detector_mod(paramfile)
     call setup_diode_euler_matrices(diode_euler)
 
     next_step = &
