@@ -23,21 +23,20 @@ program tod2comap
      real(dp), allocatable, dimension(:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq)
   end type map_type
 
-  type(tod_type)  :: tod
-  type(map_type)  :: map
-  type(lx_struct) :: data
-  type(comap_scan_info)  :: scan
-  type(acceptlist)       :: alist
+  type(tod_type)        :: tod
+  type(map_type)        :: map
+  type(lx_struct)       :: data
+  type(comap_scan_info) :: scan
+  type(acceptlist)      :: alist
 
-  character(len=512) :: filename, parfile, acceptfile, prefix
-  integer(i4b)       :: nscan, i, j, k
-  !integer(i4b)  :: myid, numprocs, ierr, root
+  character(len=512)    :: filename, parfile, acceptfile, prefix
+  integer(i4b)          :: nscan, i, j, k
+  !integer(i4b)          :: myid, numprocs, ierr, root
 
   !call mpi_init(ierr)
   !call mpi_comm_rank(mpi_comm_world, myid, ierr)
   !call mpi_comm_size(mpi_comm_world, numprocs, ierr)
   !root = 0
-  !call mpi_finalize(ierr)
 
   parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
 
@@ -61,6 +60,7 @@ program tod2comap
      call output_maps(trim(prefix), map)
   end do
 
+  !call mpi_finalize(ierr)
   write(*,*) 'Done'
 
 contains
