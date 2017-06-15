@@ -21,6 +21,6 @@ module comap_defs
        & FILTR_HIGH_ALPHA = 2, FILTR_LOW_NU = 3, FILTR_LOW_ALPHA = 4, &
        & FILTR_AZ_ORDER = 5
 
-  real(dp), parameter :: fwhm2sigma = 1d0/sqrt(8d0*log(2d0))
+!  real(dp), parameter :: fwhm2sigma = 1d0/sqrt(8d0*log(2d0))
 
 end module
