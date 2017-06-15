@@ -25,7 +25,7 @@ program tod2comap
   type(tod_type)  :: tod
   type(map_type)  :: map
   type(lx_struct) :: data
-  type(comap_ces_info)  :: scan
+  type(comap_scan_info)  :: scan
 
   character(len=512) :: filename, parfile, acceptfile
   integer(i4b)       :: nscan, i, j, k
@@ -38,13 +38,14 @@ program tod2comap
   !call mpi_finalize(ierr)
 
   !parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
+  acceptfile = '/mn/stornext/d5/comap/protodir/acceptlist.txt'
 
-  !call initialize_ces_mod(parfile)
+  !call initialize_scan_mod(parfile)
 
-  !nscan = get_num_ces()
+  !nscan = get_num_scan()
 
   !do i = 1, nscan 
-     !call get_ces_info(i,scan)
+     !call get_scan_info(i,scan)
      !filename = scan%l3file
   filename = '/mn/stornext/comap/protodir/level3/Ka/lissajous/patch1/patch1_1.h5'
   write(*,*) i, 'of', nscan
@@ -293,11 +294,5 @@ contains
 
   end subroutine output_maps
 
-  
-  subroutine collect_ces_info()
-    implicit none
-
-
-  end subroutine collect_ces_info
- 
+   
 end program tod2comap
