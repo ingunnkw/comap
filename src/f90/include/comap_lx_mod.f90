@@ -63,7 +63,7 @@ contains
     if (all) allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
     if (all) allocate(data%scanmode_l1(nsamp))
-    call read_hdf(file, "start_mjd",            data%decimation_time)
+    call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "decimation_time",      data%decimation_time)
     call read_hdf(file, "decimation_nu",        data%decimation_nu)
     call read_hdf(file, "samprate",             data%samprate)
