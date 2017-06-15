@@ -10,14 +10,15 @@ module comap_Lx_mod
 
   type Lx_struct
      !! The level1 and level2 part, present in all files.
-     integer(i4b)                                :: decimation_time, decimation_nu
-     real(dp)                                    :: samprate
-     real(dp), allocatable, dimension(:)         :: time
-     real(dp), allocatable, dimension(:)         :: nu          ! (freq)
-     real(dp), allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
-     real(sp), allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
-     real(sp), allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
-     real(sp), allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
+     integer(i4b)                                    :: decimation_time, decimation_nu
+     real(dp)                                        :: samprate
+     real(dp),     allocatable, dimension(:)         :: time
+     real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
+     real(dp),     allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
+     real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
+     real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:)       :: orig_point  ! Hor; (az/el/dk, time)
+     integer(i4b), allocatable, dimension(:)         :: status      ! Status flag per time sample
 
      !! The level3 part, which is only present in level3-files
      integer(i4b)                                 :: coord_sys
