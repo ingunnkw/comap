@@ -4,7 +4,7 @@
 
 OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_pixspace_mod.o quiet_module_mod.o comap_detector_mod.o \
-         comap_acceptlist_mod.o comap_scan_mod.o \
+         comap_frequency_mod.o comap_acceptlist_mod.o comap_scan_mod.o \
          d1mach.o drc3jj.o quiet_l1_defs.o \
          math_tools.o powell_mod.o quasi_newton_mod.o \
          quiet_fileutils.o quiet_detector_mod.o quiet_mapfile_mod.o \
@@ -42,6 +42,7 @@ quiet_mpi_utils.o        : quiet_mpi_mod.o quiet_utils.o quiet_system_mod.o
 quiet_pmac_mod.o         : quiet_utils.o locate_mod.o quiet_fileutils.o
 quiet_detector_mod.o     : quiet_utils.o
 comap_detector_mod.o     : quiet_utils.o
+comap_frequency_mod.o    : quiet_utils.o
 quiet_mask_mod.o         : quiet_utils.o quiet_fileutils.o
 comap_patch_detect_mod.o : comap_patch_mod.o comap_detector_mod.o quiet_pointing_mod.o
 comap_patch_mod.o        : quiet_utils.o quiet_ephem_mod.o
@@ -55,7 +56,7 @@ quiet_task_mod.o         : quiet_system_mod.o
 quiet_sidelobe_mod.o     : quiet_utils.o quiet_fileutils.o quiet_module_mod.o
 quiet_system_mod.o       : quiet_system_backend.o
 quiet_acceptlist_mod.o   : quiet_ces_mod.o quiet_module_mod.o
-comap_acceptlist_mod.o   : comap_scan_mod.o comap_detector_mod.o
+comap_acceptlist_mod.o   : comap_scan_mod.o comap_detector_mod.o comap_frequency_mod.o
 quiet_target_mod.o       : quiet_utils.o quiet_ces_mod.o quiet_acceptlist_mod.o quiet_defs.o
 comap_scan_mod.o         : quiet_utils.o
 quiet_ces_mod.o          : quiet_utils.o
