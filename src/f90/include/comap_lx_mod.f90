@@ -63,12 +63,12 @@ contains
     call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
     call read_hdf(file, "time",                 data%time)
-    !call read_hdf(file, "point_tel",            data%point_tel)
+    call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
     if (all) call read_hdf(file, "nu_l1",       data%nu_l1)
     if (all) call read_hdf(file, "tod_l1",      data%tod_l1)
     if (all) call read_hdf(file, "flag",        data%flag)
-    if (all) call read_hdf(file, "scanmode_l1", data%flag)
+    if (all) call read_hdf(file, "scanmode_l1", data%scanmode_l1)
     call close_hdf_file(file)
   end subroutine read_l1_file
 

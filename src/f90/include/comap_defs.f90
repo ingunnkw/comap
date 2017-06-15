@@ -2,6 +2,8 @@ module comap_defs
   use healpix_types
   implicit none
 
+  integer(i4b), parameter :: SM_CES = 1, SM_CIRC = 2, SM_LISSA=3
+
   integer(i4b), parameter :: ST_NUM = 32, ST_MJD = 1, ST_AZ = 2, ST_EL = 3, &
    & ST_DK = 4, ST_LST = 5, ST_PWV = 6, ST_PWV_CHANGE = 7, &
    & ST_HUMIDITY = 8, ST_HUMIDITY_CHANGE = 9, ST_WIND = 10, &
@@ -21,6 +23,6 @@ module comap_defs
        & FILTR_HIGH_ALPHA = 2, FILTR_LOW_NU = 3, FILTR_LOW_ALPHA = 4, &
        & FILTR_AZ_ORDER = 5
 
-  real(dp), parameter :: fwhm2sigma = 1d0/sqrt(8d0*log(2d0))
+!  real(dp), parameter :: fwhm2sigma = 1d0/sqrt(8d0*log(2d0))
 
 end module

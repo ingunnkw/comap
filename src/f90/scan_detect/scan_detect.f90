@@ -34,7 +34,8 @@ program scan_detect
   use comap_detector_mod
   use quiet_shared_output_mod
   use comap_patch_detect_mod
-  use l1_read_comap_mod
+  use comap_lx_mod
+  use comap_defs
   implicit none
 
   ! A chunk will always have a constant sample rate
@@ -51,7 +52,7 @@ program scan_detect
      integer(i4b)       :: file_index, pos, target_dt, n, iglob, icont, isect, ifile
      logical(lgt)       :: last_cont
      real(dp)           :: mjd
-     type(point_type)   :: data
+     type(lx_struct)    :: data
      !type(data_struct)  :: data_extra ! Only used to check readability
      type(chunk_type)   :: work
      integer(i4b),       dimension(:),   allocatable :: mods
@@ -228,7 +229,7 @@ contains
        select case(val%type)
           case("ces");  call validate_ces(chunk, val, valid, split)
           case("cas");  call validate_cas(chunk, val, valid, split)
-          case("sun");  call validate_sun(chunk, val, valid, split)
+!          case("sun");  call validate_sun(chunk, val, valid, split)
           case("rst");  call validate_rst(chunk, val, valid, split)
           case default
              write(stderr,*) "Invalid type to detect: " // trim(val%type)
@@ -374,7 +375,7 @@ contains
     iterator%file_index = 1
     ! Read in the data, and scan until we reach the correct time
     call get_data(l1prefix, iterator%files, iterator%file_index, iterator%mods, iterator%data)
-    iterator%n = size(iterator%data%mode)
+    iterator%n = size(iterator%data%scanmode_l1)
     i = 1
     iterator%ranges(iterator%file_index,:) = iterator%data%time([1,iterator%n])
     iterator%pos = i-1
@@ -408,7 +409,7 @@ contains
           iterator%file_index = iterator%file_index + 1
           call get_data(l1prefix, iterator%files, iterator%file_index, iterator%mods, iterator%data)
           if(iterator%file_index > size(iterator%files)) exit
-          iterator%n   = size(iterator%data%mode)
+          iterator%n   = size(iterator%data%scanmode_l1)
           iterator%ranges(iterator%file_index,:) = iterator%data%time([1,iterator%n])
           iterator%pos = 1
        end if
@@ -420,11 +421,11 @@ contains
        end if
        if(i == 1 .and. iterator%icont == 1) iterator%ifile = iterator%file_index
        iterator%work%ifile   = iterator%ifile
-       iterator%work%mode(i) = iterator%data%mode(iterator%pos)
+       iterator%work%mode(i) = iterator%data%scanmode_l1(iterator%pos)
        iterator%work%time(i) = iterator%data%time(iterator%pos)
-       iterator%work%az(i)   = iterator%data%orig_point(0, iterator%pos)
-       iterator%work%el(i)   = iterator%data%orig_point(1, iterator%pos)
-       iterator%work%dk(i)   = iterator%data%orig_point(2, iterator%pos)
+       iterator%work%az(i)   = iterator%data%point_tel(0, iterator%pos)
+       iterator%work%el(i)   = iterator%data%point_tel(1, iterator%pos)
+       iterator%work%dk(i)   = iterator%data%point_tel(2, iterator%pos)
     end do
     ! Now copy over what we got.
     call copy_chunk(iterator%work, chunk, i-1)
@@ -433,7 +434,7 @@ contains
   subroutine free_chunk_iterator(iterator)
     implicit none
     type(chunk_iterator) :: iterator
-    call deallocate_point_type(iterator%data)
+    call free_lx_struct(iterator%data)
     !call deallocate_data_struct(iterator%data_extra)
     call free_chunk(iterator%work)
     if(allocated(iterator%files)) deallocate(iterator%files)
@@ -650,7 +651,6 @@ contains
     if(.not. angle_const(subtracted_data, val%el_helper, max_el_dev)) return
     call remove_sinusoid(chunk%az, chunk%time, chunk%n, subtracted_data)
     if(.not. angle_const(subtracted_data, val%az_helper, max_az_dev)) return
-   
     val%reason = 0
     ok = .true.
   end subroutine
@@ -701,17 +701,17 @@ contains
     ok = .true.
   end subroutine
 
-  subroutine validate_sun(chunk, val, ok, split)
-    implicit none
-    type(chunk_type) :: chunk
-    type(validator)  :: val
-    logical(lgt)     :: ok, split
-    integer(i4b)     :: obj
-    split = .false.
-    obj = 0
-    !call find_object(chunk, patches(isun:isun), obj)
-    ok = obj /= 0
-  end subroutine
+!!$  subroutine validate_sun(chunk, val, ok, split)
+!!$    implicit none
+!!$    type(chunk_type) :: chunk
+!!$    type(validator)  :: val
+!!$    logical(lgt)     :: ok, split
+!!$    integer(i4b)     :: obj
+!!$    split = .false.
+!!$    obj = 0
+!!$    !call find_object(chunk, patches(isun:isun), obj)
+!!$    ok = obj /= 0
+!!$  end subroutine
 
   subroutine validate_rst(chunk, val, ok, split)
     implicit none
@@ -808,16 +808,15 @@ contains
     character(len=*)   :: prefix, filelist(:)
     character(len=512) :: file
     integer(i4b)       :: ind, mods(:), status, unit
-    type(point_type) :: point
+    type(lx_struct)    :: point
 
     unit = getlun()
     do
        if(ind > size(filelist)) exit
        file = trim(prefix) // "/" // trim(filelist(ind))
-       call deallocate_point_type(point)
+       call free_lx_struct(point)
        status = 0
-       call l1_read_point(file, &
-        & pointing=point, detectors=mods, status_code=status)
+       call read_l1_file(file, data=point, only_point=.true.)
        if(status /= 0) write(stderr,*) "Error reading '" // trim(file) // "'!"
        if(status == 0) exit
        ind = ind + 1
