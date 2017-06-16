@@ -60,7 +60,7 @@ contains
     call read_hdf(file, "map", map%m)
     call read_hdf(file, "rms", map%rms)
     call read_hdf(file, "nhit", map%nhit)
-    call read_hdf_file(file)
+    call close_hdf_file(file)
 
   end subroutine read_map_h5
 

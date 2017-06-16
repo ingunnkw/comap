@@ -39,6 +39,8 @@ program tod2comap
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
 
+  ! This loop currently requiers that all scans are of the same patch
+
   do i = 1, nscan 
      if (myid == 0) write(*,*) i, 'of', nscan
      if (allocated(alist%status)) deallocate(alist%status)
@@ -58,8 +60,8 @@ program tod2comap
 
   prefix = 'files/'//trim(scan%object)!//'_'//trim(itoa(scan%cid)) ! patchID_scanID
   call finalize_mapmaking(map)
-  !if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
-  if (myid == 0) call output_maps(trim(prefix), map)
+  if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
+  !if (myid == 0) call output_maps(trim(prefix), map)
   
 
   if (myid == 0) write(*,*) 'Done'
