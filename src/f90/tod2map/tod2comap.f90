@@ -7,6 +7,8 @@ program tod2comap
 
 !  include "mpif.h"
 
+  real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
+
   type tod_type
      real(dp)     :: samprate, Tsys
      integer(i4b) :: nsamp, ndet, nfreq
@@ -17,7 +19,8 @@ program tod2comap
   end type tod_type
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, n_k
+     integer(i4b) :: n_x, n_y, nfreq, n_k, ntheta ! 2^ntheta
+     real(dp)     :: x0, y0, f0, df
      real(dp)     :: dtheta
      real(dp), allocatable, dimension(:)     :: x, y, f, k ! (n_x or n_y or nfreq or n_k)
      real(dp), allocatable, dimension(:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq)
@@ -31,12 +34,12 @@ program tod2comap
 
   character(len=512)    :: filename, parfile, acceptfile, prefix
   integer(i4b)          :: nscan, i, j, k
-  !integer(i4b)          :: myid, numprocs, ierr, root
+  integer(i4b)          :: myid, numprocs, ierr, root
 
-  !call mpi_init(ierr)
-  !call mpi_comm_rank(mpi_comm_world, myid, ierr)
-  !call mpi_comm_size(mpi_comm_world, numprocs, ierr)
-  !root = 0
+  call mpi_init(ierr)
+  call mpi_comm_rank(mpi_comm_world, myid, ierr)
+  call mpi_comm_size(mpi_comm_world, numprocs, ierr)
+  root = 0
 
   parfile = 'param_test.txt'
 
@@ -44,7 +47,7 @@ program tod2comap
   nscan = get_num_scans()
 
   do i = 1, nscan 
-     write(*,*) i, 'of', nscan
+     if (myid == 0) write(*,*) i, 'of', nscan
      if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
      filename = scan%l3file
@@ -54,15 +57,15 @@ program tod2comap
      allocate(alist%status(tod%nfreq,tod%ndet,nscan))
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
      ! Write TOD to file
-     call output_tod(trim(prefix), 1, tod, alist, i)
+     !if (myid == 0) call output_tod(trim(prefix), 1, tod, alist, i)
      ! Compute maps
      call compute_maps(data, tod, map, alist, i)
      ! Write maps to file (includes rms and hit count)
-     call output_maps(trim(prefix), map)
+     if (myid == 0) call output_maps(trim(prefix), map)
   end do
 
-  write(*,*) 'Done'
-  !call mpi_finalize(ierr)
+  if (myid == 0) write(*,*) 'Done'
+  call mpi_finalize(ierr)
 
 contains
 
@@ -114,7 +117,7 @@ contains
          & tod%rms(tod%nsamp, tod%nfreq, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
-    tod%point = data%point
+    tod%point = data%point ! call make_angles_safe(tod%point(1,:),maxang)
     tod%g     = data%gain
 
     !write(*,*) shape(data%point), tod%nsamp
@@ -175,22 +178,23 @@ contains
     type(acceptlist), intent(in)    :: alist
     integer(i4b),     intent(in)    :: scan_nr
     
-    integer(i4b) :: i, j, k, p, q
+    integer(i4b) :: i, j, k, p, q, fs
     real(dp)     :: x_min, x_max, y_min, y_max, pad, gain_hc
 
     call free_map_type(map)
 
     ! Set up map grid
+    fs = 4
     pad = 0.d0!0.3d0 ! degrees
     map%nfreq = tod%nfreq
     map%dtheta = 5.d0/60.d0 ! Arcmin
     !write(*,*) data%point_lim
 
-    x_min = minval(tod%point(1,:)) - pad; x_max =  maxval(tod%point(1,:)) + pad
-    y_min = minval(tod%point(2,:)) - pad; y_max =  maxval(tod%point(2,:)) + pad
+    x_min = minval(tod%point(1,fs:)) - pad; x_max =  maxval(tod%point(1,fs:)) + pad
+    y_min = minval(tod%point(2,fs:)) - pad; y_max =  maxval(tod%point(2,fs:)) + pad
     !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) + pad
     !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) + pad
-    map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (x_max-x_min)/map%dtheta+1
+    map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (y_max-y_min)/map%dtheta+1
     allocate(map%x(map%n_x), map%y(map%n_y))
     do i = 1, map%n_x
        map%x(i) = x_min + (i-1)*map%dtheta
@@ -214,7 +218,7 @@ contains
     
     ! Co-add into maps
     do k = 1, tod%ndet
-       do i = 1, tod%nsamp
+       do i = fs, tod%nsamp
           p = min(max(int((tod%point(1,i)-x_min)/map%dtheta),1),map%n_x)
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
