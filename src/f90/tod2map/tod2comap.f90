@@ -48,11 +48,11 @@ program tod2comap
      filename = scan%l3file
      call get_tod(trim(filename), data, tod)
 
-     allocate(alist%status(tod%nfreq,tod%ndet,nscan))
+     allocate(alist%status(tod%nfreq,tod%ndet))
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
  
      ! Compute and co-add maps
-     call compute_scan_maps(data, tod, map, alist, i)
+     call compute_scan_maps(data, tod, map, alist)
      
   end do
 
@@ -139,12 +139,12 @@ contains
   end subroutine get_tod
 
 
-  subroutine output_tod(prefix, det, tod, alist, scan_nr)
+  subroutine output_tod(prefix, det, tod, alist)
     implicit none
     character(len=*), intent(in) :: prefix
     type(tod_type),   intent(in) :: tod
     type(acceptlist), intent(in) :: alist
-    integer(i4b),     intent(in) :: det, scan_nr
+    integer(i4b),     intent(in) :: det
 
     character(len=512) :: filename
     character(len=4)   :: jtext
@@ -152,7 +152,7 @@ contains
 
     unit = getlun()
     do j = 1, tod%nfreq
-       if (alist%status(j,det,scan_nr) == 0) then
+       if (alist%status(j,det) == 0) then
           call int2string(j,jtext)
           filename = trim(prefix) // '_freq' // jtext // '_tod.dat'
           open(unit, file=trim(filename), recl=4096)
@@ -168,13 +168,12 @@ contains
   end subroutine output_tod
   
 
-  subroutine compute_scan_maps(data, tod, map, alist, scan_nr)
+  subroutine compute_scan_maps(data, tod, map, alist)
     implicit none
     type(lx_struct),  intent(in)    :: data
     type(tod_type),   intent(in)    :: tod
     type(map_type),   intent(inout) :: map
     type(acceptlist), intent(in)    :: alist
-    integer(i4b),     intent(in)    :: scan_nr
     
     integer(i4b) :: i, j, k, p, q, fs
     real(dp)     :: x_min, x_max, y_min, y_max, pad, gain_hc
@@ -218,7 +217,7 @@ contains
           p = min(max(int((tod%point(1,i)-x_min)/map%dtheta),1),map%n_x)
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
-             if (alist%status(j,k,scan_nr) == 0) then
+             if (alist%status(j,k) == 0) then
                 map%dsum(p,q,j) = map%dsum(p,q,j) + gain_hc    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
                 map%div(p,q,j)  = map%div(p,q,j)  + gain_hc**2 / tod%rms(i,j,k)**2
                 map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
