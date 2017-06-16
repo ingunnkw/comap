@@ -62,7 +62,7 @@ comap_scan_mod.o         : quiet_utils.o
 quiet_ces_mod.o          : quiet_utils.o
 quiet_Lx_mod.o           : quiet_hdf_mod.o quiet_fft_mod.o
 comap_lx_mod.o		 : quiet_mpi_mod.o quiet_hdf_mod.o quiet_fft_mod.o
-comap_map_mod.o          : quiet_utils.o
+comap_map_mod.o          : quiet_utils.o quiet_hdf_mod.o
 quiet_filter_mod.o       : quiet_noise_estimation_mod.o quiet_assembly_mod.o
 quiet_fileutils.o        : quiet_utils.o quiet_hdf_mod.o quiet_mapfile_mod.o quiet_covfile_mod.o
 quiet_nr_mod.o           : math_tools.o

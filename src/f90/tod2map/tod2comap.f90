@@ -58,7 +58,7 @@ program tod2comap
 
   prefix = 'files/'//trim(scan%object)!//'_'//trim(itoa(scan%cid)) ! patchID_scanID
   call finalize_mapmaking(map)
-  !if (myid == 0) call output_maps_h5(trim(prefix), map)
+  !if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
   if (myid == 0) call output_maps(trim(prefix), map)
   
 
@@ -318,30 +318,6 @@ contains
     call free_map_type(map)
 
   end subroutine output_maps
-
-
-  subroutine output_maps_h5(prefix,map)
-    implicit none
-    character(len=*) :: prefix
-    type(map_type), intent(inout) :: map
-
-    integer(i4b)       :: i, j, k
-    character(len=4)   :: itext
-    character(len=512) :: filename
-    type(hdf_file)     :: file
-    
-    filename = trim(prefix)//'_map.h5'
-    call open_hdf_file(trim(filename), file, "w")
-    call write_hdf(file, "n_x", map%n_x)
-    call write_hdf(file, "n_y", map%n_y)
-    call write_hdf(file, "x",   map%x)
-    call write_hdf(file, "y",   map%y)
-    call write_hdf(file, "map", map%m)
-    call write_hdf(file, "rms", map%rms)
-    call write_hdf(file, "nhit", map%nhit)
-    call close_hdf_file(file)
-
-  end subroutine output_maps_h5
 
 
   subroutine free_tod_type(tod)
