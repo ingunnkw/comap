@@ -4,11 +4,10 @@ program tod2comap
   use comap_scan_mod
   use comap_acceptlist_mod
   use quiet_fft_mod
+  use quiet_hdf_mod
   implicit none
 
 !  include "mpif.h"
-
-  real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type tod_type
      real(dp)     :: samprate, Tsys
@@ -44,19 +43,24 @@ program tod2comap
      if (myid == 0) write(*,*) i, 'of', nscan
      if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
-     filename = scan%l3file
-     prefix = 'files/'//trim(scan%object)//'_'//trim(itoa(scan%cid)) ! patchID_scanID
+
      ! Get TOD / read level 3 file
+     filename = scan%l3file
      call get_tod(trim(filename), data, tod)
+
      allocate(alist%status(tod%nfreq,tod%ndet,nscan))
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
-     ! Write TOD to file
-     !if (myid == 0) call output_tod(trim(prefix), 1, tod, alist, i)
-     ! Compute maps
-     call compute_maps(data, tod, map, alist, i)
-     ! Write maps to file (includes rms and hit count)
-     if (myid == 0) call output_maps(trim(prefix), map)
+ 
+     ! Compute and co-add maps
+     call compute_scan_maps(data, tod, map, alist, i)
+     
   end do
+
+  prefix = 'files/'//trim(scan%object)!//'_'//trim(itoa(scan%cid)) ! patchID_scanID
+  call finalize_mapmaking(map)
+  !if (myid == 0) call output_maps_h5(trim(prefix), map)
+  if (myid == 0) call output_maps(trim(prefix), map)
+  
 
   if (myid == 0) write(*,*) 'Done'
   call mpi_finalize(ierr)
@@ -164,7 +168,7 @@ contains
   end subroutine output_tod
   
 
-  subroutine compute_maps(data, tod, map, alist, scan_nr)
+  subroutine compute_scan_maps(data, tod, map, alist, scan_nr)
     implicit none
     type(lx_struct),  intent(in)    :: data
     type(tod_type),   intent(in)    :: tod
@@ -174,8 +178,6 @@ contains
     
     integer(i4b) :: i, j, k, p, q, fs
     real(dp)     :: x_min, x_max, y_min, y_max, pad, gain_hc
-
-    call free_map_type(map)
 
     ! Set up map grid
     fs = 4
@@ -224,13 +226,7 @@ contains
           end do
        end do
     end do
-    where(map%nhit > 0)
-       map%m   = map%dsum / map%div
-       map%rms = 1.d0 / sqrt(map%div)
-    elsewhere
-       map%m   = 0.d0
-       map%rms = 0.d0
-    end where
+
     
 !!$    ! Report reduced chisquares
 !!$    do i = 1, map%nfreq
@@ -239,13 +235,28 @@ contains
 !!$       write(*,fmt='(a,i5,a,f8.3,a,f8.3)') 'Freq = ', i, ', red chisq = ', chisq/nu, ', sigma = ', (chisq-nu)/sqrt(2.d0*nu)
 !!$    end do
 
-  end subroutine compute_maps
+  end subroutine compute_scan_maps
+
+
+  subroutine finalize_mapmaking(map)
+    implicit none
+    type(map_type), intent(inout) :: map
+
+    where(map%nhit > 0)
+       map%m   = map%dsum / map%div
+       map%rms = 1.d0 / sqrt(map%div)
+    elsewhere
+       map%m   = 0.d0
+       map%rms = 0.d0
+    end where    
+
+  end subroutine finalize_mapmaking
 
 
   subroutine output_maps(prefix, map)
     implicit none
-    character(len=*), intent(in) :: prefix
-    type(map_type),   intent(in) :: map
+    character(len=*), intent(in)    :: prefix
+    type(map_type),   intent(inout) :: map
 
     integer(i4b)       :: i, j, k, unit
     character(len=4)   :: itext
@@ -305,7 +316,33 @@ contains
        close(unit)
     end do
 
+    call free_map_type(map)
+
   end subroutine output_maps
+
+
+  subroutine output_maps_h5(prefix,map)
+    implicit none
+    character(len=*) :: prefix
+    type(map_type), intent(inout) :: map
+
+    integer(i4b)       :: i, j, k
+    character(len=4)   :: itext
+    character(len=512) :: filename
+    type(hdf_file)     :: file
+    
+    filename = trim(prefix)//'_map.h5'
+    call open_hdf_file(trim(filename), file, "w")
+    call write_hdf(file, "n_x", map%n_x)
+    call write_hdf(file, "n_y", map%n_y)
+    call write_hdf(file, "x",   map%x)
+    call write_hdf(file, "y",   map%y)
+    call write_hdf(file, "map", map%m)
+    call write_hdf(file, "rms", map%rms)
+    call write_hdf(file, "nhit", map%nhit)
+    call close_hdf_file(file)
+
+  end subroutine output_maps_h5
 
 
   subroutine free_tod_type(tod)

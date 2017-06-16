@@ -3,6 +3,8 @@ module comap_map_mod
   use quiet_utils
   implicit none
 
+  real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
+
   type map_type
      integer(i4b) :: n_x, n_y, nfreq, n_k, ntheta ! 2^ntheta
      real(dp)     :: x0, y0, f0, df
