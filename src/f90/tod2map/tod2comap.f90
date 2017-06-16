@@ -38,16 +38,17 @@ program tod2comap
   !call mpi_comm_size(mpi_comm_world, numprocs, ierr)
   !root = 0
 
-  parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
+  parfile = 'param_test.txt'
 
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
 
   do i = 1, nscan 
+     write(*,*) i, 'of', nscan
+     if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
      filename = scan%l3file
      prefix = 'files/'//trim(scan%object)//'_'//trim(itoa(scan%cid)) ! patchID_scanID
-     write(*,*) i, 'of', nscan
      ! Get TOD / read level 3 file
      call get_tod(trim(filename), data, tod)
      allocate(alist%status(tod%nfreq,tod%ndet,nscan))
@@ -60,8 +61,8 @@ program tod2comap
      call output_maps(trim(prefix), map)
   end do
 
-  !call mpi_finalize(ierr)
   write(*,*) 'Done'
+  !call mpi_finalize(ierr)
 
 contains
 
@@ -98,6 +99,7 @@ contains
 
     ! Read data
     call read_l3_file(l3file, data)
+    call free_tod_type(tod)
 
     tod%samprate = data%samprate
     tod%nsamp = size(data%time)
@@ -108,12 +110,13 @@ contains
          & tod%point(3,tod%nsamp), &
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%ndet), &
-         & tod%g(1, tod%nfreq, tod%ndet), &               ! ??
+         & tod%g(0,0,0), & !(tod%nsamp, tod%nfreq, tod%ndet), &               ! ??
          & tod%rms(tod%nsamp, tod%nfreq, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
     tod%point = data%point
     tod%g     = data%gain
+
     !write(*,*) shape(data%point), tod%nsamp
 
     do k = 1, tod%ndet
@@ -173,7 +176,9 @@ contains
     integer(i4b),     intent(in)    :: scan_nr
     
     integer(i4b) :: i, j, k, p, q
-    real(dp)     :: x_min, x_max, y_min, y_max, pad
+    real(dp)     :: x_min, x_max, y_min, y_max, pad, gain_hc
+
+    call free_map_type(map)
 
     ! Set up map grid
     pad = 0.d0!0.3d0 ! degrees
@@ -204,6 +209,8 @@ contains
        map%nhit = 0.d0
        map%div  = 0.d0
     end if
+
+    gain_hc = 1.0 ! Replaces tod%g(i,j,k) in the code below
     
     ! Co-add into maps
     do k = 1, tod%ndet
@@ -212,8 +219,8 @@ contains
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
              if (alist%status(j,k,scan_nr) == 0) then
-                map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(1,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
-                map%div(p,q,j)  = map%div(p,q,j)  + tod%g(1,j,k)**2 / tod%rms(i,j,k)**2
+                map%dsum(p,q,j) = map%dsum(p,q,j) + gain_hc    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
+                map%div(p,q,j)  = map%div(p,q,j)  + gain_hc**2 / tod%rms(i,j,k)**2
                 map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
              end if
           end do
@@ -302,5 +309,35 @@ contains
 
   end subroutine output_maps
 
+
+  subroutine free_tod_type(tod)
+    implicit none
+    type(tod_type), intent(inout) :: tod 
+
+    if (allocated(tod%t))     deallocate(tod%t)
+    if (allocated(tod%f))     deallocate(tod%f)
+    if (allocated(tod%d))     deallocate(tod%d)
+    if (allocated(tod%d_raw)) deallocate(tod%d_raw)
+    if (allocated(tod%g))     deallocate(tod%g)
+    if (allocated(tod%rms))   deallocate(tod%rms)
+    if (allocated(tod%point)) deallocate(tod%point)
+
+  end subroutine free_tod_type
+
+  subroutine free_map_type(map)
+    implicit none
+    type(map_type), intent(inout) :: map
+
+    if (allocated(map%x))    deallocate(map%x) 
+    if (allocated(map%y))    deallocate(map%y)
+    if (allocated(map%f))    deallocate(map%f)
+    if (allocated(map%k))    deallocate(map%k)
+    if (allocated(map%m))    deallocate(map%m)
+    if (allocated(map%rms))  deallocate(map%rms)
+    if (allocated(map%dsum)) deallocate(map%dsum)
+    if (allocated(map%nhit)) deallocate(map%nhit)
+    if (allocated(map%div))  deallocate(map%div)
+
+  end subroutine free_map_type
    
 end program tod2comap
