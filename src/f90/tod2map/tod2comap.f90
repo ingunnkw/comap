@@ -1,5 +1,6 @@
 program tod2comap
   use comap_lx_mod
+  use comap_map_mod
   use comap_scan_mod
   use comap_acceptlist_mod
   use quiet_fft_mod
@@ -18,13 +19,6 @@ program tod2comap
      real(dp), allocatable, dimension(:,:)   :: point            ! (3, time)
   end type tod_type
 
-  type map_type
-     integer(i4b) :: n_x, n_y, nfreq, n_k, ntheta ! 2^ntheta
-     real(dp)     :: x0, y0, f0, df
-     real(dp)     :: dtheta
-     real(dp), allocatable, dimension(:)     :: x, y, f, k ! (n_x or n_y or nfreq or n_k)
-     real(dp), allocatable, dimension(:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq)
-  end type map_type
 
   type(tod_type)        :: tod
   type(map_type)        :: map
