@@ -131,6 +131,39 @@ contains
     end do
   end subroutine
 
+  subroutine get_avector_per_detscan(alist, det, sid, avec)
+    implicit none
+    type(acceptlist)                          :: alist
+    integer(i4b)                              :: det, sid
+    integer(i4b), dimension(:), allocatable   :: avec
+    integer(i4b)                              :: i, snum
+    
+    !allocate(avec(alist%nfreq))
+    avec = 0;
+    snum = lookup_scan(sid)    
+    do i = 1, alist%rf(det,snum)%numranges
+       avec(alist%rf(det,snum)%ranges(1:2,i)) = avec(alist%rf(det,snum)%ranges(3,i))
+    end do
+  end subroutine get_avector_per_detscan
+
+  subroutine get_amatrix_per_scan(alist, sid, amat)
+    implicit none
+    type(acceptlist)                          :: alist
+    integer(i4b)                              :: sid
+    integer(i4b), dimension(:,:), allocatable :: amat
+    integer(i4b)                              :: det
+    integer(i4b), dimension(:), allocatable   :: avec
+
+    ! allocate(amat(alist%nfreq,alist%ndet))
+    amat = 0;
+    allocate(avec(alist%nfreq))
+    do det = 1, alist%ndet
+       call get_avector_per_detscan(alist, det, sid, avec)
+       amat(:,det) = avec
+    end do
+
+  end subroutine get_amatrix_per_scan
+
 end module comap_acceptlist_mod
 
 
