@@ -62,7 +62,7 @@ program tod2comap
   call finalize_mapmaking(map)
   if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
   !if (myid == 0) call output_maps(trim(prefix), map)
-  
+  call free_map_type(map)
 
   if (myid == 0) write(*,*) 'Done'
   call mpi_finalize(ierr)
@@ -316,8 +316,6 @@ contains
        end do
        close(unit)
     end do
-
-    call free_map_type(map)
 
   end subroutine output_maps
 

@@ -17,6 +17,7 @@ module comap_map_mod
 
 contains
 
+  ! Writes an h5 file with maps/rms/nhit
   subroutine output_map_h5(filename,map)
     implicit none
     character(len=*), intent(in)    :: filename
@@ -34,9 +35,12 @@ contains
     call write_hdf(file, "nhit", map%nhit)
     call close_hdf_file(file)
 
+    call free_map_type(map)
+
   end subroutine output_map_h5
 
 
+  ! Reads an h5 file
   subroutine read_map_h5(filename,map)
     implicit none
     character(len=*), intent(in)  :: filename
@@ -44,6 +48,8 @@ contains
 
     type(hdf_file) :: file
     integer(i4b)   :: nx, ny, nfreq, ext(7)
+
+    call free_map_type(map)
 
     call open_hdf_file(trim(filename), file, "r")
 
@@ -63,5 +69,91 @@ contains
     call close_hdf_file(file)
 
   end subroutine read_map_h5
+
+
+  ! Creates a .dat file with the maps/rms/nhit for each frequency
+  subroutine output_maps(prefix, map)
+    implicit none
+    character(len=*), intent(in)    :: prefix
+    type(map_type),   intent(inout) :: map
+
+    integer(i4b)       :: i, j, k, unit
+    character(len=4)   :: itext
+    character(len=512) :: filename
+
+    unit = getlun()
+    do i = 1, map%nfreq
+       call int2string(i,itext)
+       filename = trim(prefix)//'_freq'//itext//'_map.dat'
+       open(unit, file=trim(filename), recl=100000)
+       write(unit,*) '# n_x = ', map%n_x
+       write(unit,*) '# n_y = ', map%n_y
+       write(unit,*) '# x   = ', real(map%x,sp)
+       write(unit,*) '# y   = ', real(map%y,sp)
+       do j = 1, map%n_x
+          do k = 1, map%n_y
+             write(unit,fmt='(e16.8)',advance='no') map%m(j,k,i)
+          end do
+          write(unit,*)
+       end do
+       close(unit)
+    end do
+
+    unit = getlun()
+    do i = 1, map%nfreq
+       call int2string(i,itext)
+       filename = trim(prefix)//'_freq'//itext//'_rms.dat'
+       open(unit, file=trim(filename), recl=100000)
+       write(unit,*) '# n_x = ', map%n_x
+       write(unit,*) '# n_y = ', map%n_y
+       write(unit,*) '# x   = ', real(map%x,sp)
+       write(unit,*) '# y   = ', real(map%y,sp)
+       do j = 1, map%n_x
+          do k = 1, map%n_y
+             write(unit,fmt='(e16.8)',advance='no') map%rms(j,k,i)
+          end do
+          write(unit,*)
+       end do
+       close(unit)
+    end do
+
+    unit = getlun()
+    do i = 1, map%nfreq
+       call int2string(i,itext)
+       filename = trim(prefix)//'_freq'//itext//'_nhit.dat'
+       open(unit, file=trim(filename), recl=100000)
+       write(unit,*) '# n_x = ', map%n_x
+       write(unit,*) '# n_y = ', map%n_y
+       write(unit,*) '# x   = ', real(map%x,sp)
+       write(unit,*) '# y   = ', real(map%y,sp)
+       do j = 1, map%n_x
+          do k = 1, map%n_y
+             write(unit,fmt='(e16.8)',advance='no') map%nhit(j,k,i)
+          end do
+          write(unit,*)
+       end do
+       close(unit)
+    end do
+
+    call free_map_type(map)
+
+  end subroutine output_maps
+
+
+  subroutine free_map_type(map)
+    implicit none
+    type(map_type), intent(inout) :: map
+
+    if (allocated(map%x))    deallocate(map%x) 
+    if (allocated(map%y))    deallocate(map%y)
+    if (allocated(map%f))    deallocate(map%f)
+    if (allocated(map%k))    deallocate(map%k)
+    if (allocated(map%m))    deallocate(map%m)
+    if (allocated(map%rms))  deallocate(map%rms)
+    if (allocated(map%dsum)) deallocate(map%dsum)
+    if (allocated(map%nhit)) deallocate(map%nhit)
+    if (allocated(map%div))  deallocate(map%div)
+
+  end subroutine free_map_type
 
 end module comap_map_mod
