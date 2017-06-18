@@ -9,12 +9,12 @@ program l3gen
   use quiet_mpi_mod
   use quiet_mpi_utils
   use quiet_task_mod
-  use comap_Lx_mod
+  use comap_lx_mod
   !use quiet_fft_mod
   use comap_pointing_mod
   use comap_noise_estimation_mod
   use powell_mod
-  !use quiet_gain_mod
+  use comap_gain_mod
   !use quiet_stat_mod
   !use quiet_patch_detect_mod
   !use quiet_sidelobe_mod
@@ -78,7 +78,7 @@ program l3gen
   call initialize_scan_mod(parfile);             call dmem("scan mod")
   call initialize_noise_estimation_mod(parfile); call dmem("noise mod")
   call initialize_comap_pointing_mod(parfile);   call dmem("pointing mod")
-  !call initialize_gain_mod(parfile);             call dmem("gain mod")
+  call initialize_gain_mod(parfile);             call dmem("gain mod")
   !call initialize_patch_detect_mod(parfile);     call dmem("patch detect mod")
   !call initialize_filter_mod(parfile);           call dmem("filter mod")
 
@@ -117,7 +117,7 @@ program l3gen
      call calc_scanfreq(data);                ; call dmem("scanfreq")
      call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
      call fit_noise(data, powspecs, snum)     ; call dmem("noise")
-     !call calc_gain(data)                     ; call dmem("gain")
+     call calc_gain(data)                     ; call dmem("gain")
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
      !call calc_stats(data)                    ; call dmem("stats")
      !allocate(data%filter_par(size(data%tod,2),NUM_FILTER_PAR))
@@ -215,7 +215,6 @@ contains
   end subroutine fit_noise
 
 
-
   subroutine get_scanfreq(point, samprate, scanfreq)
     implicit none
     real(sp)                                :: point(:)
@@ -234,23 +233,45 @@ contains
     deallocate(tod, ft, pow)
   end subroutine
 
-!!$  subroutine calc_gain(data)
-!!$    implicit none
-!!$    type(lx_struct) :: data
-!!$    integer(i4b)    :: n, ndi, i, j, m
-!!$    real(dp), dimension(:), allocatable :: tmp
-!!$    m   = 100
-!!$    n   = (size(data%time)+m-1)/m
-!!$    ndi = size(data%tod,2)
-!!$    allocate(data%time_gain(n), data%gain(n,ndi), tmp(n))
-!!$    data%time_gain = data%time(::m)
-!!$    do i = 1, ndi
-!!$       call get_gains(data%time_gain, i, tmp)
-!!$       data%gain(:,i) = tmp
-!!$    end do
-!!$    deallocate(tmp)
-!!$  end subroutine
-!!$
+  subroutine calc_gain(data)
+    implicit none
+    type(lx_struct) :: data
+    integer(i4b)    :: n, ndet, nfreq, i, j, k, m, a, tmin, tmax
+    real(dp)        :: g
+    real(dp), dimension(:), allocatable :: el, dat
+
+    a=1
+    m=a*data%samprate/data%scanfreq(2)      ! Number of tod-samples per gain estimate
+    write(*,*) m, '= m'
+!    n   = (size(data%time)+m-1)/m           ! Number of gain samples
+    n   = (size(data%time))/m               ! Number of gain samples
+    write(*,*) n, '= n', size(data%time), n*m
+    nfreq = size(data%tod,2)
+    ndet  = size(data%tod,3)
+    allocate(data%time_gain(n), data%gain(n,nfreq,ndet))
+    allocate(el(m), dat(m))
+    data%time_gain = data%time(::m)
+    open(13,file='gain.dat')
+    do k = 1, ndet
+       do j = 1, nfreq
+          do i = 1, n
+             tmin = (i-1)*m+1
+             tmax = i*m
+             el  = data%point_tel(2,tmin:tmax)
+             dat = data%tod(tmin:tmax,j,k)
+             !write(*,*) tmin, tmax
+             call estimate_gain(el,dat,g)
+             data%gain(i,j,k) = g
+             write(13,*) (g-5.6d10)/5.6d10*100
+
+          end do
+       end do
+    end do
+
+    close(13)
+    deallocate(el, dat)
+  end subroutine
+
 !!$  subroutine calc_stats(data)
 !!$    implicit none
 !!$    type(lx_struct) :: data
