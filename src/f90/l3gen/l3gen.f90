@@ -89,20 +89,20 @@ program l3gen
      tmpfile = trim(scan%l3file) // ".part"
      inquire(file=tmpfile,exist=exist)
      if(exist) then
-        write(*,fmt="(i3,a,2i5)") info%id, " found incomplete run:", snum, scan%cid
+        write(*,fmt="(i3,a,2i5)") info%id, " found incomplete run:", snum, scan%sid
         call rm(tmpfile)
      end if
      inquire(file=scan%l3file,exist=exist)
      if(exist .and. .not. reprocess) then
-        write(*,fmt="(i3,a,2i5,a)") info%id, " skipping already finished scan:", snum, scan%cid
+        write(*,fmt="(i3,a,2i5,a)") info%id, " skipping already finished scan:", snum, scan%sid
         cycle
      end if
      inquire(file=scan%l2file,exist=exist)
      if(.not. exist) then
-        write(*,fmt="(i3,a,2i5,a)") info%id, " data missing for scan:", snum, scan%cid, " " // trim(scan%l2file)
+        write(*,fmt="(i3,a,2i5,a)") info%id, " data missing for scan:", snum, scan%sid, " " // trim(scan%l2file)
         cycle
      end if
-     write(*,fmt="(i3,a,i4,a)") info%id, " processing scan ", scan%cid, " (" // trim(itoa(snum)) // "/" // &
+     write(*,fmt="(i3,a,i4,a)") info%id, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // &
           & trim(itoa(get_num_scans())) // ")"
 
      call dmem("scan start")
@@ -205,7 +205,7 @@ contains
           else
              call fit_1overf_profile(data%samprate, data%scanfreq, 1d-3, data%sigma0(j,i), &
                   & data%alpha(j,i), data%fknee(j,i), tod_ps=real(powspecs(:,j,i),dp), &
-                  & snum=scan%cid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
+                  & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
 !             write(*,fmt='(2i8,4f8.3)') info%id, i, j, data%sigma0(j,i), data%alpha(j,i), &
 !                  & data%fknee(j,i), chisq
           end if
