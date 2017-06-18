@@ -12,14 +12,14 @@ program l3gen
   use comap_Lx_mod
   !use quiet_fft_mod
   use comap_pointing_mod
-  !use quiet_noise_estimation_mod
+  use comap_noise_estimation_mod
   use powell_mod
   !use quiet_gain_mod
   !use quiet_stat_mod
   !use quiet_patch_detect_mod
   !use quiet_sidelobe_mod
   use quiet_nr_mod
-  use quiet_filter_mod
+  !use quiet_filter_mod
   use quiet_hdf_mod
   use spline_1d_mod
   implicit none
@@ -38,9 +38,9 @@ program l3gen
   type(info_struct)     :: info
   type(comap_scan_info) :: scan
   type(lx_struct)       :: data
-  real(sp),     dimension(:,:), allocatable :: powspecs, templates
-  complex(spc), dimension(:,:), allocatable :: ffts
-  logical(lgt), dimension(:,:), allocatable :: mask
+  real(sp),     dimension(:,:,:), allocatable :: powspecs
+  complex(spc), dimension(:,:,:), allocatable :: ffts
+  logical(lgt), dimension(:,:),   allocatable :: mask
 
   call getarg(1, parfile)
   call get_parameter(0, parfile, 'OUTPUT_DIR',           par_string=odir)
@@ -54,6 +54,8 @@ program l3gen
        & "Set this to negative to fit")
   call get_parameter(0, parfile, 'L2_COORDINATE_SYSTEM', par_string=coord_out, desc=&
        & "Coordinate system for L2 and L3 files; galactic or celestial")
+  call get_parameter(0, parfile, 'APPLY_SCANMASK',      par_lgt=scanmask, desc=&
+   & "Whether to mask out freqs near scanfreq when estimating noise parameters. Should normally be .true.")
 
   isys = COORD_CEL
   if (trim(coord_out) == 'galactic') then
@@ -74,7 +76,7 @@ program l3gen
   call mkdirs(trim(lockfile), .true.)
 
   call initialize_scan_mod(parfile);             call dmem("scan mod")
-  !call initialize_noise_estimation_mod(parfile); call dmem("noise mod")
+  call initialize_noise_estimation_mod(parfile); call dmem("noise mod")
   call initialize_comap_pointing_mod(parfile);   call dmem("pointing mod")
   !call initialize_gain_mod(parfile);             call dmem("gain mod")
   !call initialize_patch_detect_mod(parfile);     call dmem("patch detect mod")
@@ -113,14 +115,8 @@ program l3gen
      !call calc_objrel(data,  point_objs)      ; call dmem("objrel")
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
      call calc_scanfreq(data);                ; call dmem("scanfreq")
-     !call subtract_offset(data, offset_mask_file) ; call dmem("offset")
-     !call calc_mask(data, osys, mask);        ; call dmem("mask")
-     !call calc_noise(data, mask, ffts);       ; call dmem("noise")
-     !call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
- 
-     !call fit_noise(data, powspecs, cnum)     ; call dmem("noise")
-     !call calc_corr(data, ffts)               ; call dmem("corr")
-     !call calc_apex(data)                     ; call dmem("apex")
+     call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
+     call fit_noise(data, powspecs, snum)     ; call dmem("noise")
      !call calc_gain(data)                     ; call dmem("gain")
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
      !call calc_stats(data)                    ; call dmem("stats")
@@ -136,7 +132,7 @@ program l3gen
      call mkdirs(trim(scan%l3file), .true.)
      call mv(tmpfile, scan%l3file)
 
-     !deallocate(ffts, powspecs)
+     deallocate(ffts, powspecs)
      call free_lx_struct(data)
   end do
 
@@ -149,62 +145,6 @@ program l3gen
   write(*,*) 'Time elapsed: ', t2-t1
 contains
 
-!!$  subroutine subtract_offset(data, maskfile)
-!!$    implicit none
-!!$    type(lx_struct)                             :: data
-!!$    character(len=512)                          :: maskfile
-!!$    integer(i4b)                                :: nside, ndi, nsamp, di, nmod, nhit, nmasked, i, pix, m, numdi, ordering
-!!$    logical(lgt)                                :: exist
-!!$    real(dp), dimension(:),   allocatable   :: mask_samp
-!!$    real(dp), dimension(:,:), allocatable   :: mask
-!!$    real(dp), dimension(:),   allocatable   :: offset
-!!$
-!!$    ndi = size(data%tod,2)
-!!$    nsamp = size(data%tod,1)
-!!$    nmod = get_num_modules()
-!!$    nhit = size(data%pixels,1)
-!!$    numdi = get_num_diodes()
-!!$
-!!$    inquire(file=trim(maskfile), exist=exist)
-!!$    if (exist) then
-!!$       call read_map(mask, ordering, trim(maskfile))
-!!$       nside = npix2nside(size(mask,1))
-!!$    else
-!!$       nside = 1
-!!$       allocate(mask(0:12*nside**2-1,3))
-!!$       mask = 1.d0
-!!$       ordering = 1
-!!$    end if
-!!$
-!!$    allocate(offset(ndi))
-!!$    allocate(mask_samp(nsamp))
-!!$
-!!$    do m = 0,nmod-1
-!!$       do i = 1,nsamp
-!!$          pix = ang2pix(nside, ordering, real(data%point(2,i,m),dp), real(data%point(1,i,m),dp))
-!!$          mask_samp(i) = mask(pix,1)
-!!$       end do
-!!$       
-!!$!       write(*,*) 'ratio = ', sum(mask_samp)/nsamp
-!!$       if (sum(mask_samp) > 0.1d0 * nsamp) then
-!!$          do i = 1, numdi
-!!$             !di = diode_rel2abs(m,i)
-!!$             di = m*numdi + i
-!!$             offset(di) = sum(data%tod(:,di)*mask_samp)/real(sum(mask_samp),dp)
-!!$          end do
-!!$       else
-!!$          write(*,*) 'Warning: Too few unmasked samples to subtract offset, module', trim(itoa(m))
-!!$          offset(m*numdi+1:(m+1)*numdi) = 0.d0
-!!$       end if
-!!$    end do
-!!$    
-!!$    do di=1,ndi
-!!$       data%tod(:,di) = data%tod(:,di) - offset(di)
-!!$    end do
-!!$
-!!$    if(allocated(mask)) deallocate(mask)
-!!$    deallocate(offset, mask_samp)
-!!$  end subroutine subtract_offset
 
 
   subroutine calc_point(data, isys, osys)
@@ -224,12 +164,12 @@ contains
     data%coord_sys = osys
 
     ! Find map extent
-    call make_angles_safe(data%point(:,1),real(2.d0*pi,sp))
+    call make_angles_safe(data%point(:,1),real(360.d0,sp))
     data%point_lim(1) = minval(data%point(:,1))
     data%point_lim(2) = maxval(data%point(:,1))
     data%point_lim(3) = minval(data%point(:,2))
     data%point_lim(4) = maxval(data%point(:,2))
-    data%point(:,1)   = mod(data%point(:,1),2.d0*pi)
+    data%point(:,1)   = mod(data%point(:,1),360.)
   end subroutine
 
   subroutine calc_scanfreq(data)
@@ -239,48 +179,40 @@ contains
     call get_scanfreq(data%point_tel(2,:), data%samprate, data%scanfreq(2))
   end subroutine calc_scanfreq
 
-!!$  subroutine fit_noise(data, powspecs, cnum)
-!!$    implicit none
-!!$    type(lx_struct) :: data
-!!$    integer(i4b) :: ndi, i, cnum
-!!$    character(len=4) :: myid_text
-!!$    real(sp)     :: powspecs(:,:)
-!!$    real(dp)     :: chisq
-!!$    type(quiet_ces_info) :: ces
-!!$    ndi   = size(data%tod,2)
-!!$    allocate(data%sigma0(ndi), data%alpha(ndi), data%fknee(ndi))
-!!$    call get_ces_info(cnum, ces)
-!!$    call int2string(info%id, myid_text)
-!!$!TMR debug outputting to figure out the bias
-!!$!    open(42,file='chisq_andstuff_first.dat')
-!!$    do i = 1, ndi
-!!$       if (is_alive(i)) then
-!!$          if(no_filters) then
-!!$             data%sigma0(i) = 1e-5; data%alpha(i) = -1; data%fknee(i) = 0.02
-!!$          else
-!!$!             call fit_1overf_profile_old(data%samprate, data%scanfreq, 1d-2, data%sigma0(i), &
-!!$!               & data%alpha(i), data%fknee(i), tod_ps=real(powspecs(:,i),dp), &
-!!$!               & cnum=ces%cid, diode=i, chisq_out=chisq, apply_scanmask=scanmask)
-!!$!             write(*,*) i, data%sigma0(i), data%alpha(i), data%fknee(i)
-!!$!             write(*,*) 'chisq1 = ', chisq
-!!$             call fit_1overf_profile(data%samprate, data%scanfreq, 1d-2, data%sigma0(i), &
-!!$               & data%alpha(i), data%fknee(i), tod_ps=real(powspecs(:,i),dp), &
-!!$               & cnum=ces%cid, diode=i, chisq_out=chisq, apply_scanmask=scanmask)
-!!$!             write(*,*) i, data%sigma0(i), data%alpha(i), data%fknee(i)
-!!$!write(42,"(i4,f14.5,g14.5,2f14.5)") i, chisq, data%sigma0(i), data%fknee(i), data%alpha(i)
-!!$
-!!$!             write(*,*) 'chisq2 = ', chisq
-!!$!             stop
-!!$          end if
-!!$       else
-!!$          data%sigma0(i) = 0.d0
-!!$          data%alpha(i)  = 0.d0
-!!$          data%fknee(i)  = 0.d0
-!!$       end if
-!!$    end do
-!!$!    close(42)
-!!$!    stop
-!!$  end subroutine fit_noise
+  subroutine fit_noise(data, powspecs, snum)
+    implicit none
+    type(lx_struct) :: data
+    integer(i4b) :: ndet, nfreq, i, j, snum
+    character(len=4) :: myid_text
+    real(sp)     :: powspecs(:,:,:)
+    real(dp)     :: chisq
+    type(comap_scan_info) :: scan
+    nfreq  = size(data%tod,2)
+    ndet   = size(data%tod,3)
+    allocate(data%sigma0(nfreq,ndet), data%alpha(nfreq,ndet), data%fknee(nfreq,ndet))
+    call get_scan_info(snum, scan)
+    call int2string(info%id, myid_text)
+    do i = 1, ndet
+       if (.not. is_alive(i)) then
+          data%sigma0(:,i) = 0.d0
+          data%alpha(:,i)  = 0.d0
+          data%fknee(:,i)  = 0.d0
+          cycle
+       end if
+       do j = 1, nfreq
+          if(no_filters) then
+             data%sigma0(j,i) = 1e-5; data%alpha(j,i) = -1; data%fknee(j,i) = 0.02
+          else
+             call fit_1overf_profile(data%samprate, data%scanfreq, 1d-3, data%sigma0(j,i), &
+                  & data%alpha(j,i), data%fknee(j,i), tod_ps=real(powspecs(:,j,i),dp), &
+                  & snum=scan%cid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
+             write(*,fmt='(2i8,4f8.3)') info%id, i, j, data%sigma0(j,i), data%alpha(j,i), &
+                  & data%fknee(j,i), chisq
+          end if
+       end do
+    end do
+
+  end subroutine fit_noise
 
 
 
@@ -294,7 +226,7 @@ contains
     n = size(point) ! min(10000, size(az))
     m = n/2+1
     allocate(tod(n), ft(m), pow(m))
-    tod = point(1:n)
+    tod = point(1:n) - mean(point(1:n))
     call fft(tod, ft, 1)
     pow = ft*conjg(ft)
     i = maxloc(pow(2:),1)+1
@@ -583,78 +515,26 @@ contains
 !!$    if(allocated(spikefilter)) deallocate(spikefilter)
 !!$
 !!$  end subroutine calc_bandpass_filter_par
-!!$
-!!$  ! This routine is currently not in use.
-!!$  subroutine compute_fft_chisq(N_fft, powspec, chisq)
-!!$    implicit none
-!!$
-!!$    real(dp),     dimension(0:), intent(in)  :: N_fft
-!!$    real(sp),     dimension(0:), intent(in)  :: powspec
-!!$    real(dp),                    intent(out) :: chisq
-!!$
-!!$    integer(i4b) :: i
-!!$    real(dp)     :: n, w_sq, f
-!!$
-!!$    ! Compute effective chi-square and expected variance            
-!!$    chisq = 0.d0
-!!$    n     = 0.d0
-!!$    do i = 0, size(powspec)-1
-!!$       chisq = chisq + powspec(i) / N_fft(i)
-!!$       n     = n     + 1.d0
-!!$    end do
-!!$    chisq = (chisq - n) / sqrt(n)
-!!$  end subroutine compute_fft_chisq
-!!$
-!!$  ! Find which samples of each module hit something nasty
-!!$  subroutine calc_mask(data, osys, mask)
-!!$    implicit none
-!!$    type(lx_struct)                            :: data
-!!$    integer(i4b)                               :: osys, i, j, k, m, n, nmod, cmod, red
-!!$    real(dp)                                   :: frad, brad
-!!$    logical(lgt), dimension(:,:),  allocatable :: mask
-!!$    integer(i4b), dimension(:),    allocatable :: strong, objs, uobjs, tmp, relevant
-!!$    real(dp),     dimension(:,:,:),allocatable :: pos
-!!$    n    = size(data%time)
-!!$    nmod = get_num_modules()
-!!$    cmod = get_center_module()
-!!$    frad = get_focalplane_rad()
-!!$    red  = 100
-!!$    brad = get_max_fwhm()*fwhm2sigma*10;
-!!$    allocate(mask(n,0:nmod-1))
-!!$    mask = .true.
-!!$    call wherei(patches%priority >= patch_strong_lim, strong)
-!!$    allocate(pos(3,(n-1)/red+1,size(strong)),objs(n))
-!!$    ! Which patches hit anything at all?
-!!$    call get_patch_pos_multi(patches(strong), data%time(1:n:red), osys, pos)
-!!$    call get_patch_hits(patches(strong), pos, real(data%point(1,:,cmod),dp), &
-!!$     & real(data%point(2,:,cmod),dp), frad + brad, objs)
-!!$    call uniqi(objs, uobjs)
-!!$    call wherei(uobjs /= 0, tmp)
-!!$    allocate(relevant(size(tmp)))
-!!$    relevant = strong(uobjs(tmp))
-!!$    ! Ok, we now have the list of patches that actually matter
-!!$    do mod = 0, nmod-1
-!!$       call get_patch_hits(patches(relevant), pos(:,:,uobjs(tmp)), &
-!!$        & real(data%point(1,:,mod),dp), real(data%point(2,:,mod),dp), brad, objs)
-!!$       where(objs /= 0) mask(:,mod) = .false.
-!!$    end do
-!!$    deallocate(uobjs, tmp, objs, strong, pos, relevant)
-!!$  end subroutine
-!!$
-!!$  subroutine calc_fourier(data, ffts, powspecs)
-!!$    implicit none
-!!$    type(lx_struct) :: data
-!!$    integer(i4b)    :: ndi, i, j, k, nf
-!!$    complex(spc), dimension(:,:), allocatable :: ffts
-!!$    real(sp),     dimension(:,:), allocatable :: powspecs
-!!$    ndi   = size(data%tod,2)
-!!$    nf    = size(data%tod,1)/2+1
-!!$    allocate(ffts(nf,ndi), powspecs(nf, ndi))
-!!$    call fft_multi(data%tod, ffts, 1)
-!!$    do i = 1, ndi
-!!$       call extract_powspec(ffts(:,i), powspecs(:,i))
-!!$    end do
-!!$  end subroutine
+
+  subroutine calc_fourier(data, ffts, powspecs)
+    implicit none
+    type(lx_struct) :: data
+    integer(i4b)    :: nfreq, ndet, i, j, k, nf
+    complex(spc), dimension(:,:,:), allocatable :: ffts
+    real(sp),     dimension(:,:,:), allocatable :: powspecs
+    nfreq = size(data%tod,2)
+    ndet  = size(data%tod,3)
+    nf    = size(data%tod,1)/2+1
+    allocate(ffts(nf,nfreq,ndet), powspecs(nf,nfreq,ndet))
+    do i = 1, ndet
+       call fft_multi(data%tod(:,:,i), ffts(:,:,i), 1)
+    end do
+    do i = 1, ndet
+       do j = 1, nfreq
+          call extract_powspec(ffts(:,j,i), powspecs(:,j,i))
+       end do
+    end do
+  end subroutine
 !!$
 !!$  function ptrans_rot(phi1, theta1, phi2, theta2) result(angle)
 !!$    implicit none

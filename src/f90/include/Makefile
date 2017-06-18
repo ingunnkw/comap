@@ -17,7 +17,7 @@ OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_i2qu_mod.o quiet_mask_mod.o quiet_pmac_mod.o \
          quiet_assembly_mod.o quiet_filter_mod.o quiet_postutils.o \
          quiet_noise_estimation_mod.o comap_patch_mod.o quiet_todsim_mod.o \
-         quiet_glitchy_noise_mod.o quiet_task_mod.o \
+         quiet_glitchy_noise_mod.o quiet_task_mod.o comap_noise_estimation_mod.o \
          quiet_system_mod.o quiet_system_backend.o \
          quiet_shared_output_mod.o ziggurat.o sdeOOF.o quiet_status_mod.o \
          quiet_stat_mod.o quiet_ephem_backend.o locate_mod.o \
