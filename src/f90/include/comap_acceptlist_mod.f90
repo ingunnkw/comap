@@ -12,15 +12,15 @@ module comap_acceptlist_mod
   use comap_frequency_mod
   implicit none
 
-!  interface is_accepted_scan_any
-!     module procedure is_accepted
-!  end interface
+  interface is_accepted_scan_any
+     module procedure is_accepted
+  end interface
 
   type rejectfreqs
      integer(i4b) :: numranges       ! Number of rejected frequency intervals
      integer(i4b) :: numrf           ! Number of rejected frequencies
      integer(i4b) :: numaf           ! Number of accepted frequencies
-     integer(i4b), dimension(:,:), allocatable :: ranges !(3,numranges)
+     integer(i4b), dimension(:,:), allocatable :: ranges !(3(beg,end,stat),numranges)
   end type rejectfreqs
 
   type acceptlist
@@ -39,7 +39,7 @@ contains
     type(acceptlist)            :: alist
     call deallocate_acceptlist(alist)
     alist%nfreq = get_num_freqs()
-    alist%ndet  = get_num_detectors()
+    alist%ndet  = get_num_dets()
     alist%nscan = get_num_scans()
     allocate(alist%status( 1:alist%ndet, 1:alist%nscan))
     allocate(alist%rf(     1:alist%ndet, 1:alist%nscan))
@@ -131,21 +131,6 @@ contains
     end do
   end subroutine
 
-  subroutine get_avector_per_detscan(alist, det, sid, avec)
-    implicit none
-    type(acceptlist)                          :: alist
-    integer(i4b)                              :: det, sid
-    integer(i4b), dimension(:), allocatable   :: avec
-    integer(i4b)                              :: i, snum
-    
-    !allocate(avec(alist%nfreq))
-    avec = 0;
-    snum = lookup_scan(sid)    
-    do i = 1, alist%rf(det,snum)%numranges
-       avec(alist%rf(det,snum)%ranges(1:2,i)) = avec(alist%rf(det,snum)%ranges(3,i))
-    end do
-  end subroutine get_avector_per_detscan
-
   subroutine get_amatrix_per_scan(alist, sid, amat)
     implicit none
     type(acceptlist)                          :: alist
@@ -163,6 +148,54 @@ contains
     end do
 
   end subroutine get_amatrix_per_scan
+
+  subroutine get_avector_per_detscan(alist, det, sid, avec)
+    implicit none
+    type(acceptlist)                          :: alist
+    integer(i4b)                              :: det, sid
+    integer(i4b), dimension(:), allocatable   :: avec
+    integer(i4b)                              :: i, snum
+    
+    !allocate(avec(alist%nfreq))
+    avec = 0;
+    snum = lookup_scan(sid)    
+    do i = 1, alist%rf(det,snum)%numranges
+       avec(alist%rf(det,snum)%ranges(1:2,i)) = avec(alist%rf(det,snum)%ranges(3,i))
+    end do
+  end subroutine get_avector_per_detscan
+
+  function freq_is_accepted(alist, sid, det, freq) result(res)
+    implicit none
+    type(acceptlist)       :: alist
+    integer(i4b)           :: sid, det, freq
+    logical(lgt)           :: res
+    integer(i4b)           :: snum
+    snum = lookup_scan(sid)
+
+
+  end function freq_is_accepted
+
+
+
+
+  function is_accepted(alist, sid, det, freq) result(res)
+    implicit none
+    type(acceptlist)       :: alist
+    integer(i4b)           :: sid
+    integer(i4b), optional :: det, freq
+    logical(lgt)           :: res
+    integer(i4b)           :: snum
+
+    snum = lookup_scan(sid)
+
+    if (present(freq)) then
+       !res  = alist%status(freq,det,snum) == REJECTED_NONE
+    else
+       
+
+    end if
+
+  end function is_accepted
 
 end module comap_acceptlist_mod
 
@@ -240,22 +273,3 @@ end module comap_acceptlist_mod
 !!$       end do
 !!$    end do
 !!$  end subroutine
-
-!!$  function is_accepted(alist, sid, freq, det) result(res)
-!!$    implicit none
-!!$    type(acceptlist)       :: alist
-!!$    integer(i4b)           :: sid, snum
-!!$    integer(i4b), optional :: det, freq
-!!$    logical(lgt)           :: res
-!!$    snum = lookup_scan(sid)
-!!$    if (present(freq) .and. present(det)) then
-!!$       res  = alist%status(freq,det,snum) == REJECTED_NONE
-!!$    else if (present(freq)) then
-!!$       res  = any(alist%status(freq,:,snum)   == REJECTED_NONE)
-!!$    else if (present(det)) then
-!!$       res  = any(alist%status(:,det,snum)    == REJECTED_NONE)
-!!$    else 
-!!$       res  = any(alist%status(:,:,snum)  == REJECTED_NONE)
-!!$    end if
-!!$  end function is_accepted
-!!$

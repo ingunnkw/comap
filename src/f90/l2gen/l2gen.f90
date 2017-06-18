@@ -29,13 +29,13 @@ program l2gen
   mjd_tol  = 10d0/60/60/24
 
   call initialize_scan_mod(parfile)
-  call init_detector_mod(parfile)
+  call initialize_detector_mod(parfile)
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
   call dset(id=myid,level=debug)
 
-  ndet = get_num_detectors()
+  ndet = get_num_dets()
   allocate(detectors(ndet))
   do i = 1, ndet; detectors(i) = i; end do
   mstep = 10
@@ -54,13 +54,13 @@ program l2gen
 !!$           gonext = .true.
 !!$        end if
         if(gonext) then
-           write(*,fmt="(i3,a,2i5,a)") myid, " skipping already finished scan:", snum, scan%cid
+           write(*,fmt="(i3,a,2i5,a)") myid, " skipping already finished scan:", snum, scan%sid
            cycle
         end if
      else if (exist .and. reprocess) then
         call rm(scan%l2file)
      end if
-     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%cid, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
+     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
      call dmem("scan start")
 
      ! Read in Level 1 data
