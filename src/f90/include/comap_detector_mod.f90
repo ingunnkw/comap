@@ -12,7 +12,7 @@ module comap_detector_mod
 
 contains
 
-  subroutine init_detector_mod(parfile)
+  subroutine initialize_detector_mod(parfile)
     implicit none
     character(len=*), intent(in) :: parfile
     character(len=512)           :: dfile

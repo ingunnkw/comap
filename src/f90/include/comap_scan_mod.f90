@@ -8,7 +8,7 @@ module comap_scan_mod
   ! extracted directly from the level2-runlist. Category and object
   ! are indices into name arrays.
   type comap_scan_info
-    integer(i4b)       :: cid
+    integer(i4b)       :: sid
     real(dp)           :: mjd(2), az, el, dk, lat, lon, time_of_day
     character(len=512) :: l2file, l3file, object, scanmode
     character(len=512), allocatable, dimension(:) :: l1files
@@ -17,14 +17,14 @@ module comap_scan_mod
   type comap_runlist
      integer(i4b)                                     :: n
      type(comap_scan_info), dimension(:), allocatable :: scans
-     integer(i4b),          dimension(:), allocatable :: cidmap
+     integer(i4b),          dimension(:), allocatable :: sidmap
   end type comap_runlist
 
   integer(i4b), parameter :: PROP_TOD = 1, PROP_AZ = 2, PROP_EL = 3, &
     & PROP_DECK = 4, PROP_DUR = 5, PROP_MJD = 6
 
   type(comap_runlist)          :: scan_db
-  integer(i4b),    allocatable :: cid_list(:), cid_sort(:)
+  integer(i4b),    allocatable :: sid_list(:), sid_sort(:)
   logical(lgt),        private :: initialized = .false.
   character(len=512),  private :: l1dir, l2dir, l3dir
 
@@ -43,10 +43,10 @@ contains
     call get_parameter(0, parfile, 'LEVEL3_DIR',  par_string=l3dir)
 
     call read_runlist(runlist, l1dir, l2dir, l3dir, scan_db)
-    allocate(cid_list(scan_db%n), cid_sort(scan_db%n))
-    cid_list = scan_db%scans%cid
-    cid_sort = cid_list
-    call quicksort_int(cid_sort)
+    allocate(sid_list(scan_db%n), sid_sort(scan_db%n))
+    sid_list = scan_db%scans%sid
+    sid_sort = sid_list
+    call quicksort_int(sid_sort)
     initialized = .true.
   end subroutine
 
@@ -56,12 +56,12 @@ contains
     res = size(scan_db%scans)
   end function
 
-  function lookup_scan(cid) result(res)
+  function lookup_scan(sid) result(res)
     implicit none
-    integer(i4b) :: cid, res
+    integer(i4b) :: sid, res
     res = 0
-    if(cid < 0 .or. cid > size(scan_db%cidmap)) return
-    res = scan_db%cidmap(cid)
+    if(sid < 0 .or. sid > size(scan_db%sidmap)) return
+    res = scan_db%sidmap(sid)
   end function
 
   subroutine get_scan_info(ind, scan)
@@ -71,9 +71,9 @@ contains
     call copy_scan_info(scan_db%scans(ind), scan)
   end subroutine
 
-  subroutine get_l2_param(cid, index, mjd, az, el, dk, time, target)
+  subroutine get_l2_param(sid, index, mjd, az, el, dk, time, target)
     implicit none
-    integer(i4b),                   intent(in),  optional :: cid, index
+    integer(i4b),                   intent(in),  optional :: sid, index
     real(dp),                       intent(out), optional :: az, el, dk, time
     real(dp),         dimension(2), intent(out), optional :: mjd
     character(len=*),               intent(out), optional :: target
@@ -82,12 +82,12 @@ contains
     if(present(index)) then
        call get_scan_info(index, info)
     else
-       if(.not. present(cid)) then
-          write(stderr,*) "Either index or cid must be given to get_l2_param!"
+       if(.not. present(sid)) then
+          write(stderr,*) "Either index or sid must be given to get_l2_param!"
           stop
        end if
-       call assert(cid > 0, "Non-positive cid in get_l2_param!")
-       call get_scan_info(scan_db%cidmap(cid), info)
+       call assert(sid > 0, "Non-positive sid in get_l2_param!")
+       call get_scan_info(scan_db%sidmap(sid), info)
     end if
 
     if (present(az))   then; az   = info%az; end if
@@ -107,7 +107,7 @@ contains
     implicit none
     character(len=*)   :: file
     character(len=512) :: name, l1dir, l2dir, l3dir, line
-    integer(i4b)       :: unit, nobj, nscan, nfile, cid, i, j, k, n, cnum, cmax
+    integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n, cnum, cmax
     real(dp)           :: mjd(2)
     type(comap_runlist):: runlist
     type(comap_scan_info)    :: scan
@@ -122,7 +122,7 @@ contains
        read(unit,*) name, nscan
        do j = 1, nscan
           cnum = cnum+1
-          read(unit,*) scan%cid, scan%mjd, nfile, scan%az, scan%el, scan%dk, scan%lon, scan%lat
+          read(unit,*) scan%sid, scan%mjd, nfile, scan%az, scan%el, scan%dk, scan%lon, scan%lat
           scan%object      = name
           scan%time_of_day = mjd2chile_time(mean(scan%mjd))
           allocate(scan%l1files(nfile))
@@ -131,20 +131,20 @@ contains
              scan%l1files(k) = trim(l1dir) // "/" // trim(get_token(line, " ", 3))
           end do
           scan%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-           & trim(itoa(scan%cid)) // ".h5"
+           & trim(itoa(scan%sid)) // ".h5"
           scan%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-           & trim(itoa(scan%cid)) // ".h5"
+           & trim(itoa(scan%sid)) // ".h5"
           call copy_scan_info(scan, runlist%scans(cnum))
           call free_scan_info(scan)
        end do
     end do
     close(unit)
-    ! Set up the cid mapping
-    cmax = maxval(runlist%scans%cid)
-    allocate(runlist%cidmap(cmax))
-    runlist%cidmap = 0
+    ! Set up the sid mapping
+    cmax = maxval(runlist%scans%sid)
+    allocate(runlist%sidmap(cmax))
+    runlist%sidmap = 0
     do i = 1, size(runlist%scans)
-       runlist%cidmap(runlist%scans(i)%cid) = i
+       runlist%sidmap(runlist%scans(i)%sid) = i
     end do
     runlist%n = size(runlist%scans)
   end subroutine read_runlist
@@ -153,7 +153,7 @@ contains
     implicit none
     character(len=*)   :: file
     character(len=512) :: name
-    integer(i4b)       :: unit, nobj, nscan, nfile, cid, i, j, k, n
+    integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n
     real(dp)           :: mjd(2)
     n = 0
     unit = getlun()
@@ -163,7 +163,7 @@ contains
        read(unit,*) name, nscan
        n = n+nscan
        do j = 1, nscan
-          read(unit,*) cid, mjd, nfile
+          read(unit,*) sid, mjd, nfile
           do k = 1, nfile
              read(unit,*)
           end do
@@ -196,7 +196,7 @@ contains
        end do
        deallocate(runlist%scans)
     end if
-    if(allocated(runlist%cidmap)) deallocate(runlist%cidmap)
+    if(allocated(runlist%sidmap)) deallocate(runlist%sidmap)
   end subroutine
 
   subroutine copy_runlist(a, b)
@@ -206,11 +206,11 @@ contains
     integer(i4b)        :: i
     call free_runlist(b)
     allocate(b%scans(size(a%scans)))
-    allocate(b%cidmap(size(a%cidmap)))
+    allocate(b%sidmap(size(a%sidmap)))
     do i = 1, size(a%scans)
        call copy_scan_info(a%scans(i),b%scans(i))
     end do
-    b%cidmap = a%cidmap
+    b%sidmap = a%sidmap
   end subroutine
 
   function mjd2chile_time(mjd) result(res)
