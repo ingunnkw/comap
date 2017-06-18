@@ -1,8 +1,3 @@
-! This module replaces quiet_module_mod. 
-!
-! Horn format:
-! id telescope horn theta phi psi fwhm freq ok
-
 module comap_detector_mod
   use quiet_utils
   implicit none
@@ -69,7 +64,7 @@ contains
     2 close(unit)
   end subroutine
 
-  function get_num_detectors() result(res)
+  function get_num_dets() result(res)
     implicit none
     integer(i4b) :: res
     res = size(comap_detectors)
