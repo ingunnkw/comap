@@ -145,10 +145,11 @@ contains
     type(lx_struct)              :: data
     type(hdf_file)               :: file
     integer(i4b) :: npoint, nsamp, nfreq, ndet, nmod, ext(7)
+
     call free_lx_struct(data)
     call read_l2_file(filename, data)
     call open_hdf_file(filename, file, "r")
-    call read_hdf(file, "scan_freq",  data%scanfreq)    
+    call read_hdf(file, "scanfreq",  data%scanfreq)    
     !call read_hdf(file, "pixsize", data%pixsize)
     call read_hdf(file, "point_lim", data%point_lim)
     ! Read pointing
@@ -156,7 +157,6 @@ contains
     npoint = ext(1); nsamp = ext(2)!; mod = ext(3)
     allocate(data%point(npoint,nsamp))
     call read_hdf(file, "point",     data%point)
-    !call read_hdf(file, "coord_sys", data%coord_sys)  
     call read_hdf(file, "coord_sys", data%coord_sys)
     ! Read gain
     call get_size_hdf(file, "time_gain", ext)
@@ -169,19 +169,18 @@ contains
     call read_hdf(file, "gain", data%gain)
     ! Read noise parameters
     !call get_size_hdf(file, "corr", ext)
-    call get_size_hdf(file, "sigma", ext)
+    call get_size_hdf(file, "sigma0", ext)
     nfreq = ext(1); ndet = ext(2)
     allocate(data%sigma0(nfreq,ndet),data%alpha(nfreq,ndet),data%fknee(nfreq,ndet))
     !allocate(data%corr(nfreq,nfreq,ndet,ndet))
     !allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
     allocate(data%det_stats(ndet,nfreq,1), data%filter_par(4,nfreq,ndet))
-    call read_hdf(file, "sigma", data%sigma0)
+    call read_hdf(file, "sigma0", data%sigma0)
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)
     !call read_hdf(file, "corr",   data%corr)
     ! Read stats
-    !call read_hdf(file, "stats",       data%stats)
-    call read_hdf(file, "stats", data%det_stats)
+    call read_hdf(file, "det_stats", data%det_stats)
     ! Read filter parameters
     call read_hdf(file, "filter_par",  data%filter_par)
     call close_hdf_file(file)
