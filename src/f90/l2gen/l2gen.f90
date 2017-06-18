@@ -69,7 +69,7 @@ program l2gen
      do i = 1, num_l1_files
         call read_l1_file(scan%l1files(i), data_l1(i))
      end do
-
+     
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
 
