@@ -236,8 +236,8 @@ contains
   subroutine calc_gain(data)
     implicit none
     type(lx_struct) :: data
-    integer(i4b)    :: n, ndet, nfreq, i, j, k, m, a, tmin, tmax
-    real(dp)        :: g
+    integer(i4b)    :: n, ndet, nfreq, i, j, k, m, tmin, tmax
+    real(dp)        :: g, a
     real(dp), dimension(:), allocatable :: el, dat
 
     a=1
@@ -248,6 +248,7 @@ contains
     write(*,*) n, '= n', size(data%time), n*m
     nfreq = size(data%tod,2)
     ndet  = size(data%tod,3)
+    write(*,*) nfreq, '=nfreq', ndet, '=ndet'
     allocate(data%time_gain(n), data%gain(n,nfreq,ndet))
     allocate(el(m), dat(m))
     data%time_gain = data%time(::m)
@@ -262,12 +263,10 @@ contains
              !write(*,*) tmin, tmax
              call estimate_gain(el,dat,g)
              data%gain(i,j,k) = g
-             write(13,*) (g-5.6d10)/5.6d10*100
-
+             write(13,*) (g-4d9)/4.d9*100
           end do
        end do
     end do
-
     close(13)
     deallocate(el, dat)
   end subroutine
