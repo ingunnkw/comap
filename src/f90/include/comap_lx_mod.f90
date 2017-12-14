@@ -12,10 +12,11 @@ module comap_lx_mod
      real(dp)                                        :: mjd_start
      real(dp)                                        :: samprate
      real(dp),     allocatable, dimension(:)         :: time
+     real(dp),     allocatable, dimension(:)         :: time_point
      real(dp),     allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
-     real(sp),     allocatable, dimension(:,:)       :: point_cel   ! Celestial; (RA/dec/psi, time)
-     real(sp),     allocatable, dimension(:,:)       :: point_tel   ! Horizon; (az/el/dk, time)
+     real(sp),     allocatable, dimension(:,:)       :: point_cel   ! Celestial; (RA/dec/psi, time_point)
+     real(sp),     allocatable, dimension(:,:)       :: point_tel   ! Horizon; (az/el/dk, time_point)
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
 
@@ -53,16 +54,23 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod_l1", ext)
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
+    call get_size_hdf(file, "time_point", ext)
+    npoint = ext(1)
+
              allocate(data%time(nsamp))
-             allocate(data%point_tel(3,nsamp))
-             allocate(data%point_cel(3,nsamp))
-             allocate(data%scanmode_l1(nsamp))
+             allocate(data%time_point(npoint))
+!             allocate(data%point_tel(3,nsamp))
+!             allocate(data%point_cel(3,nsamp))
+             allocate(data%point_tel(3,npoint))
+             allocate(data%point_cel(3,npoint))
+             allocate(data%scanmode_l1(npoint))
     if (all) allocate(data%nu_l1(nsamp,nsb))
     if (all) allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
     call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
     call read_hdf(file, "time",                 data%time)
+    call read_hdf(file, "time_point",           data%time_point)
     call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
     call read_hdf(file, "scanmode_l1",          data%scanmode_l1)
@@ -190,6 +198,7 @@ contains
     implicit none
     type(lx_struct) :: data
     if(allocated(data%time))        deallocate(data%time)
+    if(allocated(data%time_point))  deallocate(data%time_point)
     if(allocated(data%nu))          deallocate(data%nu)
     if(allocated(data%nu_l1))       deallocate(data%nu_l1)
     if(allocated(data%tod))         deallocate(data%tod)

@@ -106,8 +106,8 @@ program scan_detect
 
   ! These are implementation details that probably don't need to be
   ! configurable.
-  chunk_size  = 10000 ! 10000 frames = 100 s
-  target_dt   = 10    ! 10 ms
+  chunk_size  = 5000 ! 10000 frames = 100 s
+  target_dt   = 100    ! 10 ms
   glitchtol   = 300   ! ignore mode /= 3 glitches shorter than this
 
   call get_parameter(0, parfile, "CES_RESOLUTION", par_int=subchunk_size, &
@@ -187,21 +187,27 @@ program scan_detect
   n = 0
   n=n+1; call init_validator(vals(n),"ces",output_dir,size(filelist),ces_mindur,ces_delay)
   n=n+1; call init_validator(vals(n),"cas",output_dir,size(filelist),cas_mindur,ces_delay)
-  n=n+1; call init_validator(vals(n),"sun",output_dir,size(filelist),0d0,       0d0)
+  !n=n+1; call init_validator(vals(n),"sun",output_dir,size(filelist),0d0,       0d0)
   n=n+1; call init_validator(vals(n),"rst",output_dir,size(filelist),rst_mindur,ces_delay)
+  n=n+1; call init_validator(vals(n),"liss",output_dir,size(filelist),ces_mindur,ces_delay)
   call init_subchunk_iterator(iterator, filelist(vals(1)%filefrom:), chunk_size, subchunk_size, target_dt)
+  write(*,*) "so far so good"
   ok = .true.
   do while(ok .and. any(.not. vals(1:n)%done))
      ok = next_subchunk(iterator, chunk)
+     write(*,*) "done?: ", vals(4)%done, "ok?:", ok, "chunk%n", chunk%n
      do i = 1, n
         call process_chunk(chunk, vals(i))
+        write(*,*) "reason", vals(i)%reason
+        write(*,*) "ok?", ok
+        write(*,*) "done?", vals(4)%done
      end do
   end do
   do i = 1, n
      call free_validator(vals(i))
   end do
-
-  deallocate(filelist, pswitch)
+  write(*,*) "Better"
+  deallocate(filelist)
   call free_chunk(chunk)
   call free_subchunk_iterator(iterator)
   call mpi_finalize(ierr)
@@ -217,20 +223,25 @@ contains
     real(dp)           :: hvec(3), gvec(3), az, el, dk, phi, theta, psi, dist
     character(len=512) :: line, objname
     integer(i4b), dimension(:), allocatable :: matches
-
+    
     if(val%done) return
-    ifile = chunk%ifile+val%filefrom-1
+    ifile = chunk%ifile+val%filefrom  ! There may be something wrong with the file indices!?!
+    write(*,*) "ifile", ifile, "chunkifile", chunk%ifile
+         
     ! Loop until we enter our area of responsibility
     if(ifile < val%filebeg) return
-
+    write(*,*) "inside pr.ch", chunk%n
+         
     if(chunk%n == 0) then
        valid = .false.
+       split = .false.
     else
        select case(val%type)
-          case("ces");  call validate_ces(chunk, val, valid, split)
-          case("cas");  call validate_cas(chunk, val, valid, split)
+          case("ces");  call validate_ces(chunk, val, valid, split) 
+          case("cas"); call validate_cas(chunk, val, valid, split)
 !          case("sun");  call validate_sun(chunk, val, valid, split)
           case("rst");  call validate_rst(chunk, val, valid, split)
+          case("liss"); call validate_liss(chunk, val, valid, split)
           case default
              write(stderr,*) "Invalid type to detect: " // trim(val%type)
              stop
@@ -241,12 +252,17 @@ contains
 !write(40,'(f13.7,3f15.10,i4,i7)') chunk%time(i), chunk%az(i), chunk%el(i), chunk%dk(i), val%reason, iterator%icont
 !end do
 !end if
-
+    write(*,*) "valid", valid
+    write(*,*) "split", split
+    write(*,*) "done?:", val%done
+    write(*,*) "in ces?:", val%in_ces
     ! Has a ces ended?
     if(val%in_ces .and. (split .or. .not. valid)) then
        ! Should we restrict the range?
        orange = val%ces_range
-       if(val%type == "ces") call adjust_range(orange, val%ces_delay)
+       write(*,*) "ces_range", orange
+       write(*,*) "ces_delay", val%ces_delay
+     !  if(val%type == "ces") call adjust_range(orange, val%ces_delay)  ! removed because we don't have pswitch (whatever that is
        if(orange(2)-orange(1) >= val%mindur/24/60/60) then
           call vec2ang(val%avg_hvec, avgel,    avgaz)
           call vec2ang(val%avg_gvec, avgtheta, avgphi)
@@ -280,8 +296,10 @@ contains
     end if
     ! After making sure we output our last ces, exit if we are
     ! outside our area.
-    if(.not. valid .and. ifile >= val%fileend) then
+    if(.not. valid .and. ifile > val%fileend) then !was originally "ifile >= val%fileend) then", but we ended after first ces always. This seems to work'
        val%done = .true.
+       write(*,*) "fileend", val%fileend, "ifile", ifile
+       write(*,*) "now I'm done"
        return
     end if
 
@@ -329,9 +347,9 @@ contains
     val%filebeg  = filelen*myid/nproc+1
     val%filefrom = max(1, val%filebeg-1)
     val%fileend  = filelen*(myid+1)/nproc+1 ! The first index not part of what we want
-
+!    write(*,*) "filebeg, fileend", val%filebeg, val%fileend
     val%done     = val%filebeg == val%fileend
-
+!    write(*,*) val%done
     val%ces_ofilename   = trim(odir) // "/" // trim(type) // "_list.txt"
     val%range_ofilename = trim(odir) // "/" // trim(type) // "_fileranges.txt"
     call mkdirs(val%ces_ofilename,   .true.)
@@ -368,6 +386,7 @@ contains
     iterator%icont     = 0
     iterator%isect     = 0
     iterator%ifile     = 0
+!    iterator%ifile     = 1
     iterator%ranges    = 0
     iterator%last_cont = .true.
     allocate(iterator%mods(get_num_detectors()))
@@ -376,11 +395,14 @@ contains
     ! Read in the data, and scan until we reach the correct time
     call get_data(l1prefix, iterator%files, iterator%file_index, iterator%mods, iterator%data)
     iterator%n = size(iterator%data%scanmode_l1)
+    write(*,*) "filesize (n_t):", size(iterator%data%time_point)
     i = 1
-    iterator%ranges(iterator%file_index,:) = iterator%data%time([1,iterator%n])
+!    write(*,*) [1,iterator%n]
+!    write(*,*) iterator%data%time([1,iterator%n])
+    iterator%ranges(iterator%file_index,:) = iterator%data%time_point([1,iterator%n])
     iterator%pos = i-1
     ! Assume that the previous step had the correct length
-    iterator%mjd = iterator%data%time(i) - iterator%target_dt/24d0/60/60/1000
+    iterator%mjd = iterator%data%time_point(i) - iterator%target_dt/24d0/60/60/1000
   end subroutine
 
   function next_chunk(iterator, chunk) result(ok)
@@ -391,9 +413,11 @@ contains
     integer(i4b)         :: i, j, k, m, n, unit, status
     real(dp)             :: dt
     ok   = iterator%file_index <= size(iterator%files)
+    !write(*,*) "ok in next chunk:", ok, iterator%file_index, size(iterator%files)
     if(.not. ok) return
     n    = iterator%work%n
     unit = getlun()
+    write(*,*) "icont in next_chunk", iterator%icont, "last_cont", iterator%last_cont
     if(iterator%last_cont) then
        iterator%icont = 0
        iterator%isect = iterator%isect + 1
@@ -406,15 +430,17 @@ contains
     do i = 1, n
        iterator%pos = iterator%pos + 1
        if(iterator%pos > iterator%n) then
+          ! are we outside end of file
           iterator%file_index = iterator%file_index + 1
           call get_data(l1prefix, iterator%files, iterator%file_index, iterator%mods, iterator%data)
           if(iterator%file_index > size(iterator%files)) exit
           iterator%n   = size(iterator%data%scanmode_l1)
-          iterator%ranges(iterator%file_index,:) = iterator%data%time([1,iterator%n])
+          iterator%ranges(iterator%file_index,:) = iterator%data%time_point([1,iterator%n])
           iterator%pos = 1
        end if
-       dt = (iterator%data%time(iterator%pos) - iterator%mjd)*24*60*60*1000
-       iterator%mjd = iterator%data%time(iterator%pos)
+       dt = (iterator%data%time_point(iterator%pos) - iterator%mjd)*24*60*60*1000
+       iterator%mjd = iterator%data%time_point(iterator%pos)
+       !write(*,*) "dt - comparison", nint(dt), iterator%target_dt
        if(abs(nint(dt) - iterator%target_dt) > 3) then
           iterator%last_cont = .true.
           exit
@@ -422,10 +448,10 @@ contains
        if(i == 1 .and. iterator%icont == 1) iterator%ifile = iterator%file_index
        iterator%work%ifile   = iterator%ifile
        iterator%work%mode(i) = iterator%data%scanmode_l1(iterator%pos)
-       iterator%work%time(i) = iterator%data%time(iterator%pos)
-       iterator%work%az(i)   = iterator%data%point_tel(0, iterator%pos)
-       iterator%work%el(i)   = iterator%data%point_tel(1, iterator%pos)
-       iterator%work%dk(i)   = iterator%data%point_tel(2, iterator%pos)
+       iterator%work%time(i) = iterator%data%time_point(iterator%pos)
+       iterator%work%az(i)   = iterator%data%point_tel(1, iterator%pos) * pi / 180.0
+       iterator%work%el(i)   = iterator%data%point_tel(2, iterator%pos) * pi / 180.0
+       iterator%work%dk(i)   = iterator%data%point_tel(3, iterator%pos) * pi / 180.0
     end do
     ! Now copy over what we got.
     call copy_chunk(iterator%work, chunk, i-1)
@@ -456,7 +482,9 @@ contains
     call free_subchunk_iterator(iterator)
     call init_chunk_iterator(iterator%iterator, filelist, chunk_size, target_dt)
     iterator%chunk_size = subchunk_size
+    write(*,*) "icont in init_subchunk_iterator", iterator%iterator%icont, "last_cont", iterator%iterator%last_cont
     iterator%ok         = next_chunk(iterator%iterator, iterator%chunk1)
+    write(*,*) "icont after first next_chunk", iterator%iterator%icont
     iterator%state      = 0
   end subroutine
 
@@ -479,16 +507,20 @@ contains
     chunk%n = 0
     ok = iterator%ok
     if(.not. ok) return
-
+    write(*,*) "iterator%state", iterator%state
     if(iterator%state == 1) goto 1
     if(iterator%state == 2) goto 2
+    write(*,*) "Got this far"
     do while(iterator%ok)
        iterator%i     = 1
        iterator%icont = 0
        do ! moving window
           iterator%tmp_ok = next_chunk(iterator%iterator, iterator%chunk2)
+          !write(*,*) "icont", iterator%iterator%icont
           if(.not. iterator%tmp_ok .or. iterator%iterator%icont == 1) exit ! done with this section
+          write(*,*) "But never this far"
           call append_chunk(iterator%chunk1, iterator%chunk2, iterator%chunk)
+          !write(*,*) "mode", iterator%chunk%mode
           call fix_mode(iterator%chunk%mode, glitchtol)
 1         iterator%state = 1
           m = iterator%chunk1%n+iterator%chunk2%n/2
@@ -634,25 +666,32 @@ contains
     type(validator)  :: val
     logical(lgt)     :: ok, split
     real(dp), dimension(:), allocatable :: work, subtracted_data
-    integer(i4b)     :: nstall, nstall_tmp
+    integer(i4b)     :: nstall, nstall_tmp, iii
     split = iterator%icont == 1
     ok = .false.
-    val%reason = 1
-    if(any(chunk%mode /= 3)) return
+    write(*,*) "inside liss, n: ", chunk%n, size(chunk%el), pi
+    !val%reason = 1
+    !if(any(chunk%mode /= 3)) return
     val%reason = 2
+    write(*,*) "sizechunk",size(chunk%el)
+    !do iii= 1,size(chunk%el)
+       !write(*,*) chunk%el(iii)
+    !   chunk%el(iii) = chunk%el(iii) * pi / 180.0
+    !end do
     if(any(chunk%el < -pi/2) .or. any(chunk%el > pi/2))    return
     val%reason = 3
-    if(stalled(chunk%az, az_stall_lim, az_stall_timeout))             return
-    val%reason = 4
-    if(stalled(chunk%el, el_stall_lim, el_stall_timeout))         return
+    if(angle_const(chunk%el, val%el_helper, max_el_dev)) return
+    !if(stalled(chunk%az, az_stall_lim, az_stall_timeout))             return
+    !val%reason = 4
+    !if(stalled(chunk%el, el_stall_lim, el_stall_timeout))         return
     val%reason = 5
-    !allocate(subtracted_data(chunk%n))
+    allocate(subtracted_data(chunk%n))
     call remove_sinusoid(chunk%el, chunk%time, chunk%n, subtracted_data)
     if(.not. angle_const(subtracted_data, val%el_helper, max_el_dev)) return
     call remove_sinusoid(chunk%az, chunk%time, chunk%n, subtracted_data)
     if(.not. angle_const(subtracted_data, val%az_helper, max_az_dev)) return
     val%reason = 0
-    ok = .true.
+    ok = .true. !(should be true)
   end subroutine
 
   subroutine validate_ces(chunk, val, ok, split)
@@ -664,8 +703,8 @@ contains
     integer(i4b)     :: nstall, nstall_tmp
     split = iterator%icont == 1
     ok = .false.
-    val%reason = 1
-    if(any(chunk%mode /= 3)) return
+    !val%reason = 1
+    !if(any(chunk%mode /= 3)) return
     val%reason = 2
     if(any(chunk%el < -pi/2) .or. any(chunk%el > pi/2))    return
     val%reason = 3
@@ -958,6 +997,8 @@ contains
     real(dp), intent(in)    :: delay
     integer(i4b)            :: i
     ! Find the last phase switch event before range(2)
+    write(*,*) "range",range(2)
+    write(*,*) "pswitch",pswitch
     i = locate(pswitch, range(2))
     if(i <= 0 .or. i > size(pswitch)) return
     range(1) = max(range(1), pswitch(i) + delay)
@@ -1005,34 +1046,48 @@ contains
         REAL(dp), PARAMETER :: PI = 3.1415926535
         integer(i4b)                                         :: i, n_periods, n
         real(dp), intent(in)                                 :: func(:), x(:)
-        real(dp)                                             :: mean, max_val, min_val, intersect, omega, omega_calc, first_intersect, dx
+        real(dp)                                             :: mean, max_val, min_val, intersect, omega, omega_calc, first_intersect, dx, f2i
         logical                                              :: is_first
         real(dp), intent(out), allocatable, dimension(:)     :: func2
         if (allocated(func2)) deallocate(func2)
         allocate(func2(n))
         max_val = maxval(func)
         mean = max_val - 0.5 * (max_val - minval(func))
-
-!        write(*,*) "Mean: ", mean
+        dx = x(2) - x(1)
+        intersect = 1.0 ! just to avoid float error, fix this later
+        first_intersect = 0.0
+        !write(*,*) "n: ", n
         n_periods = -1
         is_first  = .true.
-        do i=1,n
+        func2(1) = func(1) - mean
+        do i=2,n
             func2(i) = func(i) - mean
-
-            if ((func2(i) * func2(i-1) < 0) .and. (func2(i)>func2(i-1))) then
+            f2i = func2(i)
+            if ((f2i * func2(i-1) < 0) .and. (f2i>func2(i-1))) then
+                !write(*,*) "in if test"
                 n_periods = n_periods + 1
-                intersect = x(i) - func2(i)/(func2(i) - func2(i-1))*dx
+                intersect = x(i) - f2i/(f2i - func2(i-1))*dx
                 if (is_first) then
                     first_intersect = intersect
                     is_first = .false.
                 end if
             end if
         end do
-        omega_calc = 2.0 * PI / ((intersect - first_intersect)/n_periods)
-        !write(*,*) "Omega compare", omega_calc, 1.33333
+        if (abs(intersect - first_intersect) > 0.00000001 * (2 + n_periods)) then 
+           omega_calc = 2.0 * PI / ((intersect - first_intersect)/n_periods)
+        else 
+           omega_calc = 1.0
+        end if
+        write(*,*) "Omega_calc", omega_calc
+        write(*,*) "maxval", max_val
+        write(*,*) "mean", mean
+        write(*,*) "n_periods", n_periods
+        
+        
 
         do i=1,n
             func2(i) = func2(i) - (max_val - mean) * sin(omega_calc * (x(i) - first_intersect))
+            write(*,*) func2(i), func(i), x(i)
 !            if (mod(i,100) == 0) then
 !                write(*,*) func2(i)
 !            end if
