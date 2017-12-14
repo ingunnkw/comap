@@ -108,7 +108,7 @@ export FCOMP := $(FFLAGS) -I$(TOPDIR)/src/f90/include $(LAPACK_INCLUDE) $(HEALPI
 export LINK := -L$(TOPDIR)/src/f90/include -lquiet $(HEALPIX_LINK) $(CFITSIO_LINK) $(LAPACK_LINK) $(FFTW_LINK) $(NOVAS_LINK) $(LDFLAGS) $(HDF_LINK) $(LDFLAGS) $(OPENMP)
 export TEMPITA := "$(TOPDIR)/src/python/tempita_proc.py"
 
-all : libquiet libutil l2gen postmap map_editor maptool test # scan_validate ces_detect l3gen tod2map utils_f90
+all : libquiet libutil l2gen postmap map_editor maptool test scan_detect # scan_validate ces_detect l3gen tod2map utils_f90
 
 full : all libquietscala scalapost map2cl
 
@@ -150,7 +150,8 @@ install : all
 	@cp src/f90/scan_validate/scan_validate $(INSTALL)/bin
 	@cp src/f90/l2gen/l2gen $(INSTALL)/bin
 	@cp src/f90/l3gen/l3gen $(INSTALL)/bin
-	@cp src/f90/ces_detect/ces_detect $(INSTALL)/bin
+	@cp src/f90/scan_detect/scan_detect $(INSTALL)/bin
+#	 @cp src/f90/ces_detect/ces_detect $(INSTALL)/bin
 
 docs :
 	@cd docs; $(MAKE)
