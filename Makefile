@@ -108,14 +108,14 @@ export FCOMP := $(FFLAGS) -I$(TOPDIR)/src/f90/include $(LAPACK_INCLUDE) $(HEALPI
 export LINK := -L$(TOPDIR)/src/f90/include -lquiet $(HEALPIX_LINK) $(CFITSIO_LINK) $(LAPACK_LINK) $(FFTW_LINK) $(NOVAS_LINK) $(LDFLAGS) $(HDF_LINK) $(LDFLAGS) $(OPENMP)
 export TEMPITA := "$(TOPDIR)/src/python/tempita_proc.py"
 
-all : libquiet libutil l2gen postmap map_editor maptool test scan_detect # scan_validate ces_detect l3gen tod2map utils_f90
+all : libquiet libutil l2gen l3gen postmap map_editor maptool test scan_validate tod2map scan_detect # ces_detect utils_f90
 
 full : all libquietscala scalapost map2cl
 
 
 help :
 	@echo ' '
-	@echo '  This Makefile is used to build Quiet in a way that is'
+	@echo '  This Makefile is used to build COMAP in a way that is'
 	@echo '  customized to your system.  You must export the QUIET'
 	@echo '  environment variable and set it to the name of your platform.'
 	@echo '  Then you must create a config file named config/config.<$QUIET>.'
@@ -204,7 +204,7 @@ maptool:
 test :
 	@cd src/f90/test; $(MAKE)
 
-clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_l3gen clean_scan_detect clean_l2gen clean_maptool clean_test # clean_scan_validate
+clean : clean_libquiet clean_postmap clean_map2cl clean_scalapost clean_map_editor clean_tod2map clean_libutil clean_utils clean_l3gen clean_scan_detect clean_l2gen clean_maptool clean_test clean_scan_validate
 
 clean_postmap :
 	@cd src/f90/postmap; $(MAKE) clean

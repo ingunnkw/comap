@@ -78,7 +78,7 @@ contains
     real(dp) :: phi1, theta1, psi1, phi2, theta2, psi2, mjd
     if(initialized) return
     call initialize_simple_pointing
-    call init_detector_mod(paramfile)
+    call initialize_detector_mod(paramfile)
     call setup_detector_euler_matrices(diode_euler)
 
     next_step = &
@@ -455,7 +455,7 @@ contains
     real(dp), dimension(:,:,:), allocatable :: mats
     integer(i4b)                            :: ndet, i
     real(dp)                                :: theta, phi
-    ndet = get_num_detectors()
+    ndet = get_num_dets()
     allocate(mats(3,3,0:ndet))
     call compute_euler_matrix_zyz(-pi, 0d0, pi, mats(:,:,0))
     do i = 1, ndet
@@ -464,14 +464,14 @@ contains
     end do
   end subroutine setup_detector_euler_matrices
 
-  subroutine verify_module(det_id)
+  subroutine verify_detector(det_id)
     implicit none
     integer(i4b), intent(in) :: det_id
-    if (det_id < 0 .or. det_id > get_num_detectors()) then
+    if (det_id < 0 .or. det_id > get_num_dets()) then
        write(*,*) 'comap_pointing_mod: ERROR -- requested module does not exist:', det_id
        stop
     end if
-  end subroutine verify_module
+  end subroutine verify_detector
 
   ! Hack: Let pointing mod know that pointing information might have changed
   subroutine update_pointing_mod

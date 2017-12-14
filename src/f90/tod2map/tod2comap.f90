@@ -1,8 +1,10 @@
 program tod2comap
   use comap_lx_mod
+  use comap_map_mod
   use comap_scan_mod
   use comap_acceptlist_mod
   use quiet_fft_mod
+  use quiet_hdf_mod
   implicit none
 
 !  include "mpif.h"
@@ -16,12 +18,6 @@ program tod2comap
      real(dp), allocatable, dimension(:,:)   :: point            ! (3, time)
   end type tod_type
 
-  type map_type
-     integer(i4b) :: n_x, n_y, nfreq, n_k
-     real(dp)     :: dtheta
-     real(dp), allocatable, dimension(:)     :: x, y, f, k ! (n_x or n_y or nfreq or n_k)
-     real(dp), allocatable, dimension(:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq)
-  end type map_type
 
   type(tod_type)        :: tod
   type(map_type)        :: map
@@ -31,37 +27,44 @@ program tod2comap
 
   character(len=512)    :: filename, parfile, acceptfile, prefix
   integer(i4b)          :: nscan, i, j, k
-  !integer(i4b)          :: myid, numprocs, ierr, root
+  integer(i4b)          :: myid, numprocs, ierr, root
 
-  !call mpi_init(ierr)
-  !call mpi_comm_rank(mpi_comm_world, myid, ierr)
-  !call mpi_comm_size(mpi_comm_world, numprocs, ierr)
-  !root = 0
+  call mpi_init(ierr)
+  call mpi_comm_rank(mpi_comm_world, myid, ierr)
+  call mpi_comm_size(mpi_comm_world, numprocs, ierr)
+  root = 0
 
-  parfile = '/mn/stornext/d5/comap/protodir/param_standard_Wband_121211.txt'
+  parfile = 'param_test.txt'
 
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
 
+  ! This loop currently requiers that all scans are of the same patch
+
   do i = 1, nscan 
+     if (myid == 0) write(*,*) i, 'of', nscan
+     if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
-     filename = scan%l3file
-     prefix = 'files/'//trim(scan%object)//'_'//trim(itoa(scan%cid)) ! patchID_scanID
-     write(*,*) i, 'of', nscan
+
      ! Get TOD / read level 3 file
+     filename = scan%l3file
      call get_tod(trim(filename), data, tod)
-     allocate(alist%status(tod%nfreq,tod%ndet,nscan))
+
+     allocate(alist%status(tod%nfreq,tod%ndet))
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
-     ! Write TOD to file
-     call output_tod(trim(prefix), 1, tod, alist, i)
-     ! Compute maps
-     call compute_maps(data, tod, map, alist, i)
-     ! Write maps to file (includes rms and hit count)
-     call output_maps(trim(prefix), map)
+ 
+     ! Compute and co-add maps
+     call compute_scan_maps(data, tod, map, alist)
+     
   end do
 
-  !call mpi_finalize(ierr)
-  write(*,*) 'Done'
+  prefix = 'files/'//trim(scan%object)!//'_'//trim(itoa(scan%cid)) ! patchID_scanID
+  call finalize_mapmaking(map)
+  if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
+  !if (myid == 0) call output_maps(trim(prefix), map)
+
+  if (myid == 0) write(*,*) 'Done'
+  call mpi_finalize(ierr)
 
 contains
 
@@ -98,6 +101,7 @@ contains
 
     ! Read data
     call read_l3_file(l3file, data)
+    call free_tod_type(tod)
 
     tod%samprate = data%samprate
     tod%nsamp = size(data%time)
@@ -108,12 +112,13 @@ contains
          & tod%point(3,tod%nsamp), &
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%ndet), &
-         & tod%g(1, tod%nfreq, tod%ndet), &               ! ??
+         & tod%g(0,0,0), & !(tod%nsamp, tod%nfreq, tod%ndet), &               ! ??
          & tod%rms(tod%nsamp, tod%nfreq, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
-    tod%point = data%point
+    tod%point = data%point ! call make_angles_safe(tod%point(1,:),maxang)
     tod%g     = data%gain
+
     !write(*,*) shape(data%point), tod%nsamp
 
     do k = 1, tod%ndet
@@ -135,12 +140,12 @@ contains
   end subroutine get_tod
 
 
-  subroutine output_tod(prefix, det, tod, alist, scan_nr)
+  subroutine output_tod(prefix, det, tod, alist)
     implicit none
     character(len=*), intent(in) :: prefix
     type(tod_type),   intent(in) :: tod
     type(acceptlist), intent(in) :: alist
-    integer(i4b),     intent(in) :: det, scan_nr
+    integer(i4b),     intent(in) :: det
 
     character(len=512) :: filename
     character(len=4)   :: jtext
@@ -148,7 +153,7 @@ contains
 
     unit = getlun()
     do j = 1, tod%nfreq
-       if (alist%status(j,det,scan_nr) == 0) then
+       if (alist%status(j,det) == 0) then
           call int2string(j,jtext)
           filename = trim(prefix) // '_freq' // jtext // '_tod.dat'
           open(unit, file=trim(filename), recl=4096)
@@ -164,28 +169,28 @@ contains
   end subroutine output_tod
   
 
-  subroutine compute_maps(data, tod, map, alist, scan_nr)
+  subroutine compute_scan_maps(data, tod, map, alist)
     implicit none
     type(lx_struct),  intent(in)    :: data
     type(tod_type),   intent(in)    :: tod
     type(map_type),   intent(inout) :: map
     type(acceptlist), intent(in)    :: alist
-    integer(i4b),     intent(in)    :: scan_nr
     
-    integer(i4b) :: i, j, k, p, q
-    real(dp)     :: x_min, x_max, y_min, y_max, pad
+    integer(i4b) :: i, j, k, p, q, fs
+    real(dp)     :: x_min, x_max, y_min, y_max, pad, gain_hc
 
     ! Set up map grid
+    fs = 4
     pad = 0.d0!0.3d0 ! degrees
     map%nfreq = tod%nfreq
     map%dtheta = 5.d0/60.d0 ! Arcmin
     !write(*,*) data%point_lim
 
-    x_min = minval(tod%point(1,:)) - pad; x_max =  maxval(tod%point(1,:)) + pad
-    y_min = minval(tod%point(2,:)) - pad; y_max =  maxval(tod%point(2,:)) + pad
+    x_min = minval(tod%point(1,fs:)) - pad; x_max =  maxval(tod%point(1,fs:)) + pad
+    y_min = minval(tod%point(2,fs:)) - pad; y_max =  maxval(tod%point(2,fs:)) + pad
     !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) + pad
     !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) + pad
-    map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (x_max-x_min)/map%dtheta+1
+    map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (y_max-y_min)/map%dtheta+1
     allocate(map%x(map%n_x), map%y(map%n_y))
     do i = 1, map%n_x
        map%x(i) = x_min + (i-1)*map%dtheta
@@ -204,28 +209,24 @@ contains
        map%nhit = 0.d0
        map%div  = 0.d0
     end if
+
+    gain_hc = 1.0 ! Replaces tod%g(i,j,k) in the code below
     
     ! Co-add into maps
     do k = 1, tod%ndet
-       do i = 1, tod%nsamp
+       do i = fs, tod%nsamp
           p = min(max(int((tod%point(1,i)-x_min)/map%dtheta),1),map%n_x)
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
-             if (alist%status(j,k,scan_nr) == 0) then
-                map%dsum(p,q,j) = map%dsum(p,q,j) + tod%g(1,j,k)    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
-                map%div(p,q,j)  = map%div(p,q,j)  + tod%g(1,j,k)**2 / tod%rms(i,j,k)**2
+             if (alist%status(j,k) == 0) then
+                map%dsum(p,q,j) = map%dsum(p,q,j) + gain_hc    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
+                map%div(p,q,j)  = map%div(p,q,j)  + gain_hc**2 / tod%rms(i,j,k)**2
                 map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
              end if
           end do
        end do
     end do
-    where(map%nhit > 0)
-       map%m   = map%dsum / map%div
-       map%rms = 1.d0 / sqrt(map%div)
-    elsewhere
-       map%m   = 0.d0
-       map%rms = 0.d0
-    end where
+
     
 !!$    ! Report reduced chisquares
 !!$    do i = 1, map%nfreq
@@ -234,73 +235,36 @@ contains
 !!$       write(*,fmt='(a,i5,a,f8.3,a,f8.3)') 'Freq = ', i, ', red chisq = ', chisq/nu, ', sigma = ', (chisq-nu)/sqrt(2.d0*nu)
 !!$    end do
 
-  end subroutine compute_maps
+  end subroutine compute_scan_maps
 
 
-  subroutine output_maps(prefix, map)
+  subroutine finalize_mapmaking(map)
     implicit none
-    character(len=*), intent(in) :: prefix
-    type(map_type),   intent(in) :: map
+    type(map_type), intent(inout) :: map
 
-    integer(i4b)       :: i, j, k, unit
-    character(len=4)   :: itext
-    character(len=512) :: filename
+    where(map%nhit > 0)
+       map%m   = map%dsum / map%div
+       map%rms = 1.d0 / sqrt(map%div)
+    elsewhere
+       map%m   = 0.d0
+       map%rms = 0.d0
+    end where    
 
-    unit = getlun()
-    do i = 1, map%nfreq
-       call int2string(i,itext)
-       filename = trim(prefix)//'_freq'//itext//'_map.dat'
-       open(unit, file=trim(filename), recl=100000)
-       write(unit,*) '# n_x = ', map%n_x
-       write(unit,*) '# n_y = ', map%n_y
-       write(unit,*) '# x   = ', real(map%x,sp)
-       write(unit,*) '# y   = ', real(map%y,sp)
-       do j = 1, map%n_x
-          do k = 1, map%n_y
-             write(unit,fmt='(e16.8)',advance='no') map%m(j,k,i)
-          end do
-          write(unit,*)
-       end do
-       close(unit)
-    end do
+  end subroutine finalize_mapmaking
 
-    unit = getlun()
-    do i = 1, map%nfreq
-       call int2string(i,itext)
-       filename = trim(prefix)//'_freq'//itext//'_rms.dat'
-       open(unit, file=trim(filename), recl=100000)
-       write(unit,*) '# n_x = ', map%n_x
-       write(unit,*) '# n_y = ', map%n_y
-       write(unit,*) '# x   = ', real(map%x,sp)
-       write(unit,*) '# y   = ', real(map%y,sp)
-       do j = 1, map%n_x
-          do k = 1, map%n_y
-             write(unit,fmt='(e16.8)',advance='no') map%rms(j,k,i)
-          end do
-          write(unit,*)
-       end do
-       close(unit)
-    end do
 
-    unit = getlun()
-    do i = 1, map%nfreq
-       call int2string(i,itext)
-       filename = trim(prefix)//'_freq'//itext//'_nhit.dat'
-       open(unit, file=trim(filename), recl=100000)
-       write(unit,*) '# n_x = ', map%n_x
-       write(unit,*) '# n_y = ', map%n_y
-       write(unit,*) '# x   = ', real(map%x,sp)
-       write(unit,*) '# y   = ', real(map%y,sp)
-       do j = 1, map%n_x
-          do k = 1, map%n_y
-             write(unit,fmt='(e16.8)',advance='no') map%nhit(j,k,i)
-          end do
-          write(unit,*)
-       end do
-       close(unit)
-    end do
+  subroutine free_tod_type(tod)
+    implicit none
+    type(tod_type), intent(inout) :: tod 
 
-  end subroutine output_maps
+    if (allocated(tod%t))     deallocate(tod%t)
+    if (allocated(tod%f))     deallocate(tod%f)
+    if (allocated(tod%d))     deallocate(tod%d)
+    if (allocated(tod%d_raw)) deallocate(tod%d_raw)
+    if (allocated(tod%g))     deallocate(tod%g)
+    if (allocated(tod%rms))   deallocate(tod%rms)
+    if (allocated(tod%point)) deallocate(tod%point)
 
+  end subroutine free_tod_type
    
 end program tod2comap

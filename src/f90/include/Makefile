@@ -9,15 +9,15 @@ OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          math_tools.o powell_mod.o quasi_newton_mod.o \
          quiet_fileutils.o quiet_detector_mod.o quiet_mapfile_mod.o \
          quiet_nr_mod.o quiet_utils.o quiet_hdf_mod.o quiet_Lx_mod.o \
-	 comap_defs.o comap_lx_mod.o comap_ces_mod.o \
-         spline_1D_mod.o spline_2D_mod.o sort_utils.o \
+	 comap_defs.o comap_lx_mod.o comap_ces_mod.o comap_map_mod.o \
+         comap_gain_mod.o spline_1D_mod.o spline_2D_mod.o sort_utils.o \
 	 quiet_mpi_mod.o fake_mpi_mod.o quiet_pointing_mod.o comap_pointing_mod.o \
          quiet_apex_mod.o quiet_gain_mod.o quiet_mpi_utils.o \
          quiet_sidelobe_mod.o quiet_fft_mod.o \
          quiet_i2qu_mod.o quiet_mask_mod.o quiet_pmac_mod.o \
          quiet_assembly_mod.o quiet_filter_mod.o quiet_postutils.o \
          quiet_noise_estimation_mod.o comap_patch_mod.o quiet_todsim_mod.o \
-         quiet_glitchy_noise_mod.o quiet_task_mod.o \
+         quiet_glitchy_noise_mod.o quiet_task_mod.o comap_noise_estimation_mod.o \
          quiet_system_mod.o quiet_system_backend.o \
          quiet_shared_output_mod.o ziggurat.o sdeOOF.o quiet_status_mod.o \
          quiet_stat_mod.o quiet_ephem_backend.o locate_mod.o \
@@ -63,6 +63,7 @@ comap_scan_mod.o         : quiet_utils.o
 quiet_ces_mod.o          : quiet_utils.o
 quiet_Lx_mod.o           : quiet_hdf_mod.o quiet_fft_mod.o
 comap_lx_mod.o		 : quiet_mpi_mod.o quiet_hdf_mod.o quiet_fft_mod.o
+comap_map_mod.o          : quiet_utils.o quiet_hdf_mod.o
 quiet_filter_mod.o       : quiet_noise_estimation_mod.o quiet_assembly_mod.o
 quiet_fileutils.o        : quiet_utils.o quiet_hdf_mod.o quiet_mapfile_mod.o quiet_covfile_mod.o
 quiet_nr_mod.o           : math_tools.o
