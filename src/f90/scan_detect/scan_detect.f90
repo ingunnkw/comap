@@ -155,7 +155,7 @@ program scan_detect
   & desc="Max deviation in elevation in radians allowed for raster scans (0.035).")
 
   ces_delay = ces_delay/24/60/60
-  call init_detector_mod(parfile)
+  call initialize_detector_mod(parfile)
 
   call initialize_comap_pointing_mod(parfile)
   call initialize_patch_detect_mod(parfile)
@@ -389,7 +389,7 @@ contains
 !    iterator%ifile     = 1
     iterator%ranges    = 0
     iterator%last_cont = .true.
-    allocate(iterator%mods(get_num_detectors()))
+    allocate(iterator%mods(get_num_dets()))
     do i = 1, size(iterator%mods); iterator%mods(i) = i-1; end do
     iterator%file_index = 1
     ! Read in the data, and scan until we reach the correct time
@@ -915,7 +915,7 @@ contains
     real(dp),     dimension(:,:),   allocatable :: point
     integer(i4b), dimension(:),     allocatable :: mobjs, objs, inds
     call get_patch_pos_multi(patches, [chunk%time(1)], COORD_GAL, patch_pos)
-    nmod     = get_num_detectors()
+    nmod     = get_num_dets()
     samprate = 100
     red      = 4
     n        = (chunk%n-1)/red+1
@@ -997,8 +997,8 @@ contains
     real(dp), intent(in)    :: delay
     integer(i4b)            :: i
     ! Find the last phase switch event before range(2)
-    write(*,*) "range",range(2)
-    write(*,*) "pswitch",pswitch
+    !write(*,*) "range",range(2)
+    !write(*,*) "pswitch",pswitch
     i = locate(pswitch, range(2))
     if(i <= 0 .or. i > size(pswitch)) return
     range(1) = max(range(1), pswitch(i) + delay)
