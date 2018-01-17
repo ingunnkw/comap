@@ -38,6 +38,8 @@ program tod2comap
 
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
+  nscan = 1
+!  call free_map_type(map)
 
   ! This loop currently requiers that all scans are of the same patch
 
@@ -60,8 +62,8 @@ program tod2comap
 
   prefix = 'files/'//trim(scan%object)!//'_'//trim(itoa(scan%cid)) ! patchID_scanID
   call finalize_mapmaking(map)
-  if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
-  !if (myid == 0) call output_maps(trim(prefix), map)
+  !if (myid == 0) call output_map_h5(trim(prefix)//'_map.h5', map)
+  if (myid == 0) call output_maps(trim(prefix), map)
 
   if (myid == 0) write(*,*) 'Done'
   call mpi_finalize(ierr)
@@ -167,8 +169,8 @@ contains
     end do
 
   end subroutine output_tod
-  
 
+  
   subroutine compute_scan_maps(data, tod, map, alist)
     implicit none
     type(lx_struct),  intent(in)    :: data
@@ -188,16 +190,20 @@ contains
 
     x_min = minval(tod%point(1,fs:)) - pad; x_max =  maxval(tod%point(1,fs:)) + pad
     y_min = minval(tod%point(2,fs:)) - pad; y_max =  maxval(tod%point(2,fs:)) + pad
+    write(*,*) x_min, x_max, y_min, y_max
+    !write(*,*) data%point_lim
     !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) + pad
     !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) + pad
-    map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (y_max-y_min)/map%dtheta+1
-    allocate(map%x(map%n_x), map%y(map%n_y))
-    do i = 1, map%n_x
-       map%x(i) = x_min + (i-1)*map%dtheta
-    end do
-    do i = 1, map%n_y
-       map%y(i) = y_min + (i-1)*map%dtheta
-    end do
+    if (.not. allocated(map%x)) then 
+       map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (y_max-y_min)/map%dtheta+1
+       allocate(map%x(map%n_x), map%y(map%n_y))
+       do i = 1, map%n_x
+          map%x(i) = x_min + (i-1)*map%dtheta
+       end do
+       do i = 1, map%n_y
+          map%y(i) = y_min + (i-1)*map%dtheta
+       end do
+    end if
 
     
     ! Set up map structures
