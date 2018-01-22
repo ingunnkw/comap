@@ -49,8 +49,8 @@ export MPCC := mpicc
 # =========== Compiler Optimizations =============
 
 # Fortran 90 compiler flags
-export F90FLAGS := -O3 -assume byterecl
-#export F90FLAGS := -g -fpe0 -w -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
+#export F90FLAGS := -O3 -assume byterecl
+export F90FLAGS := -g -fpe0 -w -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
 
 # Fortran 77 compiler flags
 export FFLAGS := -O2

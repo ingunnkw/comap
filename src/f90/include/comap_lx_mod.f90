@@ -57,7 +57,6 @@ contains
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
     call get_size_hdf(file, "time_point", ext)
     npoint = ext(1)
-
              allocate(data%time(nsamp))
              allocate(data%time_point(npoint))
 !             allocate(data%point_tel(3,nsamp))
@@ -265,8 +264,8 @@ contains
     call write_hdf(file, "time_gain",         data%time_gain)
     call write_hdf(file, "gain",              data%gain)
     call write_hdf(file, "stats",             data%stats)
-    call write_hdf(file, "det_stats",         data%det_stats)
-    call write_hdf(file, "filter_par",        data%filter_par)
+    !call write_hdf(file, "det_stats",         data%det_stats)
+    !call write_hdf(file, "filter_par",        data%filter_par)
     call write_hdf(file, "flag",              data%flag)
     call close_hdf_file(file)
   end subroutine

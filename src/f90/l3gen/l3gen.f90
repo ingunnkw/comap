@@ -32,7 +32,8 @@ program l3gen
   character(len=512)    :: lockfile, tmpfile, point_objs, tilt_file, offset_mask_file, coord_out
   integer(i4b)          :: ierr, snum, nmod, i, j, isys, osys, mod, nside_l3, debug
   integer(i4b)          :: num_corr_bins
-  real(dp)              :: fix_highpass_freq_scan, fix_lowpass_freq, t1, t2
+  real(dp)              :: fix_highpass_freq_scan, fix_lowpass_freq, t1, t2, scanmask_width
+  real(dp)              :: scanfreq_min, scanfreq_max
   logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates
   type(task_list)       :: tasks
   type(info_struct)     :: info
@@ -56,6 +57,12 @@ program l3gen
        & "Coordinate system for L2 and L3 files; galactic or celestial")
   call get_parameter(0, parfile, 'APPLY_SCANMASK',      par_lgt=scanmask, desc=&
    & "Whether to mask out freqs near scanfreq when estimating noise parameters. Should normally be .true.")
+  call get_parameter(0, parfile, 'SCANMASK_WIDTH',      par_dp=scanmask_width, desc=&
+   & "Window to cut around scan frequency and its harmonics during noise estimation, in Hz.")
+  call get_parameter(0, parfile, 'SCANFREQ_MIN',      par_dp=scanfreq_min, desc=&
+   & "Smallest allowed scanning frequency in Hz.")
+  call get_parameter(0, parfile, 'SCANFREQ_MAX',      par_dp=scanfreq_max, desc=&
+   & "Largest allowed scanning frequency in Hz.")
 
   isys = COORD_CEL
   if (trim(coord_out) == 'galactic') then
@@ -203,7 +210,7 @@ contains
           if(no_filters) then
              data%sigma0(j,i) = 1e-5; data%alpha(j,i) = -1; data%fknee(j,i) = 0.02
           else
-             call fit_1overf_profile(data%samprate, data%scanfreq, 1d-3, data%sigma0(j,i), &
+             call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,i), &
                   & data%alpha(j,i), data%fknee(j,i), tod_ps=real(powspecs(:,j,i),dp), &
                   & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
 !             write(*,fmt='(2i8,4f8.3)') info%id, i, j, data%sigma0(j,i), data%alpha(j,i), &
@@ -221,14 +228,16 @@ contains
     real(dp)                                :: scanfreq, samprate
     real(sp),     dimension(:), allocatable :: tod, pow
     complex(spc), dimension(:), allocatable :: ft
-    integer(i4b)        :: n, m, i
+    integer(i4b)        :: n, m, i, i_min, i_max
     n = size(point) ! min(10000, size(az))
     m = n/2+1
     allocate(tod(n), ft(m), pow(m))
     tod = point(1:n) - mean(point(1:n))
     call fft(tod, ft, 1)
     pow = ft*conjg(ft)
-    i = maxloc(pow(2:),1)+1
+    i_min = freq2ind(scanfreq_min, samprate, m)
+    i_max = freq2ind(scanfreq_max, samprate, m)
+    i = maxloc(pow(i_min:i_max),1)+1+i_min
     scanfreq = ind2freq(i, samprate, m)
     deallocate(tod, ft, pow)
   end subroutine

@@ -152,6 +152,15 @@ contains
        mask(limits(2):n-1) = 0.d0
     end if
 
+!!$    open(58,file='powspec_noise.dat')
+!!$    do i = 1, n
+!!$       write(58,*) ind2freq(i, samprate, n), f(i-1), mask(i-1)
+!!$    End do
+!!$    close(58)
+!!$    call mpi_finalize(i)
+!!$    stop
+
+
     allocate(p(0:npar-1))
 
     if (.not. refit_) then
@@ -222,11 +231,11 @@ contains
        alpha  = -10.d0
     end if
 
-!    open(57,file='pow.dat')
-!    do i = 1, n-1
-!       write(57,*) freqs(i), f(i), sigma0**2 * (1 + (freqs(i)/f_knee)**alpha)
-!    end do
-!    close(57)
+!!$    open(57,file='pow.dat')
+!!$    do i = 1, n-1
+!!$       write(57,*) freqs(i), f(i), sigma0**2 * (1 + (freqs(i)/f_knee)**alpha)
+!!$    end do
+!!$    close(57)
 
     if (present(chisq_out)) then
        ! Check goodness-of-fit
