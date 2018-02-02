@@ -247,11 +247,12 @@ contains
     implicit none
     type(lx_struct) :: data
     integer(i4b)    :: n, ndet, nfreq, i, j, k, m, tmin, tmax
-    real(dp)        :: g, a
+    real(dp)        :: g, a, sigma0, chisq
     real(dp), dimension(:), allocatable :: el, dat
 
-    a=1
+    a=1.
     m=a*data%samprate/data%scanfreq(2)      ! Number of tod-samples per gain estimate
+!    m=100
     write(*,*) m, '= m'
 !    n   = (size(data%time)+m-1)/m           ! Number of gain samples
     n   = (size(data%time))/m               ! Number of gain samples
@@ -263,21 +264,26 @@ contains
     allocate(el(m), dat(m))
     data%time_gain = data%time(::m)
     open(13,file='gain.dat')
-    do k = 1, ndet
-       do j = 1, nfreq
-          do i = 1, n
+    open(14,file='chisq.dat')
+    do k = 1, 1!ndet
+       do j = 1, 2!nfreq
+          sigma0 = data%sigma0(j,k)
+          do i = 1, 1!n
              tmin = (i-1)*m+1
              tmax = i*m
              el  = data%point_tel(2,tmin:tmax)
              dat = data%tod(tmin:tmax,j,k)
-             !write(*,*) tmin, tmax
-             call estimate_gain(el,dat,g)
+             write(*,*) tmin, tmax, 'min max'
+             call estimate_gain(el,dat,g,sigma0,chisq)
              data%gain(i,j,k) = g
-             write(13,*) (g-4d9)/4.d9*100
+!             write(13,*) g
+             write(13,*) (g-5.6d10)/5.6d10*100
+             write(14,*) chisq
           end do
        end do
     end do
     close(13)
+    close(14)
     deallocate(el, dat)
   end subroutine
 
