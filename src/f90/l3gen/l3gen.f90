@@ -163,9 +163,10 @@ contains
     allocate(data%point(3,nsamp))
     do i = 1, nsamp
       op = data%point_cel(:,i)
-      call swap_coordinate_convention(op(1), op(2), op(3), isys)
-      call coord_convert(isys, op(1), op(2), op(3), osys, np(1), np(2), np(3), &
-       & mjd=data%time(i), euler=mat)
+      np = op
+!      call swap_coordinate_convention(op(1), op(2), op(3), isys)
+!      call coord_convert(isys, op(1), op(2), op(3), osys, np(1), np(2), np(3), &
+!       & mjd=data%time(i), euler=mat)
       data%point(:,i) = np
     end do
     data%coord_sys = osys
