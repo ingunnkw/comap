@@ -260,7 +260,7 @@ contains
     integer(i4b) :: i
     real(dp)     :: P_nu, alpha, f_knee, x, sigma_sq
 
-    sigma_sq =  exp(p(1))
+    sigma_sq =  exp(min(p(1),200.d0))
     if (p(2) < -10.d0) then
        f_knee = 1e-5
     else if (p(2) > 2.d0) then
