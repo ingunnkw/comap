@@ -181,15 +181,16 @@ contains
     allocate(data%sigma0(nfreq,ndet),data%alpha(nfreq,ndet),data%fknee(nfreq,ndet))
     !allocate(data%corr(nfreq,nfreq,ndet,ndet))
     !allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
-    allocate(data%det_stats(ndet,nfreq,1), data%filter_par(4,nfreq,ndet))
+    !allocate(data%det_stats(ndet,nfreq,1))
+    !allocate(data%filter_par(4,nfreq,ndet))
     call read_hdf(file, "sigma0", data%sigma0)
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)
     !call read_hdf(file, "corr",   data%corr)
     ! Read stats
-    call read_hdf(file, "det_stats", data%det_stats)
+    call read_hdf(file, "stats", data%stats)
     ! Read filter parameters
-    call read_hdf(file, "filter_par",  data%filter_par)
+    !call read_hdf(file, "filter_par",  data%filter_par)
     call close_hdf_file(file)
   end subroutine read_l3_file
 

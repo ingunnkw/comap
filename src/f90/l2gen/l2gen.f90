@@ -75,6 +75,7 @@ program l2gen
      allocate(data_l1(num_l1_files))
      do i = 1, num_l1_files
         call read_l1_file(scan%l1files(i), data_l1(i))
+        call correct_missing_time_steps(data_l1(i)%time_point)
      end do
 
      ! Reformat L1 data into L2 format, and truncate
@@ -377,5 +378,43 @@ contains
 
 
   end subroutine convert_GHz_to_k
+
+  subroutine correct_missing_time_steps(time)
+    implicit none
+    real(dp), dimension(:), intent(inout) :: time
+
+    integer(i4b) :: i, n
+    real(dp)     :: dt
+    logical(lgt), allocatable, dimension(:) :: ok
+
+    ! Check time array
+    n  = size(time)
+    dt = time(2)-time(1)
+    if (dt == 0) then
+       write(*,*) 'Error: First time sample is buggy'
+       call mpi_finalize(ierr)
+       stop
+    end if
+
+    ! Check each sample
+    allocate(ok(n))
+    ok(1) = .true.
+    do i = 2, n
+       if (abs(time(i)-(time(i-1)+dt))/dt > 0.01d0) then
+          ok(i) = .false.
+       else
+          ok(i) = .true.
+       end if
+    end do
+
+    ! Correct bad samples
+    do i = 2, n
+       if (.not. ok(i)) time(i) = time(i-1) + dt
+    end do
+
+    deallocate(ok)
+
+  end subroutine correct_missing_time_steps
+
 
 end program

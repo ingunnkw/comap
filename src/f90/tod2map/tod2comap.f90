@@ -25,7 +25,7 @@ program tod2comap
   type(comap_scan_info) :: scan
   type(acceptlist)      :: alist
 
-  character(len=512)    :: filename, parfile, acceptfile, prefix
+  character(len=512)    :: filename, parfile, acceptfile, prefix, pre
   integer(i4b)          :: nscan, i, j, k
   integer(i4b)          :: myid, numprocs, ierr, root
 
@@ -52,8 +52,12 @@ program tod2comap
      filename = scan%l3file
      call get_tod(trim(filename), data, tod)
 
+
      allocate(alist%status(tod%nfreq,tod%ndet))
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
+
+     pre = 'files/'
+     call output_tod(trim(pre), 1, tod, alist)
  
      ! Compute and co-add maps
      call compute_scan_maps(data, tod, map, alist)
@@ -99,7 +103,7 @@ contains
 
     integer(i4b) :: i, j, k, nu_cut
    
-    nu_cut = 10000
+    nu_cut = 100!00
 
     ! Read data
     call read_l3_file(l3file, data)
@@ -118,7 +122,7 @@ contains
          & tod%rms(tod%nsamp, tod%nfreq, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
-    tod%point = data%point ! call make_angles_safe(tod%point(1,:),maxang)
+    tod%point = data%point_cel ! call make_angles_safe(tod%point(1,:),maxang)
     tod%g     = data%gain
 
     !write(*,*) shape(data%point), tod%nsamp
@@ -126,12 +130,12 @@ contains
     do k = 1, tod%ndet
        do j = 1, tod%nfreq
           do i = 1, tod%nsamp
-            ! tod%d_raw(i,j,k) = mean
              tod%d_raw(i,j,k) = data%tod(i,j,k) ! ??
           end do
           
           ! Apply high pass filter
           tod%d(:,j,k) = tod%d_raw(:,j,k)
+          !tod%d(:,j,k) = tod%d(:,j,k) - mean(tod%d(:,j,k))
           call hp_filter(nu_cut, tod%d(:,j,k))
 
           ! Estimate RMS
@@ -154,19 +158,19 @@ contains
     integer(i4b) :: unit, i, j
 
     unit = getlun()
-    do j = 1, tod%nfreq
+    j=1!do j = 1, tod%nfreq
        if (alist%status(j,det) == 0) then
           call int2string(j,jtext)
-          filename = trim(prefix) // '_freq' // jtext // '_tod.dat'
+          filename = trim(prefix) // 'tod.dat' !trim(prefix) // '_freq' // jtext // '_tod.dat'
           open(unit, file=trim(filename), recl=4096)
           do i = 1, tod%nsamp
              write(unit, fmt='(f16.8)', advance='no') tod%t(i)
-             write(unit, fmt='(2f24.8)', advance='no') tod%d(i,j,det), tod%d_raw(i,j,det)
+             write(unit, fmt='(2f24.8)', advance='no') tod%d(i,j,det)!, tod%d_raw(i,j,det)
              write(unit,*)
           end do
           close(unit)
        end if
-    end do
+    !end do
 
   end subroutine output_tod
 
@@ -182,18 +186,17 @@ contains
     real(dp)     :: x_min, x_max, y_min, y_max, pad, gain_hc
 
     ! Set up map grid
-    fs = 4
-    pad = 0.d0!0.3d0 ! degrees
+    fs = 1!4 ! What is this??
+    pad = 0.3d0 ! degrees
     map%nfreq = tod%nfreq
-    map%dtheta = 5.d0/60.d0 ! Arcmin
-    !write(*,*) data%point_lim
+    map%dtheta = 5.d0/120.d0!5.d0/60.d0 ! Arcmin
 
     x_min = minval(tod%point(1,fs:)) - pad; x_max =  maxval(tod%point(1,fs:)) + pad
     y_min = minval(tod%point(2,fs:)) - pad; y_max =  maxval(tod%point(2,fs:)) + pad
+    !x_min = data%point_lim(1); x_max = data%point_lim(2)
+    !y_min = data%point_lim(3); y_max = data%point_lim(4)
     write(*,*) x_min, x_max, y_min, y_max
-    !write(*,*) data%point_lim
-    !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) + pad
-    !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) + pad
+    write(*,*) data%point_lim
     if (.not. allocated(map%x)) then 
        map%n_x = (x_max-x_min)/map%dtheta+1; map%n_y = (y_max-y_min)/map%dtheta+1
        allocate(map%x(map%n_x), map%y(map%n_y))
@@ -204,7 +207,7 @@ contains
           map%y(i) = y_min + (i-1)*map%dtheta
        end do
     end if
-
+    write(*,*) map%x(8), map%y(9)
     
     ! Set up map structures
     if (.not. allocated(map%dsum)) then
@@ -225,6 +228,7 @@ contains
           q = min(max(int((tod%point(2,i)-y_min)/map%dtheta),1),map%n_y)
           do j = 1, tod%nfreq
              if (alist%status(j,k) == 0) then
+                !if (tod%d(i,j,k)>1.d8 .and. j==1) map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0!write(*,*) tod%point(:,i)
                 map%dsum(p,q,j) = map%dsum(p,q,j) + gain_hc    / tod%rms(i,j,k)**2 * tod%d(i,j,k)
                 map%div(p,q,j)  = map%div(p,q,j)  + gain_hc**2 / tod%rms(i,j,k)**2
                 map%nhit(p,q,j) = map%nhit(p,q,j) + 1.d0
