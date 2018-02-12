@@ -125,6 +125,152 @@ contains
     deallocate(time)
   end subroutine
 
+  subroutine compute_time_offset(time_el, el, time, tod, offset)
+    implicit none
+    real(dp), dimension(1:), intent(in)  :: time_el, el, time, tod
+    real(dp),                intent(out) :: offset 
+
+    integer(i4b) :: i, j, p, q, n_tod, n_el, start_tod, end_tod, start_el, end_el
+    integer(i4b) :: off(1), left, center, right, n_val
+    real(dp)     :: mjd_min, mjd_max, dmjd, threshold, max_slew_length, delta_tod, delta_el, delta_cross
+    real(dp), allocatable, dimension(:) :: el_spline, tod_int, del, del2, numsteps, time_tod, tod_resamp
+    integer(i4b), allocatable, dimension(:) :: slew_sample_id
+    type(spline_type)  :: point_spline
+    complex(dpc), dimension(:), allocatable :: fft_el, fft_tod
+
+    mjd_min = max(minval(time_el), minval(time))
+    mjd_max = min(maxval(time_el), maxval(time))
+    dmjd    = mjd_max - mjd_min
+    mjd_min = mjd_min + 0.01d0*dmjd
+    mjd_max = mjd_max - 0.01d0*dmjd
+    start_tod = locate(time,    mjd_min)
+    end_tod   = locate(time,    mjd_max)
+    start_el  = locate(time_el, mjd_min)
+    end_el    = locate(time_el, mjd_max)
+    n_el      = end_el  - start_el  + 1
+    n_tod     = end_tod - start_tod + 1
+    threshold = 0.3d0
+    max_slew_length = 2000 ! Maximum number of samples between CES's
+
+    ! Resample pointing on radiometer time grid
+    allocate(el_spline(n_tod))
+    call spline(point_spline, time_el(start_el:end_el), el(start_el:end_el))
+    do i = start_tod, end_tod
+       el_spline(i-start_tod+1) = splint(point_spline, time(i))
+    end do
+
+    ! Search for jumps, using the derivative of the elevation
+    allocate(del(n_tod), del2(n_tod))
+    del(1) = el_spline(2) - el_spline(1)
+    do i = 2, n_tod-1
+       del(i) = 0.5d0*(el_spline(i+1)-el_spline(i-1))
+    end do
+    del(n_tod) = el_spline(n_tod)-el_spline(n_tod-1)
+    del        = abs(del)
+
+    ! Threshold derivative
+    where (del > threshold*maxval(del))
+       del = 1.d0
+    elsewhere
+       del = 0.d0
+    end where
+    call median_filter(del, del2, 10)
+    del = del2
+
+    ! Identify valid slews
+    allocate(slew_sample_id(10000))
+    j = 0
+    i = 1
+    do while (i < n_tod)
+       if (del(i) == 0.d0) then
+          i = i+1
+       else
+          k = 0
+          do while (del(i) == 1.d0)
+             k = k+1
+             i = i+1
+             if (i == n_tod) exit
+          end do
+          if (k <= max_slew_length) then
+             if (j == 0) then
+                j                 = j+1
+                slew_sample_id(j) = i - k/2
+             else if (i-k/2-slew_sample_id(j) > 2*max_slew_length) then
+                j                 = j+1
+                slew_sample_id(j) = i - k/2
+             end if
+          end if
+       end if
+    end do
+
+    ! Allocate shifted time and tod arrays 
+    allocate(time_tod(n_tod), tod_resamp(n_tod))
+    time_tod = time(start_tod:end_tod)
+    tod_resamp = tod(start_tod:end_tod)
+
+    ! Search for crude offset, giving equal weight to all points
+    allocate(numsteps(-n_tod:n_tod))
+    numsteps = 0.d0
+    off          = -10000000000
+    do i = -n_tod, n_tod
+       n_val    = 0
+       do k = 1, j
+          left   = slew_sample_id(k) + i - 0.5*max_slew_length
+          center = slew_sample_id(k) + i 
+          right  = slew_sample_id(k) + i + 0.5*max_slew_length
+          if (left < 1 .or. right > n_tod)     cycle
+          if (left-i < 1 .or. right-i > n_tod) cycle
+          n_val = n_val+1
+          delta_tod   = (tod_resamp(right)-tod_resamp(center))*(tod_resamp(center)-tod_resamp(left))
+          delta_el    = (el_spline(right-i)-el_spline(center-i))*(el_spline(center-i)-el_spline(left-i))
+          delta_cross = (tod_resamp(right)-tod_resamp(left))*(el_spline(right-i)-el_spline(left-i))
+          if (delta_tod > 0.d0 .and. delta_el > 0.d0 .and. delta_cross < 0.d0) then
+             numsteps(i) = numsteps(i) + 1.d0
+          end if
+       end do
+       if (n_val > j/2) then 
+          numsteps(i) = numsteps(i) / n_val
+       else
+          numsteps(i) = 0.d0
+       end if
+    end do
+
+    where (numsteps == maxval(numsteps))
+       numsteps = 1.d0
+    elsewhere
+       numsteps = 0.d0
+    end where
+    deallocate(del2)
+    allocate(del2(-n_tod:n_tod))
+    do i = -n_tod, n_tod
+       p = max(i-100,-n_tod)
+       q = min(i+100,n_tod)
+       del2(i) = maxval(numsteps(p:q))
+    end do
+    numsteps = del2
+
+    p = -n_tod
+    do while (numsteps(p) == 0.d0)
+       p = p+1
+       if (p == n_tod) exit
+    end do
+       
+    q = p
+    do while (numsteps(q) == 1.d0)
+       q = q+1
+       if (q == n_tod) exit
+    end do
+
+    off = (q+p)/2
+
+    ! Return offset
+    offset = off(1) * (time(2)-time(1))
+
+    deallocate(el_spline, del, del2, numsteps, slew_sample_id, time_tod, tod_resamp)
+    call free_spline(point_spline)
+
+  end subroutine compute_time_offset
+
 
   subroutine merge_l1_into_l2_files(mjd, data_l1, data_l2)
     implicit none
@@ -132,14 +278,11 @@ contains
     type(Lx_struct), allocatable, dimension(:), intent(in)  :: data_l1
     type(Lx_struct),                            intent(out) :: data_l2
     
-    integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer
-    real(dp)     :: samprate, offset_mjd, buffer_width
+    integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer, ndet0
+    real(dp)     :: samprate, offset_mjd, mjd_min, mjd_max
     integer(i4b), allocatable, dimension(:,:) :: ind, ind_point
     type(Lx_struct)   :: data_l2_fullres
     type(spline_type), allocatable, dimension(:) :: point_tel_spline, point_cel_spline
-
-    offset_mjd   = 0.00045d0+400.d0*0.02/3600.d0/24.d0 ! 1303, Jupiter
-    buffer_width = 0.03
 
     ! Find number of samples
     num_l1_files = size(data_l1)
@@ -147,8 +290,16 @@ contains
     allocate(ind_point(num_l1_files,2))   ! First and last accepted index of each L1 file in time_point
     nsamp_tot = 0
     do i = 1, num_l1_files
+
+       ! Match pointing time with radiometer time
+       ndet0     = size(data_l1(i)%tod_l1,4)
+       call compute_time_offset(data_l1(i)%time_point, real(data_l1(i)%point_tel(2,:),dp), data_l1(i)%time, &
+            & real(data_l1(i)%tod_l1(:,ndet/2,1,1),dp), offset_mjd)
+
+       ! Find basic information
        nsamp       = size(data_l1(i)%tod_l1,1)
        nsamp_point = size(data_l1(i)%time_point)
+
        if (i == 1) then
           nfreq    = size(data_l1(i)%tod_l1,2)
           nsb      = size(data_l1(i)%tod_l1,3)
@@ -161,8 +312,11 @@ contains
           call assert(data_l1(i)%samprate == samprate, 'Different sample rates in L1 files')
        end if
 
+       mjd_min = max(mjd(1), max(minval(data_l1(i)%time), minval(data_l1(i)%time_point+offset_mjd)))
+       mjd_max = max(mjd(2), min(maxval(data_l1(i)%time), maxval(data_l1(i)%time_point+offset_mjd)))
+
        ! Check that there are some valid samples inside current L1 file
-       if (mjd(1) > data_l1(i)%time(nsamp) .or. mjd(2) < data_l1(i)%time(1)) then
+       if (mjd_min > data_l1(i)%time(nsamp) .or. mjd_max < data_l1(i)%time(1)) then
           ! No acceptable samples
           ind(i,:) = -1
           cycle
@@ -170,33 +324,29 @@ contains
 
        ! Find start position
        ind(i,1) = 1
-       do while (data_l1(i)%time(ind(i,1)) < mjd(1) .and. ind(i,1) <= nsamp)
+       do while (data_l1(i)%time(ind(i,1)) < mjd_min .and. ind(i,1) <= nsamp)
           ind(i,1) = ind(i,1) + 1
        end do
 
        ! Find end position
        ind(i,2) = nsamp
-       do while (data_l1(i)%time(ind(i,2)) > mjd(2) .and. ind(i,2) >= 1)
+       do while (data_l1(i)%time(ind(i,2)) > mjd_max .and. ind(i,2) >= 1)
           ind(i,2) = ind(i,2) - 1
        end do
 
        ! Find start position for pointing
        ind_point(i,1) = 1
-       do while (data_l1(i)%time_point(ind_point(i,1)) < mjd(1) .and. ind_point(i,1) <= nsamp_point)
+       do while (data_l1(i)%time_point(ind_point(i,1))+offset_mjd < mjd_min .and. ind_point(i,1) <= nsamp_point)
           ind_point(i,1) = ind_point(i,1) + 1
        end do
 
        ! Find end position for pointing
        ind_point(i,2) = nsamp_point
-       do while (data_l1(i)%time_point(ind_point(i,2)) > mjd(2) .and. ind_point(i,2) >= 1)
+       do while (data_l1(i)%time_point(ind_point(i,2))+offset_mjd > mjd_max .and. ind_point(i,2) >= 1)
           ind_point(i,2) = ind_point(i,2) - 1
        end do
 
        nsamp_tot = nsamp_tot + ind(i,2)-ind(i,1)+1
-
-       buffer         = buffer_width*(ind_point(i,2)-ind_point(i,1))
-       ind_point(i,1) = max(1, ind_point(i,1)-buffer)
-       ind_point(i,2) = min(ind_point(i,2)+buffer, nsamp_point)
     
     end do
 
@@ -223,14 +373,9 @@ contains
 
        ! Spline pointing
        do l = 1, 3
-          open(58,file='time.dat')
-          do k = ind_point(i,1), ind_point(i,2)
-             write(58,*) data_l1(i)%time_point(k)
-          end do
-          close(58)
-          call spline(point_tel_spline(l), data_l1(i)%time_point(ind_point(i,1):ind_point(i,2)), &
+          call spline(point_tel_spline(l), data_l1(i)%time_point(ind_point(i,1):ind_point(i,2))+offset_mjd, &
                & real(data_l1(i)%point_tel(l,ind_point(i,1):ind_point(i,2)),dp))
-          call spline(point_cel_spline(l), data_l1(i)%time_point(ind_point(i,1):ind_point(i,2)), &
+          call spline(point_cel_spline(l), data_l1(i)%time_point(ind_point(i,1):ind_point(i,2))+offset_mjd, &
                & real(data_l1(i)%point_cel(l,ind_point(i,1):ind_point(i,2)),dp))
        end do
 
@@ -241,10 +386,11 @@ contains
        !data_l2%point_cel(:,j:j+nsamp-1) = data_l1(i)%point_cel(:,ind(i,1):ind(i,2))
        do l = 1, 3
           do k = j, j+nsamp-1
-             data_l2%point_tel(l,k) = splint(point_tel_spline(l), data_l2%time(k)+offset_mjd)
-             data_l2%point_cel(l,k) = splint(point_cel_spline(l), data_l2%time(k)+offset_mjd)
+             data_l2%point_tel(l,k) = splint(point_tel_spline(l), data_l2%time(k))
+             data_l2%point_cel(l,k) = splint(point_cel_spline(l), data_l2%time(k))
           end do
        end do
+
        k = 1
        do m = 1, nsb
           do n = 1, nfreq
@@ -253,6 +399,7 @@ contains
              k                                    = k+1
           end do
        end do
+
        call assert(all(data_l1(i)%scanmode_l1 == data_l2%scanmode), 'Varying scanmode within L1 files!')
        j = j + nsamp
     end do
@@ -383,9 +530,8 @@ contains
     implicit none
     real(dp), dimension(:), intent(inout) :: time
 
-    integer(i4b) :: i, n
+    integer(i4b) :: i, n, step
     real(dp)     :: dt
-    logical(lgt), allocatable, dimension(:) :: ok
 
     ! Check time array
     n  = size(time)
@@ -397,22 +543,9 @@ contains
     end if
 
     ! Check each sample
-    allocate(ok(n))
-    ok(1) = .true.
     do i = 2, n
-       if (abs(time(i)-(time(i-1)+dt))/dt > 0.01d0) then
-          ok(i) = .false.
-       else
-          ok(i) = .true.
-       end if
+       if (abs(time(i)-(time(i-1)+dt))/dt > 0.01d0) time(i) = time(i-1) + dt
     end do
-
-    ! Correct bad samples
-    do i = 2, n
-       if (.not. ok(i)) time(i) = time(i-1) + dt
-    end do
-
-    deallocate(ok)
 
   end subroutine correct_missing_time_steps
 
