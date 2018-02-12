@@ -246,28 +246,35 @@ contains
   subroutine calc_gain(data)
     implicit none
     type(lx_struct) :: data
-    integer(i4b)    :: n, ndet, nfreq, i, j, k, m, tmin, tmax
+    integer(i4b)    :: n, ndet, nfreq, i, j, k, m, tmin, tmax, parfile_time
     real(dp)        :: g, a, sigma0, chisq
     real(dp), dimension(:), allocatable :: el, dat
 
-    a=1.
+
+    parfile_time=5.     ! max time per gain estimate in minutes from parfile
+
+    a=10.
     m=a*data%samprate/data%scanfreq(2)      ! Number of tod-samples per gain estimate
-!    m=100
-    write(*,*) m, '= m'
+
+    write(*,*) 'Number of samples per gain estimate    =', m
 !    n   = (size(data%time)+m-1)/m           ! Number of gain samples
     n   = (size(data%time))/m               ! Number of gain samples
-    write(*,*) n, '= n', size(data%time), n*m
+    write(*,*) 'Number of gain estimates for this scan =', n
+    write(*,*) 'n*m                                    =', n*m
+    write(*,*) 'Total number of samples                =', size(data%time)
     nfreq = size(data%tod,2)
     ndet  = size(data%tod,3)
-    write(*,*) nfreq, '=nfreq', ndet, '=ndet'
+    write(*,*) nfreq, '= nfreq', ndet, '= ndet'
+    write(*,*) '---------------------------------------------------------'
     allocate(data%time_gain(n), data%gain(n,nfreq,ndet))
     allocate(el(m), dat(m))
     data%time_gain = data%time(::m)
     open(13,file='gain.dat')
     open(14,file='chisq.dat')
-    do k = 1, 1!ndet
+    do k = 1, ndet
        do j = 1, 2!nfreq
           sigma0 = data%sigma0(j,k)
+          write(*,*) 'sigma0 =', sigma0
           do i = 1, 1!n
              tmin = (i-1)*m+1
              tmax = i*m
