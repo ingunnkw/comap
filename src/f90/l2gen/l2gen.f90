@@ -266,6 +266,20 @@ contains
     ! Return offset
     offset = off(1) * (time(2)-time(1))
 
+!!$    open(58,file='test.dat')
+!!$    do i = 1, n_tod
+!!$       write(58,*) time_tod(i), tod_resamp(i)
+!!$    end do
+!!$    write(58,*)
+!!$    do i = 1, n_tod
+!!$       if (i+off(1)>1 .and. i+off(1) < n_tod) then
+!!$          write(58,*) time_tod(i), el_spline(i+off(1))
+!!$       end if
+!!$    end do
+!!$    close(58)
+!!$    call mpi_finalize(ierr)
+!!$    stop
+
     deallocate(el_spline, del, del2, numsteps, slew_sample_id, time_tod, tod_resamp)
     call free_spline(point_spline)
 
@@ -292,9 +306,9 @@ contains
     do i = 1, num_l1_files
 
        ! Match pointing time with radiometer time
-       ndet0     = size(data_l1(i)%tod_l1,4)
-       call compute_time_offset(data_l1(i)%time_point, real(data_l1(i)%point_tel(2,:),dp), data_l1(i)%time, &
-            & real(data_l1(i)%tod_l1(:,ndet/2,1,1),dp), offset_mjd)
+       !call compute_time_offset(data_l1(i)%time_point, real(data_l1(i)%point_tel(2,:),dp), data_l1(i)%time, &
+       !     & real(data_l1(i)%tod_l1(:,1,1,1),dp), offset_mjd)
+       offset_mjd = 0.d0
 
        ! Find basic information
        nsamp       = size(data_l1(i)%tod_l1,1)
@@ -313,7 +327,7 @@ contains
        end if
 
        mjd_min = max(mjd(1), max(minval(data_l1(i)%time), minval(data_l1(i)%time_point+offset_mjd)))
-       mjd_max = max(mjd(2), min(maxval(data_l1(i)%time), maxval(data_l1(i)%time_point+offset_mjd)))
+       mjd_max = min(mjd(2), min(maxval(data_l1(i)%time), maxval(data_l1(i)%time_point+offset_mjd)))
 
        ! Check that there are some valid samples inside current L1 file
        if (mjd_min > data_l1(i)%time(nsamp) .or. mjd_max < data_l1(i)%time(1)) then
