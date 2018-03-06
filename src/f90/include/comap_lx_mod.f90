@@ -64,7 +64,7 @@ contains
              allocate(data%point_tel(3,npoint))
              allocate(data%point_cel(3,npoint))
              allocate(data%scanmode_l1(npoint))
-    if (all) allocate(data%nu_l1(nsamp,nsb))
+    if (all) allocate(data%nu_l1(nfreq,nsb))
     if (all) allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
     call read_hdf(file, "mjd_start",            data%mjd_start)
@@ -174,6 +174,7 @@ contains
     nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
     allocate(data%gain(nsamp,nfreq,ndet))
     call read_hdf(file, "gain", data%gain)
+    !write(*,*) data%gain
     ! Read noise parameters
     !call get_size_hdf(file, "corr", ext)
     call get_size_hdf(file, "sigma0", ext)
