@@ -247,18 +247,18 @@ contains
     implicit none
     type(lx_struct) :: data
     integer(i4b)    :: n, ndet, nfreq, i, j, k, m, tmin, tmax, parfile_time
-    real(dp)        :: g, a, sigma0, chisq, T_0, tau, delta_nu, const
+    real(dp)        :: g, a, sigma0, chisq, tsys, tau, dnu, const
     real(dp), dimension(:), allocatable :: el, dat
 
     ! Constants used for calibration with radiometer equation
     ! g = sigma0*sqrt()/T_0
-    T_0 = 35.d6
-    tau = 1./50.
-    delta_nu = 4.d9/32.
-    const = sqrt(tau*delta_nu)/T_0
-    write(*,*) T_0, 'T_0'    
+    tsys = 35.d6
+    tau = 1./data%samprate
+    dnu = data%nu(2)-data%nu(1)
+    const = sqrt(tau*dnu)/tsys
+    write(*,*) tsys, 'T_sys'    
     write(*,*) tau, 'tau'
-    write(*,*) delta_nu, 'delta_nu'
+    write(*,*) dnu, 'delta_nu'
     write(*,*) const, 'const'
 
 
