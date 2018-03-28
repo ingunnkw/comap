@@ -255,6 +255,7 @@ contains
     tsys = 35.d6
     tau = 1./data%samprate
     dnu = data%nu(2)-data%nu(1)
+    dnu = 2.d9/1024.
     const = sqrt(tau*dnu)/tsys
     write(*,*) tsys, 'T_sys'    
     write(*,*) tau, 'tau'
