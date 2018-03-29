@@ -207,15 +207,15 @@ contains
           data%fknee(:,i)  = 0.d0
           cycle
        end if
-       do j = 1, nfreq
+       do j = 1, nfreq      
           if(no_filters) then
              data%sigma0(j,i) = 1e-5; data%alpha(j,i) = -1; data%fknee(j,i) = 0.02
           else
              call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,i), &
                   & data%alpha(j,i), data%fknee(j,i), tod_ps=real(powspecs(:,j,i),dp), &
                   & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-!             write(*,fmt='(2i8,4f8.3)') info%id, i, j, data%sigma0(j,i), data%alpha(j,i), &
-!                  & data%fknee(j,i), chisq
+             write(*,fmt='(3i8,4f8.3)') info%id, i, j, data%sigma0(j,i), data%alpha(j,i), &
+                  & data%fknee(j,i), chisq
           end if
        end do
     end do

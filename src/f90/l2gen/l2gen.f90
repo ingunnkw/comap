@@ -211,7 +211,7 @@ contains
     ! Search for crude offset, giving equal weight to all points
     allocate(numsteps(-n_tod:n_tod))
     numsteps = 0.d0
-    off          = -10000000000
+    off          = -10000000
     do i = -n_tod, n_tod
        n_val    = 0
        do k = 1, j
@@ -308,7 +308,7 @@ contains
        ! Match pointing time with radiometer time
        !call compute_time_offset(data_l1(i)%time_point, real(data_l1(i)%point_tel(2,:),dp), data_l1(i)%time, &
        !     & real(data_l1(i)%tod_l1(:,1,1,1),dp), offset_mjd)
-       offset_mjd = 0.d0
+       offset_mjd = -1.d0 / 3600.d0 / 24.d0
 
        ! Find basic information
        nsamp       = size(data_l1(i)%tod_l1,1)
@@ -451,10 +451,10 @@ contains
     allocate(data_out%flag(nsamp_out))
 
     ! Make angles safe for averaging
-    call make_angles_safe(data_in%point_tel(1,:), real(2.d0*pi,sp)) ! Phi
-    call make_angles_safe(data_in%point_tel(3,:), real(2.d0*pi,sp)) ! Psi
-    call make_angles_safe(data_in%point_cel(1,:), real(2.d0*pi,sp)) ! Phi
-    call make_angles_safe(data_in%point_cel(3,:), real(2.d0*pi,sp)) ! Psi
+    call make_angles_safe(data_in%point_tel(1,:), real(360.d0,sp)) ! Phi
+    call make_angles_safe(data_in%point_tel(3,:), real(360.d0,sp)) ! Psi
+    call make_angles_safe(data_in%point_cel(1,:), real(360.d0,sp)) ! Phi
+    call make_angles_safe(data_in%point_cel(3,:), real(360.d0,sp)) ! Psi
 
     do i = 1, nsamp_out
        data_out%time(i) = mean(data_in%time((i-1)*dt+1:i*dt))  ! Time
