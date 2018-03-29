@@ -39,9 +39,9 @@ program l3gen
   type(info_struct)     :: info
   type(comap_scan_info) :: scan
   type(lx_struct)       :: data
-  real(sp),     dimension(:,:,:), allocatable :: powspecs
-  complex(spc), dimension(:,:,:), allocatable :: ffts
-  logical(lgt), dimension(:,:),   allocatable :: mask
+  real(sp),     dimension(:,:,:,:), allocatable :: powspecs
+  complex(spc), dimension(:,:,:,:), allocatable :: ffts
+  logical(lgt), dimension(:,:),     allocatable :: mask
 
   call getarg(1, parfile)
   call get_parameter(0, parfile, 'OUTPUT_DIR',           par_string=odir)
@@ -190,33 +190,36 @@ contains
   subroutine fit_noise(data, powspecs, snum)
     implicit none
     type(lx_struct) :: data
-    integer(i4b) :: ndet, nfreq, i, j, snum
+    integer(i4b) :: ndet, nsb, nfreq, i, j, k, snum
     character(len=4) :: myid_text
-    real(sp)     :: powspecs(:,:,:)
+    real(sp)     :: powspecs(:,:,:,:)
     real(dp)     :: chisq
     type(comap_scan_info) :: scan
     nfreq  = size(data%tod,2)
-    ndet   = size(data%tod,3)
-    allocate(data%sigma0(nfreq,ndet), data%alpha(nfreq,ndet), data%fknee(nfreq,ndet))
+    nsb    = size(data%tod,3)
+    ndet   = size(data%tod,4)
+    allocate(data%sigma0(nfreq,nsb,ndet), data%alpha(nfreq,nsb,ndet), data%fknee(nfreq,nsb,ndet))
     call get_scan_info(snum, scan)
     call int2string(info%id, myid_text)
     do i = 1, ndet
        if (.not. is_alive(i)) then
-          data%sigma0(:,i) = 0.d0
-          data%alpha(:,i)  = 0.d0
-          data%fknee(:,i)  = 0.d0
+          data%sigma0(:,:,i) = 0.d0
+          data%alpha(:,:,i)  = 0.d0
+          data%fknee(:,:,i)  = 0.d0
           cycle
        end if
-       do j = 1, nfreq      
-          if(no_filters) then
-             data%sigma0(j,i) = 1e-5; data%alpha(j,i) = -1; data%fknee(j,i) = 0.02
-          else
-             call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,i), &
-                  & data%alpha(j,i), data%fknee(j,i), tod_ps=real(powspecs(:,j,i),dp), &
-                  & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-             write(*,fmt='(3i8,4f8.3)') info%id, i, j, data%sigma0(j,i), data%alpha(j,i), &
-                  & data%fknee(j,i), chisq
-          end if
+       do k = 1, nsb
+          do j = 1, nfreq      
+             if(no_filters) then
+                data%sigma0(j,k,i) = 1e-5; data%alpha(j,k,i) = -1; data%fknee(j,k,i) = 0.02
+             else
+                call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
+                     & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), &
+                     & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
+                write(*,fmt='(4i8,4f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
+                     & data%fknee(j,k,i), chisq
+             end if
+          end do
        end do
     end do
 
@@ -246,7 +249,7 @@ contains
   subroutine calc_gain(data)
     implicit none
     type(lx_struct) :: data
-    integer(i4b)    :: n, ndet, nfreq, i, j, k, m, tmin, tmax, parfile_time
+    integer(i4b)    :: n, ndet, nsb, nfreq, i, j, k, l, m, tmin, tmax, parfile_time
     real(dp)        :: g, a, sigma0, chisq, tsys, tau, dnu, const
     real(dp), dimension(:), allocatable :: el, dat
 
@@ -254,7 +257,7 @@ contains
     ! g = sigma0*sqrt()/T_0
     tsys = 35.d6
     tau = 1./data%samprate
-    dnu = data%nu(2)-data%nu(1)
+    dnu = data%nu(2,1)-data%nu(1,1)
     dnu = 2.d9/1024.
     const = sqrt(tau*dnu)/tsys
     write(*,*) tsys, 'T_sys'    
@@ -273,21 +276,23 @@ contains
     write(*,*) 'n*m                                    =', n*m
     write(*,*) 'Total number of samples                =', size(data%time)
     nfreq = size(data%tod,2)
-    ndet  = size(data%tod,3)
-    write(*,*) nfreq, '= nfreq', ndet, '= ndet'
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
+    write(*,*) nfreq, '= nfreq', nsb, '= nsb', ndet, '= ndet'
     write(*,*) '---------------------------------------------------------'
-    allocate(data%time_gain(n), data%gain(n,nfreq,ndet))
+    allocate(data%time_gain(n), data%gain(n,nfreq,nsb,ndet))
     allocate(el(m), dat(m))
     data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
     !open(13,file='gain.dat')
     !open(14,file='chisq.dat')
     do k = 1, ndet
-       do j = 1, nfreq
-          sigma0 = data%sigma0(j,k)
-          if (sigma0 == 0) write(*,*) 'sigma0 =', sigma0, k, '= det', j, '= freq'
-          g = sigma0*const
-          !write(*,*) 'gain =', g
-          data%gain(1,j,k) = g
+       do l = 1, nsb
+          do j = 1, nfreq
+             sigma0 = data%sigma0(j,l,k)
+             if (sigma0 == 0) write(*,*) 'sigma0 =', sigma0, k, '= det', l, '=sb', j, '= freq'
+             g = sigma0*const
+             !write(*,*) 'gain =', g
+             data%gain(1,j,l,k) = g
 !          do i = 1, n
 !             tmin = (i-1)*m+1
 !             tmax = i*m
@@ -300,6 +305,7 @@ contains
 !             write(13,*) (g-5.6d10)/5.6d10*100
 !             write(14,*) chisq
 !          end do
+          end do
        end do
     end do
     !close(13)
@@ -575,19 +581,24 @@ contains
   subroutine calc_fourier(data, ffts, powspecs)
     implicit none
     type(lx_struct) :: data
-    integer(i4b)    :: nfreq, ndet, i, j, k, nf
-    complex(spc), dimension(:,:,:), allocatable :: ffts
-    real(sp),     dimension(:,:,:), allocatable :: powspecs
+    integer(i4b)    :: nfreq, nsb, ndet, i, j, k, nf
+    complex(spc), dimension(:,:,:,:), allocatable :: ffts
+    real(sp),     dimension(:,:,:,:), allocatable :: powspecs
     nfreq = size(data%tod,2)
-    ndet  = size(data%tod,3)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
     nf    = size(data%tod,1)/2+1
-    allocate(ffts(nf,nfreq,ndet), powspecs(nf,nfreq,ndet))
+    allocate(ffts(nf,nfreq,nsb,ndet), powspecs(nf,nfreq,nsb,ndet))
     do i = 1, ndet
-       call fft_multi(data%tod(:,:,i), ffts(:,:,i), 1)
+       do k = 1, nsb
+          call fft_multi(data%tod(:,:,k,i), ffts(:,:,k,i), 1)
+       end do
     end do
     do i = 1, ndet
-       do j = 1, nfreq
-          call extract_powspec(ffts(:,j,i), powspecs(:,j,i))
+       do k = 1, nsb
+          do j = 1, nfreq
+             call extract_powspec(ffts(:,j,k,i), powspecs(:,j,k,i))
+          end do
        end do
     end do
   end subroutine

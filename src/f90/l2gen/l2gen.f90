@@ -311,18 +311,18 @@ contains
        offset_mjd = -1.d0 / 3600.d0 / 24.d0
 
        ! Find basic information
-       nsamp       = size(data_l1(i)%tod_l1,1)
+       nsamp       = size(data_l1(i)%tod,1)
        nsamp_point = size(data_l1(i)%time_point)
 
        if (i == 1) then
-          nfreq    = size(data_l1(i)%tod_l1,2)
-          nsb      = size(data_l1(i)%tod_l1,3)
-          ndet     = size(data_l1(i)%tod_l1,4)
+          nfreq    = size(data_l1(i)%tod,2)
+          nsb      = size(data_l1(i)%tod,3)
+          ndet     = size(data_l1(i)%tod,4)
           samprate = data_l1(i)%samprate
        else
-          call assert(size(data_l1(i)%nu_l1,1)  == nfreq, 'Different number of frequencies in L1 files')
-          call assert(size(data_l1(i)%tod_l1,3) == nsb, 'Different number of sidebands in L1 files')
-          call assert(size(data_l1(i)%tod_l1,4) == ndet, 'Different number of detectors in L1 files')
+          call assert(size(data_l1(i)%nu,1)  == nfreq, 'Different number of frequencies in L1 files')
+          call assert(size(data_l1(i)%tod,3) == nsb, 'Different number of sidebands in L1 files')
+          call assert(size(data_l1(i)%tod,4) == ndet, 'Different number of detectors in L1 files')
           call assert(data_l1(i)%samprate == samprate, 'Different sample rates in L1 files')
        end if
 
@@ -369,8 +369,8 @@ contains
 
     ! Allocate full-resolution L2 structure
     allocate(data_l2%time(nsamp_tot))
-    allocate(data_l2%nu(nsb*nfreq))
-    allocate(data_l2%tod(nsamp_tot, nsb*nfreq, ndet))
+    allocate(data_l2%nu(nfreq,nsb))
+    allocate(data_l2%tod(nsamp_tot, nfreq, nsb, ndet))
     allocate(data_l2%point_tel(3,nsamp_tot))
     allocate(data_l2%point_cel(3,nsamp_tot))
     allocate(data_l2%flag(nsamp_tot))
@@ -405,12 +405,10 @@ contains
           end do
        end do
 
-       k = 1
        do m = 1, nsb
           do n = 1, nfreq
-             if (i == 1) data_l2%nu(k)    = data_l1(i)%nu_l1(n,m)
-             data_l2%tod(j:j+nsamp-1,k,:) = data_l1(i)%tod_l1(ind(i,1):ind(i,2),n,m,:)
-             k                                    = k+1
+             if (i == 1) data_l2%nu(n,m)  = data_l1(i)%nu(n,m)
+             data_l2%tod(j:j+nsamp-1,n,m,:) = data_l1(i)%tod(ind(i,1):ind(i,2),n,m,:)
           end do
        end do
 
@@ -429,23 +427,24 @@ contains
     type(Lx_struct), intent(in)  :: data_in
     type(Lx_struct), intent(out) :: data_out
 
-    integer(i4b) :: i, j, k, l, nsamp_in, nsamp_out, ndet, dt, dnu
+    integer(i4b) :: i, j, k, l, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
 
-    ndet                     = size(data_in%tod,3)
+    nsb                      = size(data_in%tod,3)
+    ndet                     = size(data_in%tod,4)
     data_out%samprate        = samprate_out
     dt                       = nint(samprate_out/data_in%samprate)
     data_out%decimation_time = dt
     call assert(data_out%decimation_time >= 1, 'Cannot ask for higher output sample rate than input')
 
-    dnu                    = size(data_in%nu)/numfreq_out
+    dnu                    = size(data_in%nu,1)/numfreq_out
     data_out%decimation_nu = dnu
     call assert(data_out%decimation_nu >= 1, 'Cannot ask for more frequencies than in input files')
 
     nsamp_out = int(size(data_in%time)/data_out%decimation_time)
 
     allocate(data_out%time(nsamp_out))
-    allocate(data_out%nu(numfreq_out))
-    allocate(data_out%tod(nsamp_out, numfreq_out, ndet))
+    allocate(data_out%nu(numfreq_out,nsb))
+    allocate(data_out%tod(nsamp_out, numfreq_out, nsb, ndet))
     allocate(data_out%point_tel(3,nsamp_out))
     allocate(data_out%point_cel(3,nsamp_out))
     allocate(data_out%flag(nsamp_out))
@@ -466,13 +465,14 @@ contains
        data_out%point_cel(2,i) = mean(data_in%point_cel(2,(i-1)*dt+1:i*dt)) ! Theta
        data_out%point_cel(3,i) = mean(data_in%point_cel(3,(i-1)*dt+1:i*dt)) ! Psi
 
-       do k = 1, numfreq_out
-          if (i == 1) data_out%nu(k) = mean(data_in%nu((k-1)*dnu+1:k*dnu)) ! Frequency
-          do l = 1, ndet           ! Time-ordered data
-             data_out%tod(i,k,l) = mean(reshape(data_in%tod((i-1)*dt+1:i*dt,(k-1)*dnu+1:k*dnu,l), &
-                  & (/ dt*dnu/)))
+       do j = 1, nsb
+          do k = 1, numfreq_out
+             if (i == 1) data_out%nu(k,j) = mean(data_in%nu((k-1)*dnu+1:k*dnu,j)) ! Frequency
+             do l = 1, ndet           ! Time-ordered data
+                data_out%tod(i,k,j,l) = mean(reshape(data_in%tod((i-1)*dt+1:i*dt,(k-1)*dnu+1:k*dnu,j,l), &
+                     & (/ dt*dnu/)))
+             end do
           end do
-          
        end do
     end do
 
@@ -484,7 +484,7 @@ contains
     type(Lx_struct),  intent(inout) :: data
 
     real(dp)     :: T_0, Tsys, bw, gain, sigma, rms_drift, max_drift_freq
-    integer(i4b) :: i, j, k, l, n, ind_cut
+    integer(i4b) :: i, j, k, l, s, n, ind_cut
     real(sp),     dimension(:), allocatable :: drift
     complex(spc), dimension(:), allocatable :: ffts
 
@@ -500,23 +500,25 @@ contains
 
     ! Replace TOD with simulated data
     allocate(ffts(0:n/2), drift(1:n))
-    do k = 1, size(data%tod,3)        ! Detector  
-       do j = 1, size(data%tod,2)     ! Frequency
-          ! Start with large-scale drifts
-          !data%tod(:,j,k) = 36.d0 ! Monopole
-          data%tod(:,j,k) = 0.d0 ! Monopole
-          ffts = 0.d0
-          do l = 1, ind_cut
-             ffts(l) = sqrt(rms_drift * (real(l,dp)/real(ind_cut,dp))**(-3.d0)) * &
-                  & cmplx(rand_gauss(rng_handle),rand_gauss(rng_handle))
-          end do
-          call fft(drift, ffts, -1)
-          !data%tod(:,j,k) = data%tod(:,j,k) + drift
-          
-          do i = 1, size(data%tod,1)  ! Time
-             data%tod(i,j,k) = data%tod(i,j,k) + T_0 / sin(data%point_tel(2,i)*DEG2RAD)  ! Co-secant model
-             !data%tod(i,j,k) = data%tod(i,j,k) + sigma * rand_gauss(rng_handle) ! Radiometer equation noise
-             data%tod(i,j,k) = data%tod(i,j,k) * gain  ! Apply gain
+    do k = 1, size(data%tod,4)        ! Detector  
+       do s = 1, size(data%tod,3)     ! Sideband
+          do j = 1, size(data%tod,2)     ! Frequency
+             ! Start with large-scale drifts
+             !data%tod(:,j,k) = 36.d0 ! Monopole
+             data%tod(:,j,s,k) = 0.d0 ! Monopole
+             ffts = 0.d0
+             do l = 1, ind_cut
+                ffts(l) = sqrt(rms_drift * (real(l,dp)/real(ind_cut,dp))**(-3.d0)) * &
+                     & cmplx(rand_gauss(rng_handle),rand_gauss(rng_handle))
+             end do
+             call fft(drift, ffts, -1)
+             !data%tod(:,j,k) = data%tod(:,j,k) + drift
+             
+             do i = 1, size(data%tod,1)  ! Time
+                data%tod(i,j,s,k) = data%tod(i,j,s,k) + T_0 / sin(data%point_tel(2,i)*DEG2RAD)  ! Co-secant model
+                !data%tod(i,j,k) = data%tod(i,j,k) + sigma * rand_gauss(rng_handle) ! Radiometer equation noise
+                data%tod(i,j,s,k) = data%tod(i,j,s,k) * gain  ! Apply gain
+             end do
           end do
        end do
     end do
@@ -525,7 +527,7 @@ contains
     if (myid == 0) then
        open(58,file='gain_sim.dat')
        do i = 1, size(data%tod,1)
-          write(58,*) data%time(i), data%tod(i,1,1), data%point_tel(2,i)
+          write(58,*) data%time(i), data%tod(i,1,1,1), data%point_tel(2,i)
           !write(58,*) i, data%tod(i,1,1), data%point_tel(2,i)
        end do
        close(58)

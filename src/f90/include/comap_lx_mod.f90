@@ -13,8 +13,8 @@ module comap_lx_mod
      real(dp)                                        :: samprate
      real(dp),     allocatable, dimension(:)         :: time
      real(dp),     allocatable, dimension(:)         :: time_point
-     real(dp),     allocatable, dimension(:,:)       :: nu_l1       ! (freq, sideband)
-     real(sp),     allocatable, dimension(:,:,:,:)   :: tod_l1      ! (time, freq, sideband, detector)
+     real(dp),     allocatable, dimension(:,:)       :: nu          ! (freq, sideband)
+     real(sp),     allocatable, dimension(:,:,:,:)   :: tod         ! (time, freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:)       :: point_cel   ! Celestial; (RA/dec/psi, time_point)
      real(sp),     allocatable, dimension(:,:)       :: point_tel   ! Horizon; (az/el/dk, time_point)
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
@@ -23,8 +23,6 @@ module comap_lx_mod
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
      integer(i4b)                                    :: decimation_time, decimation_nu
-     real(dp),     allocatable, dimension(:)         :: nu          ! (freq)
-     real(sp),     allocatable, dimension(:,:,:)     :: tod         ! (time, freq, detector)
      real(sp),     allocatable, dimension(:,:)       :: point       ! Sky coordinates; (phi/theta/psi,time)
 
      ! Level 3 fields
@@ -32,11 +30,11 @@ module comap_lx_mod
      real(dp)                                        :: scanfreq(2), pixsize 
      real(dp)                                        :: point_lim(4)         ! (RA_min, RA_max, dec_min, dec_max)
      real(dp),     allocatable, dimension(:)         :: time_gain            ! (time)
-     real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (time, freq, detector)
-     real(dp),     allocatable, dimension(:,:)       :: sigma0, alpha, fknee ! (freq, detector)
+     real(sp),     allocatable, dimension(:,:,:,:)   :: gain                 ! (time, freq, nsb, detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(dp)                                        :: stats(ST_NUM)
-     real(dp),     allocatable, dimension(:,:,:)     :: det_stats            ! (freq, detector, stat)
-     real(dp),     allocatable, dimension(:,:,:)     :: filter_par           ! (freq, detector, param)
+     real(dp),     allocatable, dimension(:,:,:,:)   :: det_stats            ! (freq, detector, nsb, stat)
+     real(dp),     allocatable, dimension(:,:,:,:)   :: filter_par           ! (freq, detector, nsb, param)
 
   end type lx_struct
 
@@ -64,8 +62,8 @@ contains
              allocate(data%point_tel(3,npoint))
              allocate(data%point_cel(3,npoint))
              allocate(data%scanmode_l1(npoint))
-    if (all) allocate(data%nu_l1(nfreq,nsb))
-    if (all) allocate(data%tod_l1(nsamp,nfreq,nsb,ndet))
+    if (all) allocate(data%nu(nfreq,nsb))
+    if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
     call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
@@ -74,8 +72,8 @@ contains
     call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
     call read_hdf(file, "scanmode_l1",          data%scanmode_l1)
-    if (all) call read_hdf(file, "nu_l1",       data%nu_l1)
-    if (all) call read_hdf(file, "tod_l1",      data%tod_l1)
+    if (all) call read_hdf(file, "nu_l1",       data%nu)
+    if (all) call read_hdf(file, "tod_l1",      data%tod)
     if (all) call read_hdf(file, "flag",        data%flag)
     call close_hdf_file(file)
   end subroutine read_l1_file
@@ -86,15 +84,15 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, nfreq, ndet, npoint, ext(7)
+    integer(i4b)                 :: nsamp, nfreq, nsb, ndet, npoint, ext(7)
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
-    nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,ndet), data%flag(nsamp))
+    nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%flag(nsamp))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
-    allocate(data%point_tel(npoint,nsamp), data%point_cel(npoint,nsamp), data%nu(nfreq))
+    allocate(data%point_tel(npoint,nsamp), data%point_cel(npoint,nsamp), data%nu(nfreq,nsb))
     call read_hdf(file, "decimation_time",  data%decimation_time)
     call read_hdf(file, "decimation_nu",    data%decimation_nu)
     call read_hdf(file, "samprate",         data%samprate)
@@ -151,7 +149,7 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b) :: npoint, nsamp, nfreq, ndet, nmod, ext(7)
+    integer(i4b) :: npoint, nsamp, nfreq, nsb, ndet, nmod, ext(7)
 
     call free_lx_struct(data)
     call read_l2_file(filename, data)
@@ -171,15 +169,15 @@ contains
     allocate(data%time_gain(nsamp))
     call read_hdf(file, "time_gain", data%time_gain)
     call get_size_hdf(file, "gain", ext)
-    nsamp = ext(1); nfreq = ext(2); ndet = ext(3)
-    allocate(data%gain(nsamp,nfreq,ndet))
+    nsamp = ext(1); nfreq = ext(2); nsb = ext(3); ndet = ext(4)
+    allocate(data%gain(nsamp,nfreq,nsb,ndet))
     call read_hdf(file, "gain", data%gain)
     !write(*,*) data%gain
     ! Read noise parameters
     !call get_size_hdf(file, "corr", ext)
     call get_size_hdf(file, "sigma0", ext)
-    nfreq = ext(1); ndet = ext(2)
-    allocate(data%sigma0(nfreq,ndet),data%alpha(nfreq,ndet),data%fknee(nfreq,ndet))
+    nfreq = ext(1); nsb = ext(2); ndet = ext(3)
+    allocate(data%sigma0(nfreq,nsb,ndet),data%alpha(nfreq,nsb,ndet),data%fknee(nfreq,nsb,ndet))
     !allocate(data%corr(nfreq,nfreq,ndet,ndet))
     !allocate(data%det_stats(nfreq,ndet,NUM_DET_STATS), data%filter_par(nfreq,ndet,NUM_FILTR_PAR))
     !allocate(data%det_stats(ndet,nfreq,1))
@@ -201,9 +199,7 @@ contains
     if(allocated(data%time))        deallocate(data%time)
     if(allocated(data%time_point))  deallocate(data%time_point)
     if(allocated(data%nu))          deallocate(data%nu)
-    if(allocated(data%nu_l1))       deallocate(data%nu_l1)
     if(allocated(data%tod))         deallocate(data%tod)
-    if(allocated(data%tod_l1))      deallocate(data%tod_l1)
     if(allocated(data%point_tel))   deallocate(data%point_tel)
     if(allocated(data%point_cel))   deallocate(data%point_cel)
     if(allocated(data%scanmode_l1)) deallocate(data%scanmode_l1)
@@ -281,71 +277,73 @@ contains
     implicit none
     type(lx_struct), intent(in)    :: in(:)
     type(lx_struct), intent(inout) :: out
-    integer(i4b)                   :: i, j, jg, n, m, mg, ndet, nmod, npix, ng, nf
+    integer(i4b)                   :: i, j, jg, n, m, mg, ndet, nmod, npix, ng, nf, nsb
     logical(lgt)                   :: l3
     real(dp)                       :: f
 
     call free_lx_struct(out)
 
-    ndet = size(in(1)%tod,3)
-    l3   = allocated(in(1)%point)
-    n    = 0
-    ng   = 0
-    do i = 1, size(in)
-      n = n + size(in(i)%time)
-      if(l3) ng = ng + size(in(i)%time_gain)
-    end do
-    allocate(out%time(n), out%tod(n,nf,ndet), out%point_tel(3,n), out%point_cel(3,n))
-    if(l3) then
-       allocate(out%point(3,n))!,size(in(1)%point)))
-       allocate(out%time_gain(ng), out%gain(ng,nf,ndet))
-    end if
-    j  = 0
-    jg = 0
-    mg = 0
-    do i = 1, size(in)
-       m  = size(in(i)%time)
-       out%time       (  1+j:m+j  )   = in(i)%time
-       out%tod        (  1+j:m+j,:,:) = in(i)%tod
-       out%point_tel  (:,1+j:m+j  )   = in(i)%point_tel
-       out%point_cel  (:,1+j:m+j  )   = in(i)%point_cel
-       if(l3) then
-          mg = size(in(i)%time_gain)
-          out%point(:,1+j:m+j)          = in(i)%point
-          out%time_gain(1+jg:mg+jg)     = in(i)%time_gain
-          out%gain(1+jg:mg+jg,:,:)      = in(i)%gain
-       end if
-       j  = j+m
-       jg = jg + mg
-    end do
-
-    ! These have fixed length
-    out%decimation_time = in(1)%decimation_time
-    out%decimation_nu   = in(1)%decimation_nu
-    out%samprate        = in(1)%samprate
-    out%coord_sys       = in(1)%coord_sys
-    out%scanfreq        = in(1)%scanfreq
-    out%pixsize         = in(1)%pixsize
-    out%point_lim       = in(1)%point_lim
-
-    ! These could actually differ between the files. We make
-    ! a weighted average
-    if(l3) then
-       allocate(out%sigma0(nf,ndet), out%alpha(nf,ndet), out%fknee(nf,ndet))
-       allocate(out%det_stats(ndet,nf,size(in(1)%det_stats,2)))
-       allocate(out%filter_par(ndet,nf,size(in(1)%filter_par,2)))
-       out%sigma0 = 0; out%alpha = 0; out%fknee = 0
-       out%stats  = 0; out%det_stats = 0; out%filter_par = 0
-       do i = 1, size(in)
-          f = real(size(in(i)%time),dp)/n
-          out%sigma0 = out%sigma0 + in(i)%sigma0 * f
-          out%alpha  = out%alpha  + in(i)%alpha  * f
-          out%fknee  = out%fknee  + in(i)%fknee  * f
-          out%stats  = out%stats  + in(i)%stats  * f
-          out%det_stats  = out%det_stats  + in(i)%det_stats*f
-          out%filter_par = out%filter_par + in(i)%filter_par*f
-       end do
-    end if
+!!$    nf   = size(in(1)%tod,2)
+!!$    nsb  = size(in(1)%tod,3)
+!!$    ndet = size(in(1)%tod,4)
+!!$    l3   = allocated(in(1)%point)
+!!$    n    = 0
+!!$    ng   = 0
+!!$    do i = 1, size(in)
+!!$      n = n + size(in(i)%time)
+!!$      if(l3) ng = ng + size(in(i)%time_gain)
+!!$    end do
+!!$    allocate(out%time(n), out%tod(n,nf,nsb,ndet), out%point_tel(3,n), out%point_cel(3,n))
+!!$    if(l3) then
+!!$       allocate(out%point(3,n))!,size(in(1)%point)))
+!!$       allocate(out%time_gain(ng), out%gain(ng,nf,ndet))
+!!$    end if
+!!$    j  = 0
+!!$    jg = 0
+!!$    mg = 0
+!!$    do i = 1, size(in)
+!!$       m  = size(in(i)%time)
+!!$       out%time       (  1+j:m+j  )   = in(i)%time
+!!$       out%tod        (  1+j:m+j,:,:) = in(i)%tod
+!!$       out%point_tel  (:,1+j:m+j  )   = in(i)%point_tel
+!!$       out%point_cel  (:,1+j:m+j  )   = in(i)%point_cel
+!!$       if(l3) then
+!!$          mg = size(in(i)%time_gain)
+!!$          out%point(:,1+j:m+j)          = in(i)%point
+!!$          out%time_gain(1+jg:mg+jg)     = in(i)%time_gain
+!!$          out%gain(1+jg:mg+jg,:,:)      = in(i)%gain
+!!$       end if
+!!$       j  = j+m
+!!$       jg = jg + mg
+!!$    end do
+!!$
+!!$    ! These have fixed length
+!!$    out%decimation_time = in(1)%decimation_time
+!!$    out%decimation_nu   = in(1)%decimation_nu
+!!$    out%samprate        = in(1)%samprate
+!!$    out%coord_sys       = in(1)%coord_sys
+!!$    out%scanfreq        = in(1)%scanfreq
+!!$    out%pixsize         = in(1)%pixsize
+!!$    out%point_lim       = in(1)%point_lim
+!!$
+!!$    ! These could actually differ between the files. We make
+!!$    ! a weighted average
+!!$    if(l3) then
+!!$       allocate(out%sigma0(nf,ndet), out%alpha(nf,ndet), out%fknee(nf,ndet))
+!!$       allocate(out%det_stats(ndet,nf,size(in(1)%det_stats,2)))
+!!$       allocate(out%filter_par(ndet,nf,size(in(1)%filter_par,2)))
+!!$       out%sigma0 = 0; out%alpha = 0; out%fknee = 0
+!!$       out%stats  = 0; out%det_stats = 0; out%filter_par = 0
+!!$       do i = 1, size(in)
+!!$          f = real(size(in(i)%time),dp)/n
+!!$          out%sigma0 = out%sigma0 + in(i)%sigma0 * f
+!!$          out%alpha  = out%alpha  + in(i)%alpha  * f
+!!$          out%fknee  = out%fknee  + in(i)%fknee  * f
+!!$          out%stats  = out%stats  + in(i)%stats  * f
+!!$          out%det_stats  = out%det_stats  + in(i)%det_stats*f
+!!$          out%filter_par = out%filter_par + in(i)%filter_par*f
+!!$       end do
+!!$    end if
 
   end subroutine
 
