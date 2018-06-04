@@ -1,9 +1,9 @@
 all : tod2comap #covbench comaptest #maptest
 
-tod2comap : tod2comap.o ../include/libquiet.a
-	$(MPF90) -o tod2comap tod2comap.o $(LINK) $(COMMON_FLAGS)
-libtod2map.a : #tod2comap_utils.o tod2comap_cl_mod.o tod2comap_mapmaker.o
-#	ar crs $@ $^
+tod2comap : libtod2map.a ../include/libquiet.a tod2comap.o 
+	$(MPF90) -o tod2comap tod2comap.o -L. -ltod2map $(LINK) $(COMMON_FLAGS)
+libtod2map.a : tod2comap_utils.o tod2comap_mapmaker.o #tod2comap_cl_mod.o 
+	ar crs $@ $^
 covbench : libtod2map.a covbench.o ../include/libquiet.a
 	$(MPF90) -o covbench covbench.o libtod2map.a $(LINK) $(COMMON_FLAGS)
 maptest : libtod2map.a maptest.o ../include/libquiet.a
@@ -11,6 +11,7 @@ maptest : libtod2map.a maptest.o ../include/libquiet.a
 comaptest : comaptest.o 
 	$(MPF90) -o comaptest comaptest.o $(LINK) $(COMMON_FLAGS)
 
+tod2comap.o          : tod2comap_mapmaker.o
 tod2comap_cl_mod.o   : tod2comap_utils.o
 tod2comap_mapmaker.o : tod2comap_utils.o
 
