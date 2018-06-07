@@ -15,15 +15,15 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:)         :: time_point
      real(dp),     allocatable, dimension(:,:)       :: nu          ! (freq, sideband)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod         ! (time, freq, sideband, detector)
-     real(sp),     allocatable, dimension(:,:)       :: point_cel   ! Celestial; (RA/dec/psi, time_point)
-     real(sp),     allocatable, dimension(:,:)       :: point_tel   ! Horizon; (az/el/dk, time_point)
+     real(sp),     allocatable, dimension(:,:,:)     :: point_cel   ! Celestial; (RA/dec/psi, time_point, det)
+     real(sp),     allocatable, dimension(:,:,:)     :: point_tel   ! Horizon; (az/el/dk, time_point, det)
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
 
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
      integer(i4b)                                    :: decimation_time, decimation_nu
-     real(sp),     allocatable, dimension(:,:)       :: point       ! Sky coordinates; (phi/theta/psi,time)
+     real(sp),     allocatable, dimension(:,:,:)     :: point       ! Sky coordinates; (phi/theta/psi,time,det)
 
      ! Level 3 fields
      integer(i4b)                                    :: coord_sys
@@ -59,8 +59,8 @@ contains
              allocate(data%time_point(npoint))
 !             allocate(data%point_tel(3,nsamp))
 !             allocate(data%point_cel(3,nsamp))
-             allocate(data%point_tel(3,npoint))
-             allocate(data%point_cel(3,npoint))
+             allocate(data%point_tel(3,npoint,ndet))
+             allocate(data%point_cel(3,npoint,ndet))
              allocate(data%scanmode_l1(npoint))
     if (all) allocate(data%nu(nfreq,nsb))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
@@ -92,7 +92,7 @@ contains
     allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%flag(nsamp))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
-    allocate(data%point_tel(npoint,nsamp), data%point_cel(npoint,nsamp), data%nu(nfreq,nsb))
+    allocate(data%point_tel(npoint,nsamp,ndet), data%point_cel(npoint,nsamp,ndet), data%nu(nfreq,nsb))
     call read_hdf(file, "decimation_time",  data%decimation_time)
     call read_hdf(file, "decimation_nu",    data%decimation_nu)
     call read_hdf(file, "samprate",         data%samprate)
@@ -160,7 +160,7 @@ contains
     ! Read pointing
     call get_size_hdf(file, "point", ext)
     npoint = ext(1); nsamp = ext(2)!; mod = ext(3)
-    allocate(data%point(npoint,nsamp))
+    allocate(data%point(npoint,nsamp,ndet))
     call read_hdf(file, "point",     data%point)
     call read_hdf(file, "coord_sys", data%coord_sys)
     ! Read gain
@@ -203,7 +203,7 @@ contains
     if(allocated(data%point_tel))   deallocate(data%point_tel)
     if(allocated(data%point_cel))   deallocate(data%point_cel)
     if(allocated(data%scanmode_l1)) deallocate(data%scanmode_l1)
-    if(allocated(data%flag))        deallocate(data%flag)
+    !if(allocated(data%flag))        deallocate(data%flag)
 
     if(allocated(data%point))       deallocate(data%point)
     if(allocated(data%time_gain))   deallocate(data%time_gain)

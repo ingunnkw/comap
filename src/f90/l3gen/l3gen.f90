@@ -157,34 +157,41 @@ contains
   subroutine calc_point(data, isys, osys)
     implicit none
     type(lx_struct) :: data
-    integer(i4b) :: i, nsamp, mod, nmod, isys, osys
+    integer(i4b) :: i, j, nsamp, mod, nmod, isys, osys, ndet
     real(dp)     :: op(3), np(3), mat(3,3)
     nsamp = size(data%tod,1)
-    allocate(data%point(3,nsamp))
-    do i = 1, nsamp
-      op = data%point_cel(:,i)
-      np = op
+    ndet  = size(data%tod,4)
+    allocate(data%point(3,nsamp,ndet))
+    do j = 1, ndet
+       do i = 1, nsamp
+          op = data%point_cel(:,i,j)
+          np = op
 !      call swap_coordinate_convention(op(1), op(2), op(3), isys)
 !      call coord_convert(isys, op(1), op(2), op(3), osys, np(1), np(2), np(3), &
 !       & mjd=data%time(i), euler=mat)
-      data%point(:,i) = np
+          data%point(:,i,j) = np
+       end do
     end do
     data%coord_sys = osys
 
     ! Find map extent
-    call make_angles_safe(data%point(:,1),real(360.d0,sp))
-    data%point_lim(1) = minval(data%point(:,1))
-    data%point_lim(2) = maxval(data%point(:,1))
-    data%point_lim(3) = minval(data%point(:,2))
-    data%point_lim(4) = maxval(data%point(:,2))
-    data%point(:,1)   = mod(data%point(:,1),360.)
+    do j = 1, ndet
+       call make_angles_safe(data%point(:,1,j),real(360.d0,sp))
+    end do
+    data%point_lim(1) = minval(data%point(:,1,:))
+    data%point_lim(2) = maxval(data%point(:,1,:))
+    data%point_lim(3) = minval(data%point(:,2,:))
+    data%point_lim(4) = maxval(data%point(:,2,:))
+    do j = 1, ndet
+       data%point(:,1,j)   = mod(data%point(:,1,j),360.)
+    end do
   end subroutine
 
   subroutine calc_scanfreq(data)
     implicit none
     type(lx_struct) :: data
-    call get_scanfreq(data%point_tel(1,:), data%samprate, data%scanfreq(1))
-    call get_scanfreq(data%point_tel(2,:), data%samprate, data%scanfreq(2))
+    call get_scanfreq(data%point_tel(1,:,1), data%samprate, data%scanfreq(1))
+    call get_scanfreq(data%point_tel(2,:,1), data%samprate, data%scanfreq(2))
   end subroutine calc_scanfreq
 
   subroutine fit_noise(data, powspecs, snum)

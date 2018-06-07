@@ -19,8 +19,7 @@ program l2gen
   real(dp)             :: timing_offset, mjd_tol, mjd(2), dt_error, samprate_in, samprate, scanfreq
   integer(i4b), dimension(:),   allocatable :: detectors
   type(comap_scan_info) :: scan
-  type(Lx_struct), allocatable, dimension(:) :: data_l1
-  type(Lx_struct)                            :: data_l2_fullres, data_l2_decimated
+  type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
   type(planck_rng)     :: rng_handle
 
   call getarg(1, parfile)
@@ -72,11 +71,8 @@ program l2gen
 
      ! Read in Level 1 data
      num_l1_files = size(scan%l1files)
-     allocate(data_l1(num_l1_files))
-     do i = 1, num_l1_files
-        call read_l1_file(scan%l1files(i), data_l1(i))
-        call correct_missing_time_steps(data_l1(i)%time_point)
-     end do
+     call read_l1_file(scan%l1files(1), data_l1)
+     call correct_missing_time_steps(data_l1%time_point)
 
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
@@ -94,10 +90,7 @@ program l2gen
      call write_l2_file(scan%l2file, data_l2_decimated)
 
      ! Clean up data structures
-     do i = 1, num_l1_files
-        call free_lx_struct(data_l1(i))
-     end do
-     deallocate(data_l1)
+     call free_lx_struct(data_l1)
      call free_lx_struct(data_l2_decimated)
      call free_lx_struct(data_l2_fullres)
 
@@ -289,134 +282,96 @@ contains
   subroutine merge_l1_into_l2_files(mjd, data_l1, data_l2)
     implicit none
     real(dp),                                   intent(in)  :: mjd(2)
-    type(Lx_struct), allocatable, dimension(:), intent(in)  :: data_l1
+    type(Lx_struct),                            intent(in)  :: data_l1
     type(Lx_struct),                            intent(out) :: data_l2
     
     integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer, ndet0
-    real(dp)     :: samprate, offset_mjd, mjd_min, mjd_max
-    integer(i4b), allocatable, dimension(:,:) :: ind, ind_point
+    integer(i4b) :: ind(2), ind_point(2)
+    real(dp)     :: samprate, mjd_min, mjd_max
     type(Lx_struct)   :: data_l2_fullres
     type(spline_type), allocatable, dimension(:) :: point_tel_spline, point_cel_spline
 
-    ! Find number of samples
-    num_l1_files = size(data_l1)
-    allocate(ind(num_l1_files,2))         ! First and last accepted index of each L1 file
-    allocate(ind_point(num_l1_files,2))   ! First and last accepted index of each L1 file in time_point
-    nsamp_tot = 0
-    do i = 1, num_l1_files
-
-       ! Match pointing time with radiometer time
-       !call compute_time_offset(data_l1(i)%time_point, real(data_l1(i)%point_tel(2,:),dp), data_l1(i)%time, &
-       !     & real(data_l1(i)%tod_l1(:,1,1,1),dp), offset_mjd)
-       offset_mjd = -1.d0 / 3600.d0 / 24.d0
-
-       ! Find basic information
-       nsamp       = size(data_l1(i)%tod,1)
-       nsamp_point = size(data_l1(i)%time_point)
-
-       if (i == 1) then
-          nfreq    = size(data_l1(i)%tod,2)
-          nsb      = size(data_l1(i)%tod,3)
-          ndet     = size(data_l1(i)%tod,4)
-          samprate = data_l1(i)%samprate
-       else
-          call assert(size(data_l1(i)%nu,1)  == nfreq, 'Different number of frequencies in L1 files')
-          call assert(size(data_l1(i)%tod,3) == nsb, 'Different number of sidebands in L1 files')
-          call assert(size(data_l1(i)%tod,4) == ndet, 'Different number of detectors in L1 files')
-          call assert(data_l1(i)%samprate == samprate, 'Different sample rates in L1 files')
-       end if
-
-       mjd_min = max(mjd(1), max(minval(data_l1(i)%time), minval(data_l1(i)%time_point+offset_mjd)))
-       mjd_max = min(mjd(2), min(maxval(data_l1(i)%time), maxval(data_l1(i)%time_point+offset_mjd)))
-
-       ! Check that there are some valid samples inside current L1 file
-       if (mjd_min > data_l1(i)%time(nsamp) .or. mjd_max < data_l1(i)%time(1)) then
-          ! No acceptable samples
-          ind(i,:) = -1
-          cycle
-       end if
-
-       ! Find start position
-       ind(i,1) = 1
-       do while (data_l1(i)%time(ind(i,1)) < mjd_min .and. ind(i,1) <= nsamp)
-          ind(i,1) = ind(i,1) + 1
-       end do
-
-       ! Find end position
-       ind(i,2) = nsamp
-       do while (data_l1(i)%time(ind(i,2)) > mjd_max .and. ind(i,2) >= 1)
-          ind(i,2) = ind(i,2) - 1
-       end do
-
-       ! Find start position for pointing
-       ind_point(i,1) = 1
-       do while (data_l1(i)%time_point(ind_point(i,1))+offset_mjd < mjd_min .and. ind_point(i,1) <= nsamp_point)
-          ind_point(i,1) = ind_point(i,1) + 1
-       end do
-
-       ! Find end position for pointing
-       ind_point(i,2) = nsamp_point
-       do while (data_l1(i)%time_point(ind_point(i,2))+offset_mjd > mjd_max .and. ind_point(i,2) >= 1)
-          ind_point(i,2) = ind_point(i,2) - 1
-       end do
-
-       nsamp_tot = nsamp_tot + ind(i,2)-ind(i,1)+1
+    ! Find basic information
+    nsamp       = size(data_l1%tod,1)
+    nsamp_point = size(data_l1%time_point)
+    nfreq       = size(data_l1%tod,2)
+    nsb         = size(data_l1%tod,3)
+    ndet        = size(data_l1%tod,4)
+    samprate    = data_l1%samprate
+    mjd_min     = max(mjd(1), minval(data_l1%time))
+    mjd_max     = min(mjd(2), maxval(data_l1%time))
     
+    ! Find start position
+    ind(1) = 1
+    do while (data_l1%time(ind(1)) < mjd_min .and. ind(1) <= nsamp)
+       ind(1) = ind(1) + 1
     end do
-
-
-    call assert(any(ind(:,1) /= -1) .and. any(ind(:,2) /= -1), 'No valid ranges in L1 files')
+    
+    ! Find end position
+    ind(2) = nsamp
+    do while (data_l1%time(ind(2)) > mjd_max .and. ind(2) >= 1)
+       ind(2) = ind(2) - 1
+    end do
+    
+    ! Find start position for pointing
+    ind_point(1) = 1
+    do while (data_l1%time_point(ind_point(1)) < mjd_min .and. ind_point(1) <= nsamp_point)
+       ind_point(1) = ind_point(1) + 1
+    end do
+    
+    ! Find end position for pointing
+    ind_point(2) = nsamp_point
+    do while (data_l1%time_point(ind_point(2)) > mjd_max .and. ind_point(2) >= 1)
+       ind_point(2) = ind_point(2) - 1
+    end do
+    
+    nsamp_tot = ind(2)-ind(1)+1
 
     ! Allocate full-resolution L2 structure
     allocate(data_l2%time(nsamp_tot))
     allocate(data_l2%nu(nfreq,nsb))
     allocate(data_l2%tod(nsamp_tot, nfreq, nsb, ndet))
-    allocate(data_l2%point_tel(3,nsamp_tot))
-    allocate(data_l2%point_cel(3,nsamp_tot))
+    allocate(data_l2%point_tel(3,nsamp_tot,ndet))
+    allocate(data_l2%point_cel(3,nsamp_tot,ndet))
     allocate(data_l2%flag(nsamp_tot))
 
     ! Merge L1 data
     data_l2%decimation_time = 1
     data_l2%decimation_nu   = 1
     data_l2%samprate        = samprate
-    data_l2%scanmode        = data_l1(1)%scanmode_l1(1)
+    data_l2%scanmode        = data_l1%scanmode_l1(1)
     j                               = 1
 
     allocate(point_tel_spline(3), point_cel_spline(3))
-    do i = 1, num_l1_files
 
-       ! Spline pointing
+    ! Spline pointing
+    nsamp = ind(2)-ind(1)+1
+    data_l2%time(j:j+nsamp-1)        = data_l1%time(ind(1):ind(2))
+    data_l2%flag(j:j+nsamp-1)        = data_l1%flag(ind(1):ind(2))
+    do i = 1, ndet
        do l = 1, 3
-          call spline(point_tel_spline(l), data_l1(i)%time_point(ind_point(i,1):ind_point(i,2))+offset_mjd, &
-               & real(data_l1(i)%point_tel(l,ind_point(i,1):ind_point(i,2)),dp))
-          call spline(point_cel_spline(l), data_l1(i)%time_point(ind_point(i,1):ind_point(i,2))+offset_mjd, &
-               & real(data_l1(i)%point_cel(l,ind_point(i,1):ind_point(i,2)),dp))
+          call spline(point_tel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
+               & real(data_l1%point_tel(l,ind_point(1):ind_point(2),i),dp))
+          call spline(point_cel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
+               & real(data_l1%point_cel(l,ind_point(1):ind_point(2),i),dp))
        end do
 
-       nsamp = ind(i,2)-ind(i,1)+1
-       data_l2%time(j:j+nsamp-1)        = data_l1(i)%time(ind(i,1):ind(i,2))
-       data_l2%flag(j:j+nsamp-1)        = data_l1(i)%flag(ind(i,1):ind(i,2))
-       !data_l2%point_tel(:,j:j+nsamp-1) = data_l1(i)%point_tel(:,ind(i,1):ind(i,2))
-       !data_l2%point_cel(:,j:j+nsamp-1) = data_l1(i)%point_cel(:,ind(i,1):ind(i,2))
        do l = 1, 3
           do k = j, j+nsamp-1
-             data_l2%point_tel(l,k) = splint(point_tel_spline(l), data_l2%time(k))
-             data_l2%point_cel(l,k) = splint(point_cel_spline(l), data_l2%time(k))
+             data_l2%point_tel(l,k,i) = splint(point_tel_spline(l), data_l2%time(k))
+             data_l2%point_cel(l,k,i) = splint(point_cel_spline(l), data_l2%time(k))
           end do
        end do
-
-       do m = 1, nsb
-          do n = 1, nfreq
-             if (i == 1) data_l2%nu(n,m)  = data_l1(i)%nu(n,m)
-             data_l2%tod(j:j+nsamp-1,n,m,:) = data_l1(i)%tod(ind(i,1):ind(i,2),n,m,:)
-          end do
-       end do
-
-       call assert(all(data_l1(i)%scanmode_l1 == data_l2%scanmode), 'Varying scanmode within L1 files!')
-       j = j + nsamp
     end do
 
-    deallocate(ind, ind_point, point_cel_spline, point_tel_spline)
+    do m = 1, nsb
+       do n = 1, nfreq
+          data_l2%nu(n,m)                = data_l1%nu(n,m)
+          data_l2%tod(j:j+nsamp-1,n,m,:) = data_l1%tod(ind(1):ind(2),n,m,:)
+       end do
+    end do
+
+    deallocate(point_cel_spline, point_tel_spline)
 
   end subroutine merge_l1_into_l2_files
 
@@ -445,25 +400,29 @@ contains
     allocate(data_out%time(nsamp_out))
     allocate(data_out%nu(numfreq_out,nsb))
     allocate(data_out%tod(nsamp_out, numfreq_out, nsb, ndet))
-    allocate(data_out%point_tel(3,nsamp_out))
-    allocate(data_out%point_cel(3,nsamp_out))
+    allocate(data_out%point_tel(3,nsamp_out,ndet))
+    allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
 
     ! Make angles safe for averaging
-    call make_angles_safe(data_in%point_tel(1,:), real(360.d0,sp)) ! Phi
-    call make_angles_safe(data_in%point_tel(3,:), real(360.d0,sp)) ! Psi
-    call make_angles_safe(data_in%point_cel(1,:), real(360.d0,sp)) ! Phi
-    call make_angles_safe(data_in%point_cel(3,:), real(360.d0,sp)) ! Psi
+    do j = 1, ndet
+       call make_angles_safe(data_in%point_tel(1,:,j), real(360.d0,sp)) ! Phi
+       call make_angles_safe(data_in%point_tel(3,:,j), real(360.d0,sp)) ! Psi
+       call make_angles_safe(data_in%point_cel(1,:,j), real(360.d0,sp)) ! Phi
+       call make_angles_safe(data_in%point_cel(3,:,j), real(360.d0,sp)) ! Psi
+    end do
 
     do i = 1, nsamp_out
        data_out%time(i) = mean(data_in%time((i-1)*dt+1:i*dt))  ! Time
        data_out%flag(i) = data_in%time((i-1)*dt+1)             ! Pick first flag in segment
-       data_out%point_tel(1,i) = mean(data_in%point_tel(1,(i-1)*dt+1:i*dt)) ! Phi
-       data_out%point_tel(2,i) = mean(data_in%point_tel(2,(i-1)*dt+1:i*dt)) ! Theta
-       data_out%point_tel(3,i) = mean(data_in%point_tel(3,(i-1)*dt+1:i*dt)) ! Psi
-       data_out%point_cel(1,i) = mean(data_in%point_cel(1,(i-1)*dt+1:i*dt)) ! Phi
-       data_out%point_cel(2,i) = mean(data_in%point_cel(2,(i-1)*dt+1:i*dt)) ! Theta
-       data_out%point_cel(3,i) = mean(data_in%point_cel(3,(i-1)*dt+1:i*dt)) ! Psi
+       do j = 1, ndet
+          data_out%point_tel(1,i,j) = mean(data_in%point_tel(1,(i-1)*dt+1:i*dt,j)) ! Phi
+          data_out%point_tel(2,i,j) = mean(data_in%point_tel(2,(i-1)*dt+1:i*dt,j)) ! Theta
+          data_out%point_tel(3,i,j) = mean(data_in%point_tel(3,(i-1)*dt+1:i*dt,j)) ! Psi
+          data_out%point_cel(1,i,j) = mean(data_in%point_cel(1,(i-1)*dt+1:i*dt,j)) ! Phi
+          data_out%point_cel(2,i,j) = mean(data_in%point_cel(2,(i-1)*dt+1:i*dt,j)) ! Theta
+          data_out%point_cel(3,i,j) = mean(data_in%point_cel(3,(i-1)*dt+1:i*dt,j)) ! Psi
+       end do
 
        do j = 1, nsb
           do k = 1, numfreq_out
@@ -515,7 +474,7 @@ contains
              !data%tod(:,j,k) = data%tod(:,j,k) + drift
              
              do i = 1, size(data%tod,1)  ! Time
-                data%tod(i,j,s,k) = data%tod(i,j,s,k) + T_0 / sin(data%point_tel(2,i)*DEG2RAD)  ! Co-secant model
+                data%tod(i,j,s,k) = data%tod(i,j,s,k) + T_0 / sin(data%point_tel(2,i,k)*DEG2RAD)  ! Co-secant model
                 !data%tod(i,j,k) = data%tod(i,j,k) + sigma * rand_gauss(rng_handle) ! Radiometer equation noise
                 data%tod(i,j,s,k) = data%tod(i,j,s,k) * gain  ! Apply gain
              end do
@@ -527,7 +486,7 @@ contains
     if (myid == 0) then
        open(58,file='gain_sim.dat')
        do i = 1, size(data%tod,1)
-          write(58,*) data%time(i), data%tod(i,1,1,1), data%point_tel(2,i)
+          write(58,*) data%time(i), data%tod(i,1,1,1), data%point_tel(2,i,1)
           !write(58,*) i, data%tod(i,1,1), data%point_tel(2,i)
        end do
        close(58)

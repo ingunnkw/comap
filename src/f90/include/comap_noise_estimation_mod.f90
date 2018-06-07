@@ -236,6 +236,8 @@ contains
 !!$       write(57,*) freqs(i), f(i), sigma0**2 * (1 + (freqs(i)/f_knee)**alpha)
 !!$    end do
 !!$    close(57)
+!!$    call mpi_finalize(i)
+!!$    stop
 
     if (present(chisq_out)) then
        ! Check goodness-of-fit
@@ -274,7 +276,7 @@ contains
        alpha    = -exp(p(3))
     end if
 
-    if (f_knee > 3.d0 .or. alpha < -10.d0 .or. sigma_sq == 0.d0) then
+    if (f_knee > 5.d0 .or. alpha < -10.d0 .or. sigma_sq == 0.d0) then
        lnL_noise_powell_full = 1.d30
        return
     end if
