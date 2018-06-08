@@ -173,7 +173,7 @@ contains
        ind_max = n-1
 
        p_full(0) = log(sigma1**2)    ! variance
-       p_full(1) = log(0.001d0) ! f_knee
+       p_full(1) = log(1.d0) ! f_knee
        p_full(2) = log(2.d0) ! alpha
 
     else
@@ -264,9 +264,9 @@ contains
 
     sigma_sq =  exp(min(p(1),200.d0))
     if (p(2) < -10.d0) then
-       f_knee = 1e-5
-    else if (p(2) > 2.d0) then
-       f_knee = exp(2.d0)
+       f_knee = exp(-10.d0)
+    else if (p(2) > 3.d0) then
+       f_knee = exp(3.d0)
     else
        f_knee   =  exp(p(2))
     end if
@@ -276,7 +276,7 @@ contains
        alpha    = -exp(p(3))
     end if
 
-    if (f_knee > 5.d0 .or. alpha < -10.d0 .or. sigma_sq == 0.d0) then
+    if (f_knee > 10.d0 .or. alpha < -10.d0 .or. sigma_sq == 0.d0) then
        lnL_noise_powell_full = 1.d30
        return
     end if
@@ -304,11 +304,11 @@ contains
     real(dp)     :: nu, P_nu, alpha, f_knee, x, dPda, dPdf, current_sigma0, &
          & dS2da, dS2df, sigma_sq, dLdP
 
-    sigma_sq = exp(p(1))
+    sigma_sq =  exp(min(p(1),200.d0))
     if (p(2) < -10.d0) then
-       f_knee = 1e-5
-    else if (p(2) > 2.d0) then
-       f_knee = exp(2.d0)
+       f_knee = exp(-10.d0)
+    else if (p(2) > 3.d0) then
+       f_knee = exp(3.d0)
     else
        f_knee   =  exp(p(2))
     end if

@@ -223,7 +223,7 @@ contains
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                write(*,fmt='(4i8,4f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
+                write(*,fmt='(4i8,f10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
                      & data%fknee(j,k,i), chisq
              end if
           end do
