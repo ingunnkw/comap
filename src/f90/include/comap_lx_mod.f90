@@ -19,6 +19,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: point_tel   ! Horizon; (az/el/dk, time_point, det)
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
+     integer(i4b), allocatable, dimension(:)         :: pixels      ! Active pixels/detectors
 
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
@@ -62,6 +63,7 @@ contains
              allocate(data%point_tel(3,npoint,ndet))
              allocate(data%point_cel(3,npoint,ndet))
              allocate(data%scanmode_l1(npoint))
+             allocate(data%pixels(ndet))
     if (all) allocate(data%nu(nfreq,nsb))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
@@ -72,6 +74,7 @@ contains
     call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
     call read_hdf(file, "scanmode_l1",          data%scanmode_l1)
+    call read_hdf(file, "pixels",               data%pixels)
     if (all) call read_hdf(file, "nu_l1",       data%nu)
     if (all) call read_hdf(file, "tod_l1",      data%tod)
     if (all) call read_hdf(file, "flag",        data%flag)
@@ -89,7 +92,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%flag(nsamp))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%flag(nsamp), data%pixels(ndet))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
     allocate(data%point_tel(npoint,nsamp,ndet), data%point_cel(npoint,nsamp,ndet), data%nu(nfreq,nsb))
@@ -102,6 +105,7 @@ contains
     call read_hdf(file, "point_tel",        data%point_tel)
     call read_hdf(file, "point_cel",        data%point_cel)
     call read_hdf(file, "flag",             data%flag)
+    call read_hdf(file, "pixels",           data%pixels)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -159,9 +163,10 @@ contains
     call read_hdf(file, "point_lim", data%point_lim)
     ! Read pointing
     call get_size_hdf(file, "point", ext)
-    npoint = ext(1); nsamp = ext(2)!; mod = ext(3)
+    npoint = ext(1); nsamp = ext(2); ndet = ext(3)
     allocate(data%point(npoint,nsamp,ndet))
     call read_hdf(file, "point",     data%point)
+
     call read_hdf(file, "coord_sys", data%coord_sys)
     ! Read gain
     call get_size_hdf(file, "time_gain", ext)
@@ -232,6 +237,7 @@ contains
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point_tel",         data%point_tel)
     call write_hdf(file, "flag",              data%flag)
+    call write_hdf(file, "pixels",            data%pixels)
     call close_hdf_file(file)
   end subroutine
 
