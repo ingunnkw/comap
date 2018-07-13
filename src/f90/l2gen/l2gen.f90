@@ -67,10 +67,10 @@ program l2gen
      ! Read in Level 1 data
      num_l1_files = size(scan%l1files)
      call read_l1_file(scan%l1files(1), data_l1); call update_status(status, 'read_l1')
-     call correct_missing_time_steps(data_l1%time_point)
+     !call correct_missing_time_steps(data_l1%time_point)
 
      ! Initialize frequency mask
-     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres%freqmask_full, data_l2_fullres%freqmask)
+     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
      call update_status(status, 'freq_mask')
 
      ! Reformat L1 data into L2 format, and truncate
@@ -82,7 +82,6 @@ program l2gen
      call update_status(status, 'gain_norm')
 
      ! Poly-filter if requested
-     !write(*,*) 'a'
      call polyfilter_TOD(data_l2_fullres, bp_filter)
      call update_status(status, 'polyfilter')
 
@@ -90,7 +89,6 @@ program l2gen
      !call convert_GHz_to_k(data_l2_fullres(i))
 
      ! If necessary, decimate L2 file in both time and frequency
-     write(*,*) 'Decimating L2 data'
      call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
      call update_status(status, 'decimate')
      !write(*,*) 'c'
@@ -99,6 +97,7 @@ program l2gen
      if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
      ! Write L2 file to disk
+     write(*,*) 'Writing ', trim(scan%l2file)
      call write_l2_file(scan%l2file, data_l2_decimated)
      call update_status(status, 'write_l2')
 
@@ -134,9 +133,9 @@ contains
     allocate(dt(2*nsamp), dv(0:n-1))
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
+       if (mod(k,200) == 0) write(*,*) 'Normalizing gains for det = ', i
        do j = 1, nsb
           do k = 1, nfreq
-             if (mod(k,200) == 0) write(*,*) 'Normalizing gains, ', i,j,k
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
 
              dt(1:nsamp)            = data_l2%tod(:,k,j,i)
@@ -463,7 +462,7 @@ contains
 
     ! Allocate full-resolution L2 structure
     allocate(data_l2%time(nsamp_tot), stat=err)
-    allocate(data_l2%nu(nfreq,nsb))
+    allocate(data_l2%nu(nfreq,nsb,ndet))
     allocate(data_l2%tod(nsamp_tot, nfreq, nsb, ndet))
     allocate(data_l2%point_tel(3,nsamp_tot,ndet))
     allocate(data_l2%point_cel(3,nsamp_tot,ndet))
@@ -534,13 +533,13 @@ contains
     nsamp_out = int(size(data_in%time)/data_out%decimation_time)
 
     allocate(data_out%time(nsamp_out))
-    allocate(data_out%nu(numfreq_out,nsb))
+    allocate(data_out%nu(numfreq_out,nsb,ndet))
     allocate(data_out%tod(nsamp_out, numfreq_out, nsb, ndet))
     allocate(data_out%point_tel(3,nsamp_out,ndet))
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
-    allocate(data_out%freqmask_full(size(data_in%nu,1),nsb,ndet))
+    allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
@@ -570,8 +569,8 @@ contains
 
        do j = 1, nsb
           do k = 1, numfreq_out
-             if (i == 1) data_out%nu(k,j) = mean(data_in%nu((k-1)*dnu+1:k*dnu,j)) ! Frequency
              do l = 1, ndet           ! Time-ordered data
+                data_out%nu(k,j,l)    = mean(data_in%nu((k-1)*dnu+1:k*dnu,j,l)) ! Frequency
                 data_out%tod(i,k,j,l) = 0.d0
                 weight                = 0.d0
                 do n = (k-1)*dnu+1, k*dnu
@@ -696,11 +695,11 @@ contains
 
   end subroutine correct_missing_time_steps
 
-  subroutine initialize_frequency_mask(freqmaskfile, nfreq, freqmask_full, freqmask)
+  subroutine initialize_frequency_mask(freqmaskfile, nfreq, data)
     implicit none
-    character(len=*),                                intent(in)  :: freqmaskfile
-    integer(i4b),                                    intent(in)  :: nfreq
-    real(sp),         allocatable, dimension(:,:,:), intent(out) :: freqmask_full, freqmask
+    character(len=*),                                intent(in)    :: freqmaskfile
+    integer(i4b),                                    intent(in)    :: nfreq
+    type(Lx_struct),                                 intent(inout) :: data
     
 
     integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
@@ -709,7 +708,6 @@ contains
 
     ndet = get_num_dets()
     nsb  = get_num_sideband()
-
     unit = getlun()
     open(unit, file=trim(freqmaskfile), recl=1024)
     first = .true.
@@ -719,9 +717,9 @@ contains
        if (line(1:1) == '#') cycle
        if (first) then
           read(line,*) nfreq_full
-          allocate(freqmask(nfreq,nsb,ndet))
-          allocate(freqmask_full(nfreq_full,nsb,ndet))
-          freqmask_full = 1.d0
+          allocate(data%freqmask(nfreq,nsb,ndet))
+          allocate(data%freqmask_full(nfreq_full,nsb,ndet))
+          data%freqmask_full = 1.d0
           first = .false.
        else
           read(line,*) freq, sb, det
@@ -729,21 +727,21 @@ contains
              write(*,*) 'ERROR: All frequencies removed by freqmask!'
              stop
           else if (det == 0 .and. sb == 0) then
-             freqmask_full(freq,:,:) = 0.d0
+             data%freqmask_full(freq,:,:) = 0.d0
           else if (det == 0 .and. freq == 0) then
-             freqmask_full(:,sb,:) = 0.d0
+             data%freqmask_full(:,sb,:) = 0.d0
           else if (sb == 0 .and. freq == 0) then
-             freqmask_full(:,:,det) = 0.d0
+             data%freqmask_full(:,:,det) = 0.d0
           else if (det == 0) then
-             freqmask_full(freq,sb,:) = 0.d0
+             data%freqmask_full(freq,sb,:) = 0.d0
           else if (sb == 0) then
-             freqmask_full(freq,:,det) = 0.d0
+             data%freqmask_full(freq,:,det) = 0.d0
           else if (freq == 0) then
-             freqmask_full(:,sb,det) = 0.d0
+             data%freqmask_full(:,sb,det) = 0.d0
           else 
-             freqmask_full(freq,sb,det) = 0.d0
+             data%freqmask_full(freq,sb,det) = 0.d0
           end if
-          if (all(freqmask_full == 0)) then
+          if (all(data%freqmask_full == 0)) then
              write(*,*) 'ERROR: All frequencies removed by freqmask!'
              stop
           end if
@@ -753,13 +751,13 @@ contains
 
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
-       freqmask = freqmask_full
+       data%freqmask = data%freqmask_full
     else
-       freqmask = 1.
+       data%freqmask = 1.
        do k = 1, ndet
           do j = 1, nsb
              do i = 1, nfreq
-                if (all(freqmask_full((i-1)*dfreq+1:i*dfreq,j,k) == 0.d0)) freqmask(i,j,k) = 0.0
+                if (all(data%freqmask_full((i-1)*dfreq+1:i*dfreq,j,k) == 0.d0)) data%freqmask(i,j,k) = 0.0
              end do
           end do
        end do
