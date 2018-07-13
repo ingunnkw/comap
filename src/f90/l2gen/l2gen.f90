@@ -9,17 +9,19 @@ program l2gen
   use rngmod
   use quiet_fft_mod
   use spline_1D_mod
+  use quiet_status_mod
   implicit none
 
-  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile
+  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet
-  integer(i4b)         :: mstep, i2, decimation, nsamp, status, numfreq
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter
   logical(lgt)         :: exist, reprocess, check_existing, gonext
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
   type(planck_rng)     :: rng_handle
+  type(status_file)    :: status
 
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',              par_dp=samprate)
@@ -33,13 +35,14 @@ program l2gen
   call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter)
 
   check_existing = .true.
-
   call initialize_scan_mod(parfile)
   call initialize_detector_mod(parfile)
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
-  call dset(id=myid,level=debug)
+  call init_status(status, 'l2gen_mon.txt'); 
+  call update_status(status, 'init')
+  !call dset(id=myid,level=debug)
 
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
@@ -58,25 +61,30 @@ program l2gen
         call rm(scan%l2file)
      end if
      write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
-     call dmem("scan start")
+     call update_status(status, 'scan_start')
+
 
      ! Read in Level 1 data
      num_l1_files = size(scan%l1files)
-     call read_l1_file(scan%l1files(1), data_l1)
+     call read_l1_file(scan%l1files(1), data_l1); call update_status(status, 'read_l1')
      call correct_missing_time_steps(data_l1%time_point)
 
      ! Initialize frequency mask
      call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres%freqmask_full, data_l2_fullres%freqmask)
+     call update_status(status, 'freq_mask')
 
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
+     call update_status(status, 'merge')
 
      ! Normalize gain
      call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
+     call update_status(status, 'gain_norm')
 
      ! Poly-filter if requested
      !write(*,*) 'a'
      call polyfilter_TOD(data_l2_fullres, bp_filter)
+     call update_status(status, 'polyfilter')
 
      ! Fourier transform frequency direction
      !call convert_GHz_to_k(data_l2_fullres(i))
@@ -84,6 +92,7 @@ program l2gen
      ! If necessary, decimate L2 file in both time and frequency
      write(*,*) 'Decimating L2 data'
      call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+     call update_status(status, 'decimate')
      !write(*,*) 'c'
 
      ! Replace TOD with simulated data
@@ -91,6 +100,7 @@ program l2gen
 
      ! Write L2 file to disk
      call write_l2_file(scan%l2file, data_l2_decimated)
+     call update_status(status, 'write_l2')
 
      ! Clean up data structures
      call free_lx_struct(data_l1)
@@ -99,6 +109,8 @@ program l2gen
 
   end do
   call mpi_finalize(ierr)
+
+  call free_status(status)
 
 contains
 
