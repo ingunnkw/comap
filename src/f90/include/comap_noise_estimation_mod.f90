@@ -276,7 +276,7 @@ contains
        alpha    = -exp(p(3))
     end if
 
-    if (f_knee > 10.d0 .or. alpha < -10.d0 .or. sigma_sq == 0.d0) then
+    if (f_knee > 50.d0 .or. alpha < -10.d0 .or. sigma_sq == 0.d0) then
        lnL_noise_powell_full = 1.d30
        return
     end if

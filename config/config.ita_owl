@@ -38,19 +38,19 @@
 export F90 := ifort
 
 # MPI Fortran 90 compiler.  Default is "mpif90".
-export MPF90 := mpif90
+export MPF90 := mpiifort
 
 # MPI Fortran 77 compiler.  Default is "mpif77".
-export MPF77 := mpif90
+export MPF77 := mpiifort
 
 # MPI C compiler.  Default is "mpicc".
-export MPCC := mpicc
+export MPCC := mpiicc
 
 # =========== Compiler Optimizations =============
 
 # Fortran 90 compiler flags
-#export F90FLAGS := -O3 -assume byterecl
-export F90FLAGS := -g -fpe0 -w -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
+export F90FLAGS := -O3 -assume byterecl
+#export F90FLAGS := -g -fpe0 -w -check bounds -check format -check pointers -check uninit -check output_conversion -assume byterecl -traceback -heap-arrays 16384
 
 # Fortran 77 compiler flags
 export FFLAGS := -O2
@@ -98,7 +98,7 @@ export CFITSIO_LINK := -L$(LOCAL)/lib -lcfitsio
 
 # =============== LAPACK Linking =================
 #MKLPATH := /opt/app-sync/intel/mkl/lib/intel64/
-MKLPATH := /astro/local/opt/Intel/composer_xe_2013_sp1.2.144/mkl/lib/intel64/
+MKLPATH := ${MKLROOT}
 
 # The include and linking commands for LAPACK.
 export LAPACK_INCLUDE := 
@@ -108,7 +108,7 @@ export LAPACK_LINK := -shared-intel -Wl,-rpath,$(MKLPATH) -L$(MKLPATH)  -lmkl_in
 #export LAPACK_LINK := -L/mn/stornext/u3/hke/owl/local/lib/ifort64_fma4_mp_int64/lib -lifcoremt_pic -lacml
 
 # =============== Scalapack =======================
-SCAPATH := /astro/local/opt/Intel/composer_xe_2013_sp1.2.144/mkl/lib/intel64/
+SCAPATH := ${MKLROOT}/lib/intel64/
 export SCALAPACK_LIBS := $(MKLPATH)/libmkl_intel_lp64.a $(MKLPATH)/libmkl_scalapack_lp64.a $(MKLPATH)/libmkl_sequential.a $(MKLPATH)/libmkl_core.a $(SCAPATH)/libmkl_blacs_intelmpi_lp64.a
 #export SCALAPACK_LIBS := -limf -lirc -lsvml
 
@@ -121,7 +121,7 @@ export SCALAPACK_LIBS := $(MKLPATH)/libmkl_intel_lp64.a $(MKLPATH)/libmkl_scalap
 #export HEALPIX_INCLUDE_CPP := -I$(LOCAL)/include
 #export HEALPIX_LINK_CPP := -L$(LOCAL)/lib -lhealpix_cxx -lcxxsupport -lgomp -lfftpack
 
-export HEALPIX := /mn/stornext/u3/hke/owl/local/src/Healpix_3.11
+export HEALPIX := /mn/stornext/u3/hke/owl/local/src/dagsshealpix
 export HEALPIX_INCLUDE := -I$(HEALPIX)/include
 export HEALPIX_LINK := -L$(HEALPIX)/lib -lhealpix
 

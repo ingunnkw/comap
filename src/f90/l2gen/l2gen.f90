@@ -11,26 +11,28 @@ program l2gen
   use spline_1D_mod
   implicit none
 
-  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile
+  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet
-  integer(i4b)         :: mstep, i2, decimation, mod, di, nsamp, status, numfreq
-  integer(i4b)         :: debug, num_l1_files, seed
+  integer(i4b)         :: mstep, i2, decimation, nsamp, status, numfreq
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter
   logical(lgt)         :: exist, reprocess, check_existing, gonext
-  real(dp)             :: timing_offset, mjd_tol, mjd(2), dt_error, samprate_in, samprate, scanfreq
-  integer(i4b), dimension(:),   allocatable :: detectors
+  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
   type(planck_rng)     :: rng_handle
 
   call getarg(1, parfile)
-  call get_parameter(unit, parfile, 'L2_SAMPRATE',         par_dp=samprate)
-  call get_parameter(unit, parfile, 'NUMFREQ',             par_int=numfreq)
-  call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES', par_lgt=reprocess)
-  call get_parameter(unit, parfile, 'DEBUG',               par_int=debug)
-  call get_parameter(unit, parfile, 'SEED',                par_int=seed)
+  call get_parameter(unit, parfile, 'L2_SAMPRATE',              par_dp=samprate)
+  call get_parameter(unit, parfile, 'NUMFREQ',                  par_int=numfreq)
+  call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES',      par_lgt=reprocess)
+  call get_parameter(unit, parfile, 'DEBUG',                    par_int=debug)
+  call get_parameter(unit, parfile, 'SEED',                     par_int=seed)
+  call get_parameter(unit, parfile, 'FREQUENCY_MASK',           par_string=freqmaskfile)
+  call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',    par_dp=nu_gain)
+  call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA', par_dp=alpha_gain)
+  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter)
 
   check_existing = .true.
-  mjd_tol  = 10d0/60/60/24
 
   call initialize_scan_mod(parfile)
   call initialize_detector_mod(parfile)
@@ -39,12 +41,8 @@ program l2gen
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
   call dset(id=myid,level=debug)
 
-  call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
-  ndet = get_num_dets()
-  allocate(detectors(ndet))
-  do i = 1, ndet; detectors(i) = i; end do
-  mstep = 10
+  call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   nscan = get_num_scans()
   do snum = 1+myid, nscan, nproc
@@ -52,13 +50,6 @@ program l2gen
      inquire(file=scan%l2file,exist=exist)
      if(exist .and. .not. reprocess) then
         gonext = .true.
-!!$        if(check_existing) then
-!!$           ! Check if the file is as long as it should be
-!!$           call get_l2_time_stats(scan%l2file, mjd, dt_error)
-!!$           gonext = dt_error < 0.25 .and. (mjd(2) - scan%mjd(2) < mjd_tol .or. scan%mjd(1) - mjd(1) < mjd_tol)
-!!$        else
-!!$           gonext = .true.
-!!$        end if
         if(gonext) then
            write(*,fmt="(i3,a,2i5,a)") myid, " skipping already finished scan:", snum, scan%sid
            cycle
@@ -74,14 +65,26 @@ program l2gen
      call read_l1_file(scan%l1files(1), data_l1)
      call correct_missing_time_steps(data_l1%time_point)
 
+     ! Initialize frequency mask
+     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres%freqmask_full, data_l2_fullres%freqmask)
+
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
+
+     ! Normalize gain
+     call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
+
+     ! Poly-filter if requested
+     !write(*,*) 'a'
+     call polyfilter_TOD(data_l2_fullres, bp_filter)
 
      ! Fourier transform frequency direction
      !call convert_GHz_to_k(data_l2_fullres(i))
 
      ! If necessary, decimate L2 file in both time and frequency
+     write(*,*) 'Decimating L2 data'
      call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+     !write(*,*) 'c'
 
      ! Replace TOD with simulated data
      if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
@@ -98,6 +101,125 @@ program l2gen
   call mpi_finalize(ierr)
 
 contains
+
+  subroutine normalize_gain(data_l2, nu_gain, alpha_gain)
+    implicit none
+    type(Lx_struct),                            intent(inout) :: data_l2
+    real(dp),                                   intent(in)    :: nu_gain, alpha_gain
+
+    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet
+    real(dp)     :: samprate, nu
+    real(dp),     allocatable, dimension(:) :: dt
+    complex(dpc), allocatable, dimension(:) :: dv
+
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%tod,2)
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    samprate    = data_l2%samprate    
+    n           = nsamp+1
+
+    allocate(dt(2*nsamp), dv(0:n-1))
+    allocate(data_l2%mean_tp(nfreq,nsb,ndet))
+    do i = 1, ndet
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (mod(k,200) == 0) write(*,*) 'Normalizing gains, ', i,j,k
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+
+             dt(1:nsamp)            = data_l2%tod(:,k,j,i)
+             dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+             call fft(dt, dv, 1)
+             ! Apply lowpass filter
+             do l = 0, n-1
+                nu = ind2freq(l+1, samprate, n)
+                dv(l) = dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
+             end do
+             call fft(dt, dv, -1)
+
+             data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp)
+             data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
+!!$             open(58,file='filter.dat')
+!!$             do l = 1, nsamp
+!!$                write(58,*) l, data_l2%tod(l,k,j,i), dt(l)
+!!$             end do
+!!$             close(58)
+!!$             call mpi_finalize(l)
+!!$             stop
+          end do
+       end do
+    end do
+    deallocate(dt, dv)
+
+  end subroutine normalize_gain
+
+
+  subroutine polyfilter_TOD(data_l2, bp_filter)
+    implicit none
+    type(Lx_struct),                            intent(inout) :: data_l2
+    integer(i4b),                               intent(in)    :: bp_filter
+
+    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, p, stat
+    real(dp)     :: samprate, nu, mu
+    real(dp),     allocatable, dimension(:)   :: x
+    real(dp),     allocatable, dimension(:,:) :: T, A
+
+    data_l2%polyorder = bp_filter
+    if (bp_filter < 0) return
+
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%tod,2)
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    p           = bp_filter
+
+    allocate(T(nfreq,0:p), A(0:p,0:p), x(0:p))
+    allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
+
+    ! Precompute polynomial basis
+    do k = 1, nfreq
+       mu = max(min(2.d0*real(k-1,dp)/real(nfreq-1,dp)-1.d0,1.d0),-1.d0)
+       call get_legendre_polynomials(mu,T(k,:))
+    end do
+
+    do i = 1, ndet
+       do j = 1, nsb
+          !write(*,*) 'Polyfiltering det, sb = ', i, j
+
+          ! Pre-compute Cholesky factor of coupling matrix for current sideband
+          do m = 0, p
+             do n = 0, m
+                A(m,n) = sum(T(:,m)*T(:,n)*data_l2%freqmask_full(:,j,i))
+             end do
+          end do
+          call dpotrf('L', p+1, A, p+1, stat )
+
+          ! Solve for polynomial coefficients
+          !$OMP PARALLEL PRIVATE(k,m,x,l,stat)
+          !$OMP DO SCHEDULE(guided)
+          do k = 1, nsamp
+             do m = 0, p
+                x(m) = sum(data_l2%tod(k,:,j,i)*T(:,m)*data_l2%freqmask_full(:,j,i))
+             end do
+             call dpotrs( 'L', p+1, 1, A, p+1, x, p+1, stat)
+
+             ! Store poly coeffs as separate TOD
+             data_l2%tod_poly(k,:,j,i) = x
+
+             ! Subtract fitted polynomial from main TOD
+             do l = 1, nfreq
+                if (data_l2%freqmask_full(l,j,i) == 0.d0) cycle
+                data_l2%tod(k,l,j,i) = data_l2%tod(k,l,j,i) - sum(T(l,:)*x)
+             end do
+          end do
+          !$OMP END DO
+          !$OMP END PARALLEL
+       end do
+    end do
+    deallocate(T, A, x)
+
+  end subroutine polyfilter_TOD
+
 
   subroutine get_l2_time_stats(filename, mjd, dt_error)
     implicit none
@@ -281,11 +403,11 @@ contains
 
   subroutine merge_l1_into_l2_files(mjd, data_l1, data_l2)
     implicit none
-    real(dp),                                   intent(in)  :: mjd(2)
-    type(Lx_struct),                            intent(in)  :: data_l1
-    type(Lx_struct),                            intent(out) :: data_l2
+    real(dp),                                   intent(in)    :: mjd(2)
+    type(Lx_struct),                            intent(in)    :: data_l1
+    type(Lx_struct),                            intent(inout) :: data_l2
     
-    integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer, ndet0
+    integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer, ndet0, err
     integer(i4b) :: ind(2), ind_point(2)
     real(dp)     :: samprate, mjd_min, mjd_max
     type(Lx_struct)   :: data_l2_fullres
@@ -328,26 +450,27 @@ contains
     nsamp_tot = ind(2)-ind(1)+1
 
     ! Allocate full-resolution L2 structure
-    allocate(data_l2%time(nsamp_tot))
+    allocate(data_l2%time(nsamp_tot), stat=err)
     allocate(data_l2%nu(nfreq,nsb))
     allocate(data_l2%tod(nsamp_tot, nfreq, nsb, ndet))
     allocate(data_l2%point_tel(3,nsamp_tot,ndet))
     allocate(data_l2%point_cel(3,nsamp_tot,ndet))
-    allocate(data_l2%flag(nsamp_tot))
+    !allocate(data_l2%flag(nsamp_tot))
 
     ! Merge L1 data
     data_l2%decimation_time = 1
     data_l2%decimation_nu   = 1
     data_l2%samprate        = samprate
     data_l2%scanmode        = data_l1%scanmode_l1(1)
-    j                               = 1
+    data_l2%nu              = data_l1%nu
+    j                       = 1
 
     allocate(point_tel_spline(3), point_cel_spline(3))
 
     ! Spline pointing
     nsamp = ind(2)-ind(1)+1
     data_l2%time(j:j+nsamp-1)        = data_l1%time(ind(1):ind(2))
-    data_l2%flag(j:j+nsamp-1)        = data_l1%flag(ind(1):ind(2))
+!    data_l2%flag(j:j+nsamp-1)        = data_l1%flag(ind(1):ind(2))
     do i = 1, ndet
        do l = 1, 3
           call spline(point_tel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
@@ -364,25 +487,26 @@ contains
        end do
     end do
 
-    do m = 1, nsb
-       do n = 1, nfreq
-          data_l2%nu(n,m)                = data_l1%nu(n,m)
-          data_l2%tod(j:j+nsamp-1,n,m,:) = data_l1%tod(ind(1):ind(2),n,m,:)
+    do j = 1, ndet
+       do m = 1, nsb
+          do n = 1, nfreq
+             data_l2%tod(1:nsamp,n,m,j) = data_l1%tod(ind(1):ind(2),n,m,j)
+          end do
        end do
     end do
-
     deallocate(point_cel_spline, point_tel_spline)
 
   end subroutine merge_l1_into_l2_files
 
   subroutine decimate_L2_data(samprate_out, numfreq_out, data_in, data_out)
     implicit none
-    real(dp),        intent(in) :: samprate_out
-    integer(i4b),    intent(in) :: numfreq_out
-    type(Lx_struct), intent(in)  :: data_in
-    type(Lx_struct), intent(out) :: data_out
+    real(dp),                          intent(in)  :: samprate_out
+    integer(i4b),                      intent(in)  :: numfreq_out
+    type(Lx_struct),                   intent(in)  :: data_in
+    type(Lx_struct),                   intent(out) :: data_out
 
-    integer(i4b) :: i, j, k, l, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
+    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
+    real(dp)     :: weight
 
     nsb                      = size(data_in%tod,3)
     ndet                     = size(data_in%tod,4)
@@ -403,6 +527,12 @@ contains
     allocate(data_out%point_tel(3,nsamp_out,ndet))
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
+    allocate(data_out%freqmask(numfreq_out,nsb,ndet))
+    allocate(data_out%freqmask_full(size(data_in%nu,1),nsb,ndet))
+    allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
+    data_out%freqmask      = data_in%freqmask
+    data_out%freqmask_full = data_in%freqmask_full
+    data_out%mean_tp       = data_in%mean_tp
 
     ! Make angles safe for averaging
     do j = 1, ndet
@@ -412,6 +542,8 @@ contains
        call make_angles_safe(data_in%point_cel(3,:,j), real(360.d0,sp)) ! Psi
     end do
 
+    !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight)
+    !$OMP DO SCHEDULE(guided)    
     do i = 1, nsamp_out
        data_out%time(i) = mean(data_in%time((i-1)*dt+1:i*dt))  ! Time
        data_out%flag(i) = data_in%time((i-1)*dt+1)             ! Pick first flag in segment
@@ -428,12 +560,40 @@ contains
           do k = 1, numfreq_out
              if (i == 1) data_out%nu(k,j) = mean(data_in%nu((k-1)*dnu+1:k*dnu,j)) ! Frequency
              do l = 1, ndet           ! Time-ordered data
-                data_out%tod(i,k,j,l) = mean(reshape(data_in%tod((i-1)*dt+1:i*dt,(k-1)*dnu+1:k*dnu,j,l), &
-                     & (/ dt*dnu/)))
+                data_out%tod(i,k,j,l) = 0.d0
+                weight                = 0.d0
+                do n = (k-1)*dnu+1, k*dnu
+                   weight = weight + data_in%freqmask_full(n,j,l)
+                   do m = (i-1)*dt+1, i*dt
+                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + data_in%tod(m,n,j,l) * data_in%freqmask_full(n,j,l)
+                   end do
+                end do
+                if (weight > 0.d0) then
+                   data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) / weight
+                else
+                   data_out%tod(i,k,j,l) = 0.d0
+                end if
              end do
           end do
        end do
     end do
+    !$OMP END DO
+    !$OMP END PARALLEL
+
+    ! Polyfiltered TOD
+    data_out%polyorder = data_in%polyorder
+    if (data_out%polyorder >= 0) then
+       allocate(data_out%tod_poly(nsamp_out, 0:data_out%polyorder, nsb, ndet))
+       do l = 1, ndet           
+          do j = 1, nsb
+             do k = 0, data_out%polyorder
+                do i = 1, nsamp_out
+                   data_out%tod_poly(i,k,j,l) = mean(data_in%tod_poly((i-1)*dt+1:i*dt,k,j,l))
+                end do
+             end do
+          end do
+       end do
+    end if
 
   end subroutine decimate_L2_data
 
@@ -523,6 +683,77 @@ contains
     end do
 
   end subroutine correct_missing_time_steps
+
+  subroutine initialize_frequency_mask(freqmaskfile, nfreq, freqmask_full, freqmask)
+    implicit none
+    character(len=*),                                intent(in)  :: freqmaskfile
+    integer(i4b),                                    intent(in)  :: nfreq
+    real(sp),         allocatable, dimension(:,:,:), intent(out) :: freqmask_full, freqmask
+    
+
+    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
+    logical(lgt) :: first
+    character(len=1024) :: line, val, equal
+
+    ndet = get_num_dets()
+    nsb  = get_num_sideband()
+
+    unit = getlun()
+    open(unit, file=trim(freqmaskfile), recl=1024)
+    first = .true.
+    do while (.true.)
+       read(unit,'(a)', end=99) line
+       line = trim(adjustl(line))
+       if (line(1:1) == '#') cycle
+       if (first) then
+          read(line,*) nfreq_full
+          allocate(freqmask(nfreq,nsb,ndet))
+          allocate(freqmask_full(nfreq_full,nsb,ndet))
+          freqmask_full = 1.d0
+          first = .false.
+       else
+          read(line,*) freq, sb, det
+          if (det == 0 .and. sb == 0 .and. freq == 0) then
+             write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             stop
+          else if (det == 0 .and. sb == 0) then
+             freqmask_full(freq,:,:) = 0.d0
+          else if (det == 0 .and. freq == 0) then
+             freqmask_full(:,sb,:) = 0.d0
+          else if (sb == 0 .and. freq == 0) then
+             freqmask_full(:,:,det) = 0.d0
+          else if (det == 0) then
+             freqmask_full(freq,sb,:) = 0.d0
+          else if (sb == 0) then
+             freqmask_full(freq,:,det) = 0.d0
+          else if (freq == 0) then
+             freqmask_full(:,sb,det) = 0.d0
+          else 
+             freqmask_full(freq,sb,det) = 0.d0
+          end if
+          if (all(freqmask_full == 0)) then
+             write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             stop
+          end if
+       end if
+    end do
+99  close(unit)
+
+    dfreq = nfreq_full/nfreq
+    if (dfreq == 1) then
+       freqmask = freqmask_full
+    else
+       freqmask = 1.
+       do k = 1, ndet
+          do j = 1, nsb
+             do i = 1, nfreq
+                if (all(freqmask_full((i-1)*dfreq+1:i*dfreq,j,k) == 0.d0)) freqmask(i,j,k) = 0.0
+             end do
+          end do
+       end do
+    end if
+
+  end subroutine initialize_frequency_mask
 
 
 end program

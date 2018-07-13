@@ -22,8 +22,13 @@ module comap_lx_mod
 
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
+     integer(i4b)                                    :: polyorder     ! Polynomial order for frequency filter
      integer(i4b)                                    :: decimation_time, decimation_nu
-     real(sp),     allocatable, dimension(:,:,:)     :: point       ! Sky coordinates; (phi/theta/psi,time,det)
+     real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:,:)     :: point         ! Sky coordinates; (phi/theta/psi,time,det)
+     real(sp),     allocatable, dimension(:,:,:)     :: mean_tp
+     real(sp),     allocatable, dimension(:,:,:,:)   :: tod_poly      ! Poly-filter TOD coefficients (time,0:poly,sb,det)
 
      ! Level 3 fields
      integer(i4b)                                    :: coord_sys
@@ -32,9 +37,12 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:)         :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:,:)   :: gain                 ! (time, freq, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: sigma0_poly, alpha_poly, fknee_poly ! (poly, nsb, detector)
      real(dp)                                        :: stats(ST_NUM)
      real(dp),     allocatable, dimension(:,:,:,:)   :: det_stats            ! (freq, detector, nsb, stat)
      real(dp),     allocatable, dimension(:,:,:,:)   :: filter_par           ! (freq, detector, nsb, param)
+     real(sp),     allocatable, dimension(:,:,:)     :: weather_temp         ! (nsamp, nsb, detector)
+     real(sp),     allocatable, dimension(:,:,:)     :: rel_gain             ! (freq, nsb, detector)
 
   end type lx_struct
 
@@ -64,7 +72,7 @@ contains
              allocate(data%scanmode_l1(npoint))
     if (all) allocate(data%nu(nfreq,nsb))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
-    if (all) allocate(data%flag(nsamp))
+    !if (all) allocate(data%flag(nsamp))
     call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
     call read_hdf(file, "time",                 data%time)
@@ -74,7 +82,7 @@ contains
     call read_hdf(file, "scanmode_l1",          data%scanmode_l1)
     if (all) call read_hdf(file, "nu_l1",       data%nu)
     if (all) call read_hdf(file, "tod_l1",      data%tod)
-    if (all) call read_hdf(file, "flag",        data%flag)
+    !if (all) call read_hdf(file, "flag",        data%flag)
     call close_hdf_file(file)
   end subroutine read_l1_file
 
@@ -84,12 +92,13 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, nfreq, nsb, ndet, npoint, ext(7)
+    integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, ext(7), poly
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%flag(nsamp))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet))
+    !allocate(data%flag(nsamp))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
     allocate(data%point_tel(npoint,nsamp,ndet), data%point_cel(npoint,nsamp,ndet), data%nu(nfreq,nsb))
@@ -101,7 +110,17 @@ contains
     call read_hdf(file, "tod",              data%tod)
     call read_hdf(file, "point_tel",        data%point_tel)
     call read_hdf(file, "point_cel",        data%point_cel)
-    call read_hdf(file, "flag",             data%flag)
+    !call read_hdf(file, "flag",             data%flag)
+    nfreq_full = nfreq*data%decimation_nu
+    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet))
+    call read_hdf(file, "freqmask",         data%freqmask)    
+    call read_hdf(file, "freqmask_full",    data%freqmask_full)
+    call read_hdf(file, "mean_tp",          data%mean_tp)
+    call read_hdf(file, "polyorder",        data%polyorder)
+    if (data%polyorder >= 0) then
+       allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
+       call read_hdf(file, "tod_poly",         data%tod_poly)
+    end if
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -149,7 +168,7 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b) :: npoint, nsamp, nfreq, nsb, ndet, nmod, ext(7)
+    integer(i4b) :: npoint, nsamp, nfreq, nfreq_full, nsb, ndet, nmod, ext(7)
 
     call free_lx_struct(data)
     call read_l2_file(filename, data)
@@ -188,6 +207,16 @@ contains
     !call read_hdf(file, "corr",   data%corr)
     ! Read stats
     call read_hdf(file, "stats", data%stats)
+    nfreq_full = nfreq*data%decimation_nu
+    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq,nsb,ndet))
+    call read_hdf(file, "freqmask",         data%freqmask)
+    call read_hdf(file, "freqmask_full",    data%freqmask_full)
+    call read_hdf(file, "mean_tp",          data%mean_tp)
+    call read_hdf(file, "polyorder",        data%polyorder)
+    if (data%polyorder >= 0) then
+       allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
+       call read_hdf(file, "tod_poly",         data%tod_poly)
+    end if
     ! Read filter parameters
     !call read_hdf(file, "filter_par",  data%filter_par)
     call close_hdf_file(file)
@@ -205,14 +234,18 @@ contains
     if(allocated(data%scanmode_l1)) deallocate(data%scanmode_l1)
     !if(allocated(data%flag))        deallocate(data%flag)
 
-    if(allocated(data%point))       deallocate(data%point)
-    if(allocated(data%time_gain))   deallocate(data%time_gain)
-    if(allocated(data%gain))        deallocate(data%gain)
-    if(allocated(data%sigma0))      deallocate(data%sigma0)
-    if(allocated(data%alpha))       deallocate(data%alpha)
-    if(allocated(data%fknee))       deallocate(data%fknee)
-    if(allocated(data%det_stats))   deallocate(data%det_stats)
-    if(allocated(data%filter_par))  deallocate(data%filter_par)
+    if(allocated(data%point))         deallocate(data%point)
+    if(allocated(data%time_gain))     deallocate(data%time_gain)
+    if(allocated(data%gain))          deallocate(data%gain)
+    if(allocated(data%sigma0))        deallocate(data%sigma0)
+    if(allocated(data%alpha))         deallocate(data%alpha)
+    if(allocated(data%fknee))         deallocate(data%fknee)
+    if(allocated(data%det_stats))     deallocate(data%det_stats)
+    if(allocated(data%filter_par))    deallocate(data%filter_par)
+    if(allocated(data%freqmask))      deallocate(data%freqmask)
+    if(allocated(data%freqmask_full)) deallocate(data%freqmask_full)
+    if(allocated(data%mean_tp))       deallocate(data%mean_tp)
+    if(allocated(data%tod_poly))      deallocate(data%tod_poly)
   end subroutine
 
   subroutine write_l2_file(filename, data)
@@ -231,7 +264,12 @@ contains
     call write_hdf(file, "tod",               data%tod)
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point_tel",         data%point_tel)
-    call write_hdf(file, "flag",              data%flag)
+    !call write_hdf(file, "flag",              data%flag)
+    call write_hdf(file, "freqmask",          data%freqmask)
+    call write_hdf(file, "freqmask_full",     data%freqmask_full)
+    call write_hdf(file, "mean_tp",           data%mean_tp)
+    call write_hdf(file, "polyorder",         data%polyorder)
+    if (data%polyorder >= 0) call write_hdf(file, "tod_poly",         data%tod_poly)
     call close_hdf_file(file)
   end subroutine
 
@@ -264,7 +302,12 @@ contains
     call write_hdf(file, "stats",             data%stats)
     !call write_hdf(file, "det_stats",         data%det_stats)
     !call write_hdf(file, "filter_par",        data%filter_par)
-    call write_hdf(file, "flag",              data%flag)
+    !call write_hdf(file, "flag",              data%flag)
+    call write_hdf(file, "freqmask",          data%freqmask)
+    call write_hdf(file, "freqmask_full",     data%freqmask_full)
+    call write_hdf(file, "mean_tp",           data%mean_tp)
+    call write_hdf(file, "polyorder",         data%polyorder)
+    if (data%polyorder >= 0) call write_hdf(file, "tod_poly",         data%tod_poly)
     call close_hdf_file(file)
   end subroutine
 

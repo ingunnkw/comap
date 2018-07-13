@@ -118,6 +118,7 @@ program l3gen
      call read_L2_file(scan%l2file, data)     ; call dmem("read l2")
 
      ! Process it
+     !call calc_weather_template(data)         ; call dmem("weather")
      call calc_point (data,  isys, osys)      ; call dmem("point")
      !call calc_objrel(data,  point_objs)      ; call dmem("objrel")
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
@@ -152,6 +153,99 @@ program l3gen
   write(*,*) 'Time elapsed: ', t2-t1
 contains
 
+
+  subroutine calc_weather_template(data)
+    implicit none
+
+    type(lx_struct) :: data
+
+
+    integer(i4b) :: i, j, k, l, ndet, nsamp, nfreq, nsb, n
+    real(dp)     :: sigma0, alpha, fknee, nu, chisq, g
+    real(dp),     allocatable, dimension(:) :: dt 
+    complex(dpc), allocatable, dimension(:) :: dv
+
+    nsamp  = size(data%tod,1)
+    nfreq  = size(data%tod,2)
+    nsb    = size(data%tod,3)
+    ndet   = size(data%tod,4)
+    n      = nsamp+1
+
+    allocate(data%weather_temp(nsamp,nsb,ndet), data%rel_gain(nfreq,nsb,ndet))
+    allocate(dt(2*nsamp), dv(0:n-1))
+    do i = 2, ndet
+       do j = 1, nsb
+
+          ! Normalize gain with a low-pass filter
+          data%weather_temp(:,j,i) = 0.d0
+          open(58,file='tods.dat')
+          do k = 1, nfreq
+             dt(1:nsamp) = data%tod(:,k,j,i)
+             dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+             call fft(dt, dv, 1)
+             dv(21:n-1) = 0.d0 ! Remove highest modes
+             call fft(dt, dv, -1)
+             data%weather_temp(:,j,i) = data%weather_temp(:,j,i) + data%tod(:,k,j,i) / dt(1:nsamp)
+             do l = 1, nsamp
+                write(58,*) l, data%tod(l,k,j,i)/dt(l)
+                data%tod(l,k,j,i) = data%tod(l,k,j,i)/dt(l)
+             end do
+             write(58,*) 
+          end do
+          close(58)
+          data%weather_temp(:,j,i) = data%weather_temp(:,j,i) / nfreq
+          
+          ! Compute mean TOD over all frequencies
+          !g = mean(data%tod(:,15,j,i))/mean(data%tod(:,17,j,i))
+             !do k = 1, nsamp
+             !dt(k) = mean(data%tod(k,:,j,i))
+             !dt(k) = data%tod(k,15,j,i)-data%tod(k,17,j,i)*g
+          !end do
+          dt(1:nsamp)            = data%weather_temp(:,j,i)
+          dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+
+          open(58,file='weather_raw.dat')
+          do k = 1, nsamp
+             write(58,*) k, dt(k)
+          end do
+          close(58)
+
+
+          ! Fit 1/f noise profile
+          call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, sigma0, &
+               & alpha, fknee, chisq_out=chisq, apply_scanmask=scanmask, tod=dt)
+          write(*,fmt='(3i8,f10.2,3f8.3)') info%id, i, j, sigma0, alpha, fknee, chisq
+
+
+
+          ! Wiener filter time stream with frequency-averaged noise parameters
+          call fft(dt, dv, 1)
+          do k = 1, n-1 ! Frequency 0 is unchanged
+             nu    = ind2freq(k+1, data%samprate, n)
+             dv(k) = (1.d0 / (1.d0 + (nu/fknee)**(-alpha)))**5 * dv(k)
+          end do
+          call fft(dt, dv, -1)
+
+          open(58,file='weather_wf.dat')
+          do k = 1, nsamp
+             write(58,*) k, dt(k)
+          end do
+          close(58)
+
+          do k = 1, nfreq
+             dt(1:nsamp) = data%tod(:,k,j,i)-data%weather_temp(:,j,i)
+             dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+             call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, sigma0, &
+                  & alpha, fknee, chisq_out=chisq, apply_scanmask=scanmask, tod=dt)
+             write(*,fmt='(3i8,f10.2,3f8.3)') info%id, i, j, sigma0, alpha, fknee, chisq
+          end do
+
+          call mpi_finalize(ierr)
+          stop
+       end do
+    end do
+    
+  end subroutine calc_weather_template
 
 
   subroutine calc_point(data, isys, osys)
@@ -197,11 +291,12 @@ contains
   subroutine fit_noise(data, powspecs, snum)
     implicit none
     type(lx_struct) :: data
-    integer(i4b) :: ndet, nsb, nfreq, i, j, k, snum
+    integer(i4b) :: ndet, nsb, nfreq, i, j, k, snum, p
     character(len=4) :: myid_text
     real(sp)     :: powspecs(:,:,:,:)
-    real(dp)     :: chisq
+    real(dp)     :: chisq, nsamp
     type(comap_scan_info) :: scan
+    nsamp  = size(data%tod,1)
     nfreq  = size(data%tod,2)
     nsb    = size(data%tod,3)
     ndet   = size(data%tod,4)
@@ -217,18 +312,57 @@ contains
        end if
        do k = 1, nsb
           do j = 1, nfreq      
-             if(no_filters) then
-                data%sigma0(j,k,i) = 1e-5; data%alpha(j,k,i) = -1; data%fknee(j,k,i) = 0.02
+             if (.false.) then
+                ! White noise 
+                data%sigma0(j,k,i) = sqrt(variance(data%tod(:,j,k,i)))
+                data%alpha(j,k,i)  = -10.d0
+                data%fknee(j,k,i)  = 1d-6
+                chisq = (sum((data%tod(:,j,k,i)/data%sigma0(j,k,i))**2)-nsamp)/sqrt(2.d0*nsamp)
+                write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i)
              else
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                write(*,fmt='(4i8,f10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
+                write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
                      & data%fknee(j,k,i), chisq
+!                write(*,*) info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
+!                     & data%fknee(j,k,i), chisq
              end if
           end do
        end do
     end do
+
+    if (data%polyorder >= 0) then
+       
+       p = data%polyorder
+       allocate(data%sigma0_poly(0:p,nsb,ndet), data%alpha_poly(0:p,nsb,ndet), data%fknee_poly(0:p,nsb,ndet))
+       do i = 1, ndet
+          if (.not. is_alive(i)) then
+             data%sigma0_poly(:,:,i) = 0.d0
+             data%alpha_poly(:,:,i)  = 0.d0
+             data%fknee_poly(:,:,i)  = 0.d0
+             cycle
+          end if
+          do k = 1, nsb
+             do j = 0, p
+                if (.false.) then
+                   data%sigma0_poly(j,k,i) = sqrt(variance(data%tod_poly(:,j,k,i)))
+                   data%alpha_poly(j,k,i)  = -10.d0
+                   data%fknee_poly(j,k,i)  = 1d-6
+                   chisq = (sum((data%tod_poly(:,j,k,i)/data%sigma0_poly(j,k,i))**2)-nsamp)/sqrt(2.d0*nsamp)
+                   write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0_poly(j,k,i)
+                else
+                   call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0_poly(j,k,i), &
+                        & data%alpha_poly(j,k,i), data%fknee_poly(j,k,i), tod=real(data%tod_poly(:,j,k,i),dp), &
+                        & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
+                   write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0_poly(j,k,i), data%alpha_poly(j,k,i), &
+                        & data%fknee_poly(j,k,i), chisq
+                end if
+             end do
+          end do
+       end do
+
+    end if
 
   end subroutine fit_noise
 
@@ -296,7 +430,7 @@ contains
        do l = 1, nsb
           do j = 1, nfreq
              sigma0 = data%sigma0(j,l,k)
-             if (sigma0 == 0) write(*,*) 'sigma0 =', sigma0, k, '= det', l, '=sb', j, '= freq'
+             if (sigma0 == 0) write(*,*) 'sigma0 =', real(sigma0,sp), k, '= det', l, '=sb', j, '= freq'
              g = sigma0*const
              !write(*,*) 'gain =', g
              data%gain(1,j,l,k) = g

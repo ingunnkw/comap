@@ -1,6 +1,6 @@
 OBJS = #bin_test.o # time_test.o
 
-all : time_test bin_test
+all : time_test #bin_test
 
 time_test : $(OBJS) time_test.o
 	$(MPF90) -o time_test $(OBJS) time_test.o $(LINK)

@@ -8,6 +8,7 @@ module comap_detector_mod
      logical(lgt) :: ok
   end type
 
+  integer(i4b), private :: num_sideband
   type(comap_detector),  dimension(:), allocatable, public :: comap_detectors  ! (1:ndet)
 
 contains
@@ -19,6 +20,7 @@ contains
     logical(lgt),     save       :: initialized = .false.
     if(initialized) return
     call get_parameter(0, parfile, "DETECTOR_FILE", par_string=dfile)
+    call get_parameter(0, parfile, "NUM_SIDEBAND", par_int=num_sideband)
     call read_detectors(dfile, comap_detectors)
     initialized = .true.
   end subroutine
@@ -68,6 +70,12 @@ contains
     implicit none
     integer(i4b) :: res
     res = size(comap_detectors)
+  end function
+
+  function get_num_sideband() result(res)
+    implicit none
+    integer(i4b) :: res
+    res = num_sideband
   end function
 
   function detector_valid(id) result(res)
