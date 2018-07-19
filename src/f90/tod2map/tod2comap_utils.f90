@@ -6,10 +6,11 @@ module tod2comap_utils
      real(dp)     :: samprate, Tsys
      integer(i4b) :: nsamp, ndet, nfreq, nsb
      real(dp)     :: fmin, fmax, df, mean_el
-     real(dp), allocatable, dimension(:)       :: t, pixels            ! (time) 
+     real(dp), allocatable, dimension(:)       :: t                    ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
-     real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha ! (freq, sb, det)
-     real(dp), allocatable, dimension(:,:)     :: point, f             ! (3, time) or (sb, freq)
+     real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
+     real(dp), allocatable, dimension(:,:)     :: pixels            ! (sb, freq) or (time, det)
+     real(dp), allocatable, dimension(:,:,:)   :: point, point_tel     ! (det, 3, time)
   end type tod_type
 
 contains
@@ -37,8 +38,9 @@ contains
 
 !    write(*,*) tod%nsamp, tod%nfreq, tod%nsb, tod%ndet
 
-    allocate( tod%t(tod%nsamp), tod%f(tod%nsb, tod%nfreq), &
-         & tod%point(3,tod%nsamp), tod%pixels(tod%nsamp), &
+    allocate( tod%t(tod%nsamp), tod%f(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%point(3,tod%nsamp,tod%ndet), tod%pixels(tod%nsamp, tod%ndet), &
+         & tod%point_tel(3,tod%nsamp, tod%ndet), &
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
@@ -49,12 +51,12 @@ contains
 
     tod%t = data%time; tod%f = data%nu
     tod%point = data%point!_cel ! call make_angles_safe(tod%point(1,:),maxang)
+    tod%point_tel = data%point_tel
     tod%g     = data%gain
     tod%sigma0 = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
-    tod%mean_el = mean(data%point_tel(2,:))
-
+    tod%mean_el = mean(data%point_tel(2,:,1))
     !write(*,*) shape(data%point), tod%nsamp
 
     do k = 1, tod%ndet
@@ -113,6 +115,7 @@ contains
     if (allocated(tod%g))      deallocate(tod%g)
     if (allocated(tod%rms))    deallocate(tod%rms)
     if (allocated(tod%point))  deallocate(tod%point)
+    if (allocated(tod%point_tel))  deallocate(tod%point_tel)
     if (allocated(tod%sigma0)) deallocate(tod%sigma0)
     if (allocated(tod%fknee))  deallocate(tod%fknee)
     if (allocated(tod%alpha))  deallocate(tod%alpha)
