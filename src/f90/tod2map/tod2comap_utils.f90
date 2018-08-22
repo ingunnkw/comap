@@ -5,7 +5,7 @@ module tod2comap_utils
   type tod_type
      real(dp)     :: samprate, Tsys
      integer(i4b) :: nsamp, ndet, nfreq, nsb
-     real(dp)     :: fmin, fmax, df, mean_el
+     real(dp)     :: fmin, fmax, df, mean_el, mean_az
      real(dp), allocatable, dimension(:)       :: t                    ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
      real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
@@ -56,7 +56,8 @@ contains
     tod%sigma0 = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
-    tod%mean_el = mean(data%point_tel(2,:,1))
+    tod%mean_el = mean(data%point_tel(2,:,1)) ! Mean boresight
+    tod%mean_az = mean(data%point_tel(1,:,1)) ! Mean boresight
     !write(*,*) shape(data%point), tod%nsamp
 
     do k = 1, tod%ndet

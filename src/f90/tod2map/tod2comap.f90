@@ -1,4 +1,3 @@
-
 program tod2comap
   use comap_lx_mod
   use comap_map_mod
@@ -69,7 +68,14 @@ program tod2comap
      allocate(alist%status(tod(i)%nfreq, tod(i)%ndet))
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
 
+     !prefix = pre//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
   end do
+
+  !if (myid == 0) write(*,*) trim(scan%object), trim(itoa(scan%sid))
+  !prefix = trim(pre)//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
+  !if (myid == 0) write(*,*) prefix
+  !call mpi_finalize(ierr)
+  !stop
 
   call initialize_mapmaker(map, tod)
   call time2pix(tod, map)
@@ -78,11 +84,11 @@ program tod2comap
   !call binning(map, tod(i), alist)
   if (myid == 0) write(*,*) "CG mapmaker ..."
   det = 2
-  do sb = 1, tod(1)%nsb
+  do sb = 1, 1!tod(1)%nsb
      if (myid == 0) write(*,*) "sb", sb
      !do freq = tod(1)%nfreq/4, tod(1)%nfreq/4
-     !do freq = 2,2
-     do freq = 1, tod(1)%nfreq
+     do freq = 2,2
+     !do freq = 1, tod(1)%nfreq
         if (myid == 0 .and. modulo(freq, 10) == 0) write(*,*) 'freq', freq, 'of', tod(1)%nfreq
         call pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
      end do
@@ -92,8 +98,8 @@ program tod2comap
   !end do
   if (myid == 0) write(*,*) "Writing to file ..."
   !write(*,*) trim(itoa(scan%sid))
-  prefix = pre//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
- 
+  prefix = trim(pre)//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
+
   !if (binning) call finalize_binning(map)
 
   if (myid == 0) call output_map_h5(trim(prefix), map)

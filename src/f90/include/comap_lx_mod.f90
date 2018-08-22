@@ -214,15 +214,6 @@ contains
     ! Read stats
     call read_hdf(file, "stats", data%stats)
     nfreq_full = nfreq*data%decimation_nu
-    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq,nsb,ndet))
-    call read_hdf(file, "freqmask",         data%freqmask)
-    call read_hdf(file, "freqmask_full",    data%freqmask_full)
-    call read_hdf(file, "mean_tp",          data%mean_tp)
-    call read_hdf(file, "polyorder",        data%polyorder)
-    if (data%polyorder >= 0) then
-       allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
-       call read_hdf(file, "tod_poly",         data%tod_poly)
-    end if
     ! Read filter parameters
     !call read_hdf(file, "filter_par",  data%filter_par)
     call close_hdf_file(file)
