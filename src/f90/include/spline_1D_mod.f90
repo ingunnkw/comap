@@ -126,6 +126,7 @@ contains
     call tridag(a(2:n), b(1:n), c(1:n-1), r(1:n), y2(1:n))
 
     deallocate(a,b,c,r)
+
   end subroutine spline_plain
 
   function splint_plain(xa, ya, y2a, x)

@@ -274,9 +274,11 @@ contains
     call write_hdf(file, "flag",              data%flag)
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
-    call write_hdf(file, "mean_tp",           data%mean_tp)
+    if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
-    if (data%polyorder >= 0) call write_hdf(file, "tod_poly",         data%tod_poly)
+    if (data%polyorder >= 0) then
+       call write_hdf(file, "tod_poly",         data%tod_poly)
+    end if
     call write_hdf(file, "pixels",            data%pixels)
     call close_hdf_file(file)
   end subroutine
@@ -314,9 +316,14 @@ contains
     call write_hdf(file, "pixels",            data%pixels)
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
-    call write_hdf(file, "mean_tp",           data%mean_tp)
+    if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
-    if (data%polyorder >= 0) call write_hdf(file, "tod_poly",         data%tod_poly)
+    if (data%polyorder >= 0) then
+       call write_hdf(file, "tod_poly",       data%tod_poly)
+       call write_hdf(file, "sigma0_poly",    data%sigma0_poly)
+       call write_hdf(file, "alpha_poly",     data%alpha_poly)
+       call write_hdf(file, "fknee_poly",     data%fknee_poly)
+    end if
     call close_hdf_file(file)
   end subroutine
 

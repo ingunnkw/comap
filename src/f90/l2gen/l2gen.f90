@@ -16,7 +16,7 @@ program l2gen
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter
-  logical(lgt)         :: exist, reprocess, check_existing, gonext
+  logical(lgt)         :: exist, reprocess, check_existing, gonext, norm_with_tp
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
@@ -33,6 +33,12 @@ program l2gen
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',    par_dp=nu_gain)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA', par_dp=alpha_gain)
   call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter)
+  call get_parameter(unit, parfile, 'NORMALIZE_GAIN_WITH_TOTAL_POWER', par_lgt=norm_with_tp)
+
+  if (.not. norm_with_tp .and. bp_filter >= 0) then
+     write(*,*) 'Error: Not possible to poly-filter data without first normalize with total power!'
+     stop
+  end if
 
   check_existing = .true.
   call initialize_scan_mod(parfile)
@@ -67,7 +73,7 @@ program l2gen
      ! Read in Level 1 data
      num_l1_files = size(scan%l1files)
      call read_l1_file(scan%l1files(1), data_l1); call update_status(status, 'read_l1')
-     !call correct_missing_time_steps(data_l1%time_point)
+     call correct_missing_time_steps(data_l1%time_point)
 
      ! Initialize frequency mask
      call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
@@ -78,8 +84,10 @@ program l2gen
      call update_status(status, 'merge')
 
      ! Normalize gain
-     call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
-     call update_status(status, 'gain_norm')
+     if (norm_with_tp) then
+        call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
+        call update_status(status, 'gain_norm')
+     end if
 
      ! Poly-filter if requested
      call polyfilter_TOD(data_l2_fullres, bp_filter)
@@ -150,13 +158,6 @@ contains
 
              data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp)
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
-!!$             open(58,file='filter.dat')
-!!$             do l = 1, nsamp
-!!$                write(58,*) l, data_l2%tod(l,k,j,i), dt(l)
-!!$             end do
-!!$             close(58)
-!!$             call mpi_finalize(l)
-!!$             stop
           end do
        end do
     end do
@@ -541,9 +542,13 @@ contains
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
+    if (allocated(data_in%mean_tp)) then
+       data_out%mean_tp = data_in%mean_tp
+    else
+       data_out%mean_tp = 0.d0
+    end if
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
-    data_out%mean_tp       = data_in%mean_tp
 
     ! Make angles safe for averaging
     do j = 1, ndet
