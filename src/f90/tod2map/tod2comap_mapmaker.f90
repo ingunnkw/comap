@@ -17,7 +17,7 @@ contains
     type(map_type),               intent(inout) :: map
 
     integer(i4b) :: i, j, k, l, p, q, fs, st
-    real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_el
+    real(dp)     :: x_min, x_max, y_min, y_max, pad, temp
     real(8), parameter :: PI = 4*atan(1.d0)
 
     ! Set up map grid
@@ -28,12 +28,9 @@ contains
        map%nfreq = tod(1)%nfreq
        map%nsb   = tod(1)%nsb
        map%dthetay = 1.d0/60.d0 ! degrees (arcmin/60), resolution
-       mean_el = 0.d0
-       do i = 1, size(tod)
-          temp = tod(i)%mean_el
-          if (temp .ge. mean_el) mean_el = temp
-       end do
-       map%dthetax = map%dthetay/abs(cos(mean_el*PI/180.d0))
+       map%mean_el = mean(tod(:)%mean_el)
+       map%mean_az = mean(tod(:)%mean_az)
+       map%dthetax = map%dthetay !/abs(cos(map%mean_el*PI/180.d0))
 
        x_min = 1.d3; x_max = -1.d3
        y_min = 1.d3; y_max = -1.d3
@@ -419,7 +416,7 @@ contains
     write(*,*) "starting iteration"
     i = 0
     do while (i < imax .and. delta_new > epsilon2 * delta_0)
-       write(*,*) i, delta_new, epsilon2 * delta_0
+       !write(*,*) i, delta_new, epsilon2 * delta_0
        !d = 0.d0
        !d(4000) = 1.d0
        call get_lhs(Ad, d, map, tod, det, sb, freq)
