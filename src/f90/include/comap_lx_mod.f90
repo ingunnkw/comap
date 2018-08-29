@@ -127,7 +127,7 @@ contains
        call read_hdf(file, "tod_poly",         data%tod_poly)
     end if
     call read_hdf(file, "pixels",           data%pixels)
-    allocate(data%var_fullres(nfreq,nsb,ndet))
+    allocate(data%var_fullres(nfreq_full,nsb,ndet))
     call read_hdf(file, "var_fullres",      data%var_fullres)
     call close_hdf_file(file)
   end subroutine read_l2_file
