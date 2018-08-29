@@ -580,14 +580,14 @@ contains
           !write(58,*)
        end do
     end do
-!!$    close(58)
+    !close(58)
 !!$    call mpi_finalize(ierr)
 !!$    stop
 
 
     
-
-    !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight)
+    
+    !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight,w)
     !$OMP DO SCHEDULE(guided)    
     do i = 1, nsamp_out
        data_out%time(i) = mean(data_in%time((i-1)*dt+1:i*dt))  ! Time
@@ -609,7 +609,11 @@ contains
                 data_out%tod(i,k,j,l) = 0.d0
                 weight                = 0.d0
                 do n = (k-1)*dnu+1, k*dnu
-                   w      = 1.d0 / data_out%var_fullres(k,j,l) * data_in%freqmask_full(n,j,l)
+                   if (data_out%var_fullres(n,j,l) <= 0) then
+                      w = 0.d0
+                   else
+                      w      = 1.d0 / data_out%var_fullres(n,j,l) * data_in%freqmask_full(n,j,l)
+                   end if
                    weight = weight + w !data_in%freqmask_full(n,j,l)
                    do m = (i-1)*dt+1, i*dt
                       data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) !* data_in%freqmask_full(n,j,l)
