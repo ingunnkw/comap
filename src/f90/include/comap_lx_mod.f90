@@ -30,6 +30,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: point         ! Sky coordinates; (phi/theta/psi,time,det)
      real(sp),     allocatable, dimension(:,:,:)     :: mean_tp
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_poly      ! Poly-filter TOD coefficients (time,0:poly,sb,det)
+     real(sp),     allocatable, dimension(:,:,:)     :: var_fullres   ! Full-resolution variance (freq,sb,det)
 
      ! Level 3 fields
      integer(i4b)                                    :: coord_sys
@@ -126,6 +127,8 @@ contains
        call read_hdf(file, "tod_poly",         data%tod_poly)
     end if
     call read_hdf(file, "pixels",           data%pixels)
+    allocate(data%var_fullres(nfreq,nsb,ndet))
+    call read_hdf(file, "var_fullres",      data%var_fullres)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -244,6 +247,7 @@ contains
     if(allocated(data%mean_tp))       deallocate(data%mean_tp)
     if(allocated(data%tod_poly))      deallocate(data%tod_poly)
     if(allocated(data%pixels))        deallocate(data%pixels)
+    if(allocated(data%var_fullres))   deallocate(data%var_fullres)
   end subroutine
 
   subroutine write_l2_file(filename, data)
@@ -271,6 +275,7 @@ contains
        call write_hdf(file, "tod_poly",         data%tod_poly)
     end if
     call write_hdf(file, "pixels",            data%pixels)
+    call write_hdf(file, "var_fullres",       data%var_fullres)
     call close_hdf_file(file)
   end subroutine
 
@@ -309,6 +314,7 @@ contains
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
+    call write_hdf(file, "var_fullres",       data%var_fullres)
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",       data%tod_poly)
        call write_hdf(file, "sigma0_poly",    data%sigma0_poly)

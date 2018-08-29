@@ -141,7 +141,8 @@ contains
     allocate(dt(2*nsamp), dv(0:n-1))
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
-       if (mod(k,200) == 0) write(*,*) 'Normalizing gains for det = ', i
+       if (.not. is_alive(i)) cycle
+       write(*,*) 'Normalizing gains for det = ', i
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -155,7 +156,6 @@ contains
                 dv(l) = dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
              end do
              call fft(dt, dv, -1)
-
              data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp)
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
           end do
@@ -195,6 +195,7 @@ contains
     end do
 
     do i = 1, ndet
+       if (.not. is_alive(i)) cycle
        do j = 1, nsb
           !write(*,*) 'Polyfiltering det, sb = ', i, j
 
@@ -484,6 +485,12 @@ contains
     data_l2%time(j:j+nsamp-1)        = data_l1%time(ind(1):ind(2))
 !    data_l2%flag(j:j+nsamp-1)        = data_l1%flag(ind(1):ind(2))
     do i = 1, ndet
+       if (.not. is_alive(i)) then
+          data_l2%point_tel(:,:,i) = 0.d0
+          data_l2%point_cel(:,:,i) = 0.d0
+          data_l2%tod(:,:,:,i)     = 0.d0
+          cycle
+       end if
        do l = 1, 3
           call spline(point_tel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
                & real(data_l1%point_tel(l,ind_point(1):ind_point(2),i),dp))
@@ -518,7 +525,8 @@ contains
     type(Lx_struct),                   intent(out) :: data_out
 
     integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
-    real(dp)     :: weight
+    real(dp)     :: w, weight
+    real(dp), allocatable, dimension(:,:,:) :: sigmasq
 
     nsb                      = size(data_in%tod,3)
     ndet                     = size(data_in%tod,4)
@@ -542,6 +550,7 @@ contains
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
+    allocate(data_out%var_fullres(size(data_in%nu,1),nsb,ndet))
     if (allocated(data_in%mean_tp)) then
        data_out%mean_tp = data_in%mean_tp
     else
@@ -552,11 +561,31 @@ contains
 
     ! Make angles safe for averaging
     do j = 1, ndet
+       if (.not. is_alive(j)) cycle
        call make_angles_safe(data_in%point_tel(1,:,j), real(360.d0,sp)) ! Phi
        call make_angles_safe(data_in%point_tel(3,:,j), real(360.d0,sp)) ! Psi
        call make_angles_safe(data_in%point_cel(1,:,j), real(360.d0,sp)) ! Phi
        call make_angles_safe(data_in%point_cel(3,:,j), real(360.d0,sp)) ! Psi
     end do
+
+    ! Compute variance per frequency channel
+    !open(58,file='variance.dat')
+    do k = 1, ndet
+       if (.not. is_alive(k)) cycle
+       do j = 1, nsb
+          do i = 1, size(data_in%nu,1)
+             data_out%var_fullres(i,j,k) = variance(data_in%tod(:,i,j,k))
+             !write(58,*) i, data_out%var_fullres(i,j,k)
+          end do
+          !write(58,*)
+       end do
+    end do
+!!$    close(58)
+!!$    call mpi_finalize(ierr)
+!!$    stop
+
+
+    
 
     !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight)
     !$OMP DO SCHEDULE(guided)    
@@ -575,13 +604,15 @@ contains
        do j = 1, nsb
           do k = 1, numfreq_out
              do l = 1, ndet           ! Time-ordered data
+                if (.not. is_alive(l)) cycle
                 data_out%nu(k,j,l)    = mean(data_in%nu((k-1)*dnu+1:k*dnu,j,l)) ! Frequency
                 data_out%tod(i,k,j,l) = 0.d0
                 weight                = 0.d0
                 do n = (k-1)*dnu+1, k*dnu
-                   weight = weight + data_in%freqmask_full(n,j,l)
+                   w      = 1.d0 / data_out%var_fullres(k,j,l) * data_in%freqmask_full(n,j,l)
+                   weight = weight + w !data_in%freqmask_full(n,j,l)
                    do m = (i-1)*dt+1, i*dt
-                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + data_in%tod(m,n,j,l) * data_in%freqmask_full(n,j,l)
+                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) !* data_in%freqmask_full(n,j,l)
                    end do
                 end do
                 if (weight > 0.d0) then
@@ -601,6 +632,10 @@ contains
     if (data_out%polyorder >= 0) then
        allocate(data_out%tod_poly(nsamp_out, 0:data_out%polyorder, nsb, ndet))
        do l = 1, ndet           
+          if (.not. is_alive(l)) then
+             data_out%tod_poly(:,:,:,l) = 0.d0
+             cycle
+          end if
           do j = 1, nsb
              do k = 0, data_out%polyorder
                 do i = 1, nsamp_out

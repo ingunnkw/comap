@@ -31,7 +31,7 @@ program l3gen
   character(len=512)    :: parfile, odir, outfile
   character(len=512)    :: lockfile, tmpfile, point_objs, tilt_file, offset_mask_file, coord_out
   integer(i4b)          :: ierr, snum, nmod, i, j, isys, osys, mod, nside_l3, debug
-  integer(i4b)          :: num_corr_bins
+  integer(i4b)          :: num_corr_bins, nscan
   real(dp)              :: fix_highpass_freq_scan, fix_lowpass_freq, t1, t2, scanmask_width
   real(dp)              :: scanfreq_min, scanfreq_max
   logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates
@@ -90,8 +90,10 @@ program l3gen
   !call initialize_filter_mod(parfile);           call dmem("filter mod")
 
   ! Process all CES's
-  call init_task_list(tasks, lockfile, get_num_scans(), MPI_COMM_WORLD)
-  do while(get_next_task(tasks, snum))
+  !call init_task_list(tasks, lockfile, get_num_scans(), MPI_COMM_WORLD)
+  nscan = get_num_scans()
+  do snum = 1+info%id, nscan, info%nproc
+ !do while(get_next_task(tasks, snum))
      call get_scan_info(snum, scan)
      tmpfile = trim(scan%l3file) // ".part"
      inquire(file=tmpfile,exist=exist)
@@ -291,7 +293,7 @@ contains
   subroutine fit_noise(data, powspecs, snum)
     implicit none
     type(lx_struct) :: data
-    integer(i4b) :: ndet, nsb, nfreq, i, j, k, snum, p
+    integer(i4b) :: ndet, nsb, nfreq, i, j, k, l, snum, p
     character(len=4) :: myid_text
     real(sp)     :: powspecs(:,:,:,:)
     real(dp)     :: chisq, nsamp
