@@ -27,7 +27,7 @@ program tod2comap
   type(acceptlist)      :: alist
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
-  character(len=512)    :: filename, parfile, acceptfile, prefix, pre
+  character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name
   integer(i4b)          :: nscan, i, j, k, det, sb, freq
   integer(i4b)          :: myid, numprocs, ierr, root
 
@@ -49,8 +49,9 @@ program tod2comap
   !nscan = 1
 !  call free_map_type(map)
 
-
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
+  !call get_parameter()
+
 
   ! This loop currently requiers that all scans are of the same patch
 
@@ -61,7 +62,7 @@ program tod2comap
 
      ! Get TOD / read level 3 file
      filename = scan%l3file
-     !filename = '/mn/stornext/d5/comap/protodir/level3/Ka/ces/patch1/patch1_'//trim(itoa(scan%sid))//'_32.h5'
+     !filename = '/mn/stornext/d5/comap/protodir/level3/Ka/ces/jupiter/jupiter_'//trim(itoa(scan%sid))//'_v1.h5'
      if (i == 1) write(*,*) trim(filename)
      call get_tod(trim(filename), tod(i))
 
@@ -77,20 +78,21 @@ program tod2comap
   !call mpi_finalize(ierr)
   !stop
 
-  call initialize_mapmaker(map, tod)
+  call initialize_mapmaker(map, tod, parfile)
   call time2pix(tod, map)
 
   ! Compute and co-add maps
   !call binning(map, tod(i), alist)
   if (myid == 0) write(*,*) "CG mapmaker ..."
-  det = 2
-  do sb = 1, 1!tod(1)%nsb
-     if (myid == 0) write(*,*) "sb", sb
-     !do freq = tod(1)%nfreq/4, tod(1)%nfreq/4
-     do freq = 2,2
-     !do freq = 1, tod(1)%nfreq
-        if (myid == 0 .and. modulo(freq, 10) == 0) write(*,*) 'freq', freq, 'of', tod(1)%nfreq
-        call pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
+  do det = 3, 3
+     do sb = 1, tod(1)%nsb
+        if (myid == 0) write(*,*) "sb", sb
+        !do freq = tod(1)%nfreq/4, tod(1)%nfreq/4
+        !do freq = 2,2
+        do freq = 1, tod(1)%nfreq
+           if (myid == 0 .and. modulo(freq, 10) == 0) write(*,*) 'freq', freq, 'of', tod(1)%nfreq
+           call pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
+        end do
      end do
   end do
   

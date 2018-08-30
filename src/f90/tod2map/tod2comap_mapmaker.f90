@@ -11,10 +11,11 @@ module tod2comap_mapmaker
 contains
 
 
-  subroutine initialize_mapmaker(map, tod)
+  subroutine initialize_mapmaker(map, tod, parfile)
     implicit none
     type(tod_type), dimension(:), intent(in)    :: tod
     type(map_type),               intent(inout) :: map
+    character(len=*)                            :: parfile
 
     integer(i4b) :: i, j, k, l, p, q, fs, st
     real(dp)     :: x_min, x_max, y_min, y_max, pad, temp
@@ -22,6 +23,8 @@ contains
 
     ! Set up map grid
     if (.not. allocated(map%x)) then
+       call get_parameter(0, parfile, 'MAP_NAME', par_string=map%name)
+
        !fs = 1!200
        !st = tod%nsamp!-200 ! tod%nsamp
        pad = 0.3d0 ! degrees
@@ -36,7 +39,7 @@ contains
        y_min = 1.d3; y_max = -1.d3
 
        do i = 1, size(tod)
-          do j = 2, tod(i)%ndet
+          do j = 3, 3!tod(i)%ndet
              temp = minval(tod(i)%point(1,:,j)) - pad
              if (temp .le. x_min) x_min = temp
              temp = maxval(tod(i)%point(1,:,j)) + pad
@@ -96,7 +99,7 @@ contains
     !!$OMP PARALLEL PRIVATE(scan,j,i,p,q,sb,freq)
     !!$OMP DO SCHEDULE(guided)
     do scan = 1, size(tod)
-       do j = 2, tod(scan)%ndet
+       do j = 3, 3!tod(scan)%ndet
           do i = 1, tod(scan)%nsamp
              p = min(max(nint((tod(scan)%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
              q = min(max(nint((tod(scan)%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
