@@ -13,6 +13,7 @@ program maptool
   use quiet_mpi_mod
   use quiet_task_mod
   use quiet_pixspace_mod
+  use comap_map_mod
 
   implicit none
 
@@ -104,6 +105,12 @@ program maptool
   else if (kommando == 'mdmaps') then
      if (myid==0) write(*,*) 'Output (mono-)/dipole maps from list of values'
      call output_mdmaps(unit)
+  else if (kommando == 'beta') then
+     if (myid==0) write(*,*) 'synthesize maps based on signal-to-noise'
+     call make_weighted_map(unit)
+  else if (kommando == 'gain') then
+     if (myid==0) write(*,*) 'Esitimate gain between map of source and known strength'
+     call estimate_gain_from_map(unit)
   else
      call give_user_info
   end if
@@ -1082,9 +1089,9 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
 
   end subroutine plot_focalplane
 
-  !-----------------------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   ! subroutine merge
-  !-----------------------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
 
   subroutine merge_fits(unit)
     implicit none
@@ -1956,9 +1963,9 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
 
   end subroutine clustersims
 
-  !-----------------------------------------------------------------------------------------------
+  !----------------------------------------------------------------------------------------------
   ! subroutine make_sims
-  !-----------------------------------------------------------------------------------------------
+  !----------------------------------------------------------------------------------------------
 
   subroutine make_sims(unit)
     implicit none
@@ -1966,46 +1973,65 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
     integer(i4b),    intent(in) :: unit
     
     character(len=512)          :: powspecfile, beamfile, maskfile, outdir, outfile
-    character(len=512)          :: nside_in, numsim_in, numside_in
+    character(len=512)          :: nside_in, numsim_in, numside_in, lmax_in, pixwin_in
     character(len=3)            :: simtxt
     character(len=4)            :: sidetxt
-    integer(i4b)                :: ordering, nside, nside2, nmaps, nmaps2, npix, npix2, dnside, dnpix
+    integer(i4b)                :: ordering, nside, nside2, nmaps, nmaps2, npix, npix2
+    integer(i4b)                :: dnside, dnpix
     integer(i4b)                :: i, j, l, m, s, lmax, pol, numsim, numpatches, ns, numsides
     real(dp)                    :: t1, t2
-    logical(lgt)                :: nobeam
+    logical(lgt)                :: nobeam, applypixwin
 
     character(len=1024), allocatable, dimension(:) :: masklist
     character(len=8),    allocatable, dimension(:) :: patchtxt
     real(dp),          allocatable, dimension(:,:) :: power, beam, inmask, map, outmap, downmask
+    real(dp),          pointer,     dimension(:,:) :: pixwin
     integer(i4b),      allocatable, dimension(:,:) :: masks
     integer(i4b),      allocatable, dimension(:)   :: healvec
  
-    call initialize_random_seeds(MPI_COMM_WORLD, 735909, rng_handle)  !obs sjekk om noise og cmb forskjellig handle
+    !obs sjekk om noise og cmb forskjellig handle
+    call initialize_random_seeds(MPI_COMM_WORLD, 735909, rng_handle)  
 
     ! Get parameters
-    if (iargc() /= 8) then
-       write(*,*) 'sims takes 7 parameters'
-       call give_user_info
-    else 
-       call getarg(2, powspecfile)
-       call getarg(3, beamfile)
-       call getarg(4, maskfile)
-       call getarg(5, nside_in)
-       call getarg(6, numside_in)
-       call getarg(7, outdir)
-       call getarg(8, numsim_in)
+    if ((iargc() < 9) .or. (iargc() > 10)) then
+       if (myid==root) then
+          write(*,*) 'sims takes 8(9) parameters'
+          write(*,*) ''
+          write(*,*) 'sims powspec beam pixwin mask nside numside outdir numsim (lmax)'
+          write(*,*) ''
+          write(*,*) 'Ex: sims pow.fits beam.fits true nomask 64 1 sims 10 150'
+          write(*,*) ''
+       end if
+    call mpi_finalize(ierr)
+    stop
+    else if (iargc() == 10) then
+       call getarg(10, lmax_in)
+       read(lmax_in,*) lmax
     end if
+    call getarg(2, powspecfile)
+    call getarg(3, beamfile)
+    call getarg(4, pixwin_in)
+    call getarg(5, maskfile)
+    call getarg(6, nside_in)
+    call getarg(7, numside_in)
+    call getarg(8, outdir)
+    call getarg(9, numsim_in)
+    read(nside_in,*) nside
+    read(numside_in,*) numsides
+    read(numsim_in,*) numsim
+    read(pixwin_in,*) applypixwin
+    nmaps = 3 ! OBS hardcoding polarization
+    if (myid==root) write(*,*) nmaps, ' = nmaps' 
+    if (myid==root) write(*,*) nside, ' = nside' 
+    npix  = 12*nside**2
+    if (iargc() == 9) lmax  = 3*nside
+    if (myid==root) write(*,*) lmax, ' = lmax' 
+    ! Check for beam
     nobeam = .false.
     if (trim(beamfile)=='nobeam') then
        nobeam = .true. 
        if (myid==root) write(*,*) 'Running without beam'
     end if
-    read(nside_in,*) nside
-    read(numside_in,*) numsides
-    read(numsim_in,*) numsim
-    nmaps = 3 ! OBS hardcoding polarization
-    npix  = 12*nside**2
-    lmax  = 3*nside
 
     ! Read powspec
     if (myid==root) write(*,*) 'Reading from file ', trim(powspecfile)
@@ -2018,6 +2044,8 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
        end do
        close(13)
     end if
+
+    ! Read beam and apply
     if (.not. nobeam) then 
        ! Read beam
        if (myid==0) write(*,*) 'Reading from file ', trim(beamfile)
@@ -2042,6 +2070,31 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
        end if
     end if
     deallocate(beam) ! done with it after convolving the power
+
+    ! Read pixwin and apply
+    if (applypixwin) then 
+       ! Read pixwin
+       if (myid==0) write(*,*) 'Applying pixel window'
+       call read_pixwin(nside, nmaps, pixwin)
+       if (myid==root) then       
+          open(13, file='pixwin.dat', recl=1024)
+          do l = 0, lmax
+             write(13,*) l, pixwin(l,:)
+          end do
+          close(13)
+       end if
+       ! Convolve power spectrum with pixwin
+       power(:,1:3) = power(:,1:3)*pixwin(0:lmax,1:3)**2
+       power(:,4)   = power(:,4)*pixwin(0:lmax,1)*pixwin(0:lmax,2)
+       if (myid==root) then
+          open(13, file='powerwithbeamandpixwin.dat', recl=1024)
+          do l = 0, lmax
+             write(13,*) l, power(l,:)*l*(l+1)/2/pi
+          end do
+          close(13)
+       end if
+    end if
+
 
     ! Read masklist
     if (myid==0) write(*,*) 'Reading from file ', trim(maskfile)
@@ -2104,10 +2157,10 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
        ! Output maps
        call int2string(nside, sidetxt)
        outfile = trim(outdir) // '/' // sidetxt // '/' // trim(patchtxt(0)) // '/sim' // simtxt // '.fits'
-       call cpu_time(t1)
+       !call cpu_time(t1)
        call write_map(map, ordering, trim(outfile))
-       call cpu_time(t2)
-       if (myid==0) write(*,*) 'Time to write fullsky map to disk:', t2-t1
+       !call cpu_time(t2)
+       !if (myid==0) write(*,*) 'Time to write fullsky map to disk:', t2-t1
 ! What is this doing here?
 !       deallocate(outmap)
        do i =1, numpatches
@@ -2117,10 +2170,10 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
              outmap(:,j) =  map(healvec,j)
           end do
           outfile = trim(outdir) // '/' // sidetxt // '/' // trim(patchtxt(i)) // '/sim' // simtxt // '.fits'
-          call cpu_time(t1)
+          !call cpu_time(t1)
           call write_map(outmap, healvec, nside, ordering, trim(outfile))
-          call cpu_time(t2)
-          if (myid==0) write(*,*) 'Time to write ',trim(patchtxt(i)), t2-t1 
+          !call cpu_time(t2)
+          !if (myid==0) write(*,*) 'Time to write ',trim(patchtxt(i)), t2-t1 
           deallocate(healvec, outmap)
        end do
 
@@ -2160,7 +2213,7 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
     allocate(Lmat(n,n))
     allocate(eta(n), x(n), y(n))
     allocate(alm(1:n, 0:lmax, 0:lmax))
-    call cpu_time(t1)
+    !call cpu_time(t1)
     do l = 0, lmax
        matrix = 0.d0
        matrix(1,1) = power(l, 1)
@@ -2191,11 +2244,11 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
           end do
        end if
     end do
-    call cpu_time(t2)
-    if (myid==0) write(*,*) 'Time almsim:', t2-t1 
+    !call cpu_time(t2)
+    !if (myid==0) write(*,*) 'Time almsim:', t2-t1 
 
     if (myid==0) then
-       call cpu_time(t1)
+      ! call cpu_time(t1)
        open(13, file='almpower.dat', recl=1024)
        do l = 0, lmax
           cl(1:3) = alm(:,l,0)*conjg(alm(:,l,0))
@@ -2208,19 +2261,19 @@ write(*,*) cos(60.d0*pi/180.d0), 'cos 60'
           write(13,*) l, cl*l*(l+1)/2.d0/pi
        end do
        close(13)
-       call cpu_time(t2)
-       write(*,*) 'Time to write almpower to disk:', t2-t1 
+       !call cpu_time(t2)
+       !write(*,*) 'Time to write almpower to disk:', t2-t1 
     end if
     
-    call cpu_time(t1)
+    !call cpu_time(t1)
     call alm2map(nside, lmax, lmax, alm, map)
-    call cpu_time(t2)
-    if (myid==0) write(*,*) 'Time alm2map:', t2-t1 
+    !call cpu_time(t2)
+    !if (myid==0) write(*,*) 'Time alm2map:', t2-t1 
     deallocate(eta,x,y,matrix,Lmat,alm)
-    call cpu_time(t1) 
+    !call cpu_time(t1) 
     call convert_ring2nest(nside, map)
-    call cpu_time(t2) 
-    if (myid==0) write(*,*) 'Time ring2nest:', t2-t1 
+    !call cpu_time(t2) 
+    !if (myid==0) write(*,*) 'Time ring2nest:', t2-t1 
 
   end subroutine make_mapsim
 
@@ -5351,10 +5404,378 @@ spectral = beta(1)
 
   end subroutine output_mdmaps
 
+  !---------------------------------------------------------------------------------
+  ! subroutine beta
+  !---------------------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------------------------------
+  subroutine make_weighted_map(unit)
+    implicit none
+    
+    integer(i4b),    intent(in) :: unit
+    
+    character(len=512)          :: outfile, weightmapfile, map1file, val_in
+    integer(i4b)                :: i, j, numfiles, npix, ordering, nside, nmaps
+    integer(i4b)                :: npix1, ordering1, nside1, nmaps1, comp
+    real(dp)                    :: nullval, val2, minval, topval, lowval, highval, weight
+    logical(lgt)                :: anynull
+
+    real(dp),           allocatable, dimension(:,:) :: weightmap, map1, outmap
+
+    ! Get parameters
+    if (iargc() /= 7) then
+       write(*,*) 'beta takes 6 parameters: weightmap, map1, val2, outfile lowcut highcut'
+       write(*,*) ''
+       call give_user_info
+    else 
+       call getarg(2, weightmapfile)
+       call getarg(3, map1file)
+       call getarg(4, val_in)
+       read(val_in,*) val2
+       call getarg(5, outfile)
+       call getarg(6, val_in)
+       read(val_in,*) lowval
+       call getarg(7, val_in)
+       read(val_in,*) highval
+    end if
+
+    ! Read maps
+    npix = getsize_fits(weightmapfile, nmaps=nmaps, ordering=ordering, nside=nside)
+    if (myid==root) write(*,*) nside, '= nside,', nmaps, '= nmaps,' ,ordering,'= ordering'
+    npix1 = getsize_fits(map1file, nmaps=nmaps1, ordering=ordering1, nside=nside1)
+    if (myid==root) write(*,*) nside1, '= nside,', nmaps1, '= nmaps,' ,ordering1,'= ordering'
+
+    ! Check maps
+    if (nside1 /= nside) then
+       if (myid==root) write(*,*) 'Different nside. Quiting'
+       stop
+    end if
+ 
+    ! Actually read maps
+    allocate(weightmap(0:npix-1,nmaps))
+    call read_bintab(weightmapfile, weightmap, npix, nmaps, nullval, anynull)
+    allocate(map1(0:npix-1,nmaps1))
+    call read_bintab(map1file, map1, npix1, nmaps1, nullval, anynull)
+ 
+    ! convert to same ordering if necessary
+    if (ordering1 /= ordering) then
+       if (myid==root) write(*,*) 'Different ordering. Converting map'
+       if (ordering1 == 1) then
+          call convert_nest2ring(nside, weightmap)
+       else if (ordering1 == 2) then
+          call convert_ring2nest(nside, weightmap)
+       end if
+       ordering=ordering1
+    end if
+
+    ! Prepare syntehzized map
+    allocate(outmap(0:npix-1,nmaps))
+    j=1
+    do i = 0, npix-1
+       if (weightmap(i,j) > highval) then
+          outmap(i,j) = map1(i,j)
+       else if (weightmap(i,j) < lowval) then
+          outmap(i,j) = val2
+       else
+          weight = (weightmap(i,j)-lowval)/(highval-lowval)
+          if (weight>1.d0 .or. weight<0.d0) write(*,*) weight
+          outmap(i,j) = weight * map1(i,j) + (1-weight) * val2
+       end if
+    end do
+    write(*,*) lowval, '= lowval', highval, '= highval'
+
+    ! Write map
+    call write_map(outmap, ordering, trim(outfile))
+    write(*,*) '* Map written to file = ', trim(outfile)
+    
+    ! Clean up
+    deallocate(weightmap, map1, outmap)
+
+  end subroutine make_weighted_map
+
+  !---------------------------------------------------------------------------------
+  ! subroutine gain
+  !---------------------------------------------------------------------------------
+
+  subroutine estimate_gain_from_map(unit)
+    implicit none
+    
+    integer(i4b),    intent(in) :: unit
+    
+    character(len=512)          :: mapfile, outprefix, val_in
+    character(len=4)            :: ftxt
+    character(len=2)            :: sbtxt
+    integer(i4b)                :: i, k, l, p, s, nfreq, nsb, nx, ny
+    integer(i4b)                :: numsamp, burn, numrej, numpar
+    real(dp)                    :: gain, mingain, maxgain, minbeam, maxbeam
+    real(dp)                    :: r, xjup, yjup, x, y
+    real(dp)                    :: gain0, fwhm0, xpos0, ypos0, mono
+    real(dp)                    :: abstemp, obstemp, fwhm, nu0, dist, dist_fid
+    real(dp)                    :: inittemp, initfwhm, initdist, tsys0, tsys
+    real(dp)                    :: f_A, f_D, sigma, omega_b, omega_ref, ratio
+    logical(lgt)                :: second_time
+    real(dp),     dimension(5)  :: nu, T_p, T_p2
+    real(dp),     dimension(5)  :: stepsize, parmean, parstdd
+    integer(i4b), dimension(4)  :: pos
+
+    real(dp),         allocatable, dimension(:,:,:) :: ipar, fpar
+    real(dp),         allocatable, dimension(:,:)   :: params
+    real(dp),         allocatable, dimension(:)     :: chisq
+    character(len=4), allocatable, dimension(:)     :: parname
+
+    type(map_type)  :: inmap
+
+    call initialize_random_seeds(MPI_COMM_WORLD, 357888, rng_handle)
+
+    ! Get parameters
+    if (iargc() /= 5) then
+       write(*,*) 'gain takes 4 parameters: map, prefix, numsamp, burn'
+       write(*,*) ''
+       call give_user_info
+    else 
+       call getarg(2, mapfile)
+       call getarg(3, outprefix)
+       call getarg(4, val_in)
+       read(val_in,*) numsamp
+       call getarg(5, val_in)
+       read(val_in,*) burn
+    end if
+
+    if (numsamp-burn <= 0) then
+       write(*,*) 'No samples left after burn-in. Exiting'
+       call mpi_finalize(ierr)
+       stop
+    end if
+
+    tsys0 = 35. !Assumed Tsys for initial gain calib
+
+    ! Find temperature (K) of Jupiter as function of frequency nu from WMAP
+    nu        = [22.85d0, 33.11d0, 40.92d0, 60.41d0, 93.25d0]
+    T_p       = [136.2d0, 147.2d0, 154.4d0, 165.d0,  173.d0]
+    call spline(nu, T_p, 1.d30, 1.d30, T_p2)
+
+    ! Reference values
+    omega_ref = 2.481d-8
+    dist_fid = 5.2d0
+    f_A = 1.d0
+
+    ! Calculate temperature at 30 GHz for 4 arcmin fwhm in uK
+    initdist = 4.4d0 !obs
+    initfwhm = 4.d0
+    inittemp = splint(nu, T_p, T_p2, 30.d0) * 1d6
+    sigma    = initfwhm / 60.d0 / sqrt(8.d0*log(2.d0)) * pi/180.d0
+    omega_b  = 2.d0*pi*sigma**2
+    f_d = (initdist/dist_fid)**2
+    inittemp = inittemp * omega_ref/omega_b * f_A / f_d
+
+    ! Read map information
+    call read_map_h5(mapfile, inmap)
+    !write(*,*) shape(inmap%m), 'shape inmap'
+    nx = size(inmap%m,1)
+    ny = size(inmap%m,2)
+    nfreq = size(inmap%m,3)
+    nsb = size(inmap%m,4)
+    if (myid==0) write(*,*) nx, ny, nfreq, nsb, 'nx, ny, nfreq, nsb'
+    !write(*,*) minval(inmap%x), maxval(inmap%x), 'x range'
+    !write(*,*) minval(inmap%y), maxval(inmap%y), 'y range'
+    !write(*,*) numsamp, '= numsamp'
+    pos = maxloc(inmap%m(:,:,:,:))
+
+    ! Set up parameter structure and initialize
+    numpar = 5
+    allocate(parname(numpar))
+    parname(1) = 'gain'
+    parname(2) = 'fwhm'
+    parname(3) = 'xpos'
+    parname(4) = 'ypos'
+    parname(5) = 'mono'
+    allocate(params(0:numsamp,numpar))  
+    allocate(ipar(0:nfreq,numpar,2))  
+    allocate(fpar(0:nfreq,numpar,2))  
+    allocate(chisq(0:numsamp))
+
+    ! Loop over all frequency channels
+    do l = 1, nsb
+       call int2string(l, sbtxt)
+       ipar = 0.d0
+!       do k = 20, 20
+       do k = 1+myid, nfreq, numprocs
+          call int2string(k, ftxt)
+          write(*,*) myid, 'processing freq:', ftxt,'      sb:',sbtxt
+          ! init values
+          params(0,1) = inittemp/maxval(inmap%m)    !tsys0
+          params(0,2) = initfwhm
+          params(0,3) = inmap%x(pos(1))
+          params(0,4) = inmap%y(pos(2))
+          params(0,5) = 0.d0
+          ! init step size
+          stepsize(1) = 0.1d0 !gain
+          stepsize(2) = 0.01d0 !beam arcmin
+          stepsize(3) = 0.0001d0 !ra degrees
+          stepsize(4) = 0.0001d0 !dec degrees
+          stepsize(5) = 1000.d0  ! offset uK
+          do p = 1, numpar
+             if (myid==0) write(*,*) 'init ', parname(p), ' =', params(0,p), '+-', stepsize(p)
+          end do
+
+          ! Extract observed parameters
+          dist = 4.4d0
+          f_d = (dist/dist_fid)**2
+          !nu0 = inmap%f(k,l)
+          nu0 = 27.953125d0 ! GHz
+          nu0 = 30.d0 ! GHz
+          if (myid==0) write(*,*) nu0, '= nu0' !, inmap%f(k,l) 
+          !Find intrinsic Jupiter temperature in uK
+          abstemp = splint(nu, T_p, T_p2, nu0) * 1d6
+
+          ! Loop twice, first one to initialize start points and step size
+          second_time = .false.
+          do while (.true.)
+             numrej = 0
+             chisq  = 0.d0
+             ! Calculate chisq for given gain, beam size and position
+             call calculate_chisq(inmap, k, l, abstemp, omega_ref, f_A, f_D, tsys0, params(0,:), chisq(0))
+             ! Loop over MCMC samples
+             do s = 1, numsamp
+                !if (modulo(s,10 /= 0)) write(*,*) 'Processing sample', s, 'of', numsamp
+                ! Draw random parameters
+                do p = 1, numpar
+                   params(s,p) = params(s-1,p) + rand_gauss(rng_handle) * stepsize(p)
+                end do
+                ! Calculate chisq for given parameters
+                call calculate_chisq(inmap, k,l, abstemp, omega_ref, f_A, f_D, tsys0, params(s,:), chisq(s))
+                ! Reject if necessary poor sample
+                if (chisq(s) == 0.d0) then
+                   ratio = 0.d0
+                else if (chisq(s) < chisq(s-1)) then
+                   ratio = 1.d0
+                else
+                   ratio = exp(-0.5*(chisq(s)-chisq(s-1)))
+                end if
+                if (rand_uni(rng_handle) > ratio) then
+                   params(s,:) = params(s-1,:)
+                   chisq(s)    = chisq(s-1)
+                   numrej = numrej + 1
+                end if
+             end do
+             
+             ! Collect and write results
+             write(*,*) myid, k, '  Accept rate =', real(numsamp-numrej,dp)/real(numsamp,dp)
+             do p = 1, numpar
+                parmean(p) = mean(params(burn:numsamp,p))
+                parstdd(p) = sqrt(variance(params(burn:numsamp,p)))
+                ! Check if we have data
+                if (parstdd(p) /= 0.d0) then
+                   if (myid==0) write(*,*) parname(p), ' =', parmean(p), '+-', parstdd(p)
+                   ! write chains to file
+                   if (second_time) then
+                      open(14, file=trim(outprefix)//'_'//parname(p)//'_sb'//sbtxt//'_f'//ftxt//'.dat')
+                      do i = 1, numsamp
+                         write(14,*) i, params(i,p)
+                      end do
+                      close(14)
+                      ipar(k,p,1) = parmean(p)
+                      ipar(k,p,2) = parstdd(p)
+                   else
+                      stepsize(p) = parstdd(p) * 0.3
+                      params(0,p) = parmean(p)
+                   end if
+                else
+                   write(*,*) 'No data for freq:',ftxt,' sb:',sbtxt  
+                end if
+             end do
+            
+             if (second_time) then
+                exit
+             end if
+             second_time = .true.             
+          end do !while loop
+
+       end do !freq loop
+       call mpi_reduce(ipar, fpar, size(ipar), mpi_double_precision, mpi_sum, root, MPI_COMM_WORLD, ierr)
+       if (myid==0) then 
+          do p = 1, numpar
+             open(15, file=trim(outprefix)//'_all_'//parname(p)//'_sb'//sbtxt//'.dat')
+             do i = 1, nfreq
+                write(15,*) i, fpar(i,p,:) 
+             end do
+             close(15)
+          end do
+          open(15, file=trim(outprefix)//'_all_tsys_sb'//sbtxt//'.dat')
+          do i = 1, nfreq
+             write(15,*) i, tsys0/fpar(i,1,1) 
+          end do
+          close(15)
+       end if
+    end do !sb loop
+
+    deallocate(params, chisq, parname, ipar, fpar)
+  end subroutine estimate_gain_from_map
+
+
+  !---------------------------------------------------------------------------------
+  ! subroutine calculate_chisq
+  !---------------------------------------------------------------------------------
+
+  subroutine calculate_chisq(inmap, freq, sb, abstemp, omega_ref, f_A, f_D, tsys0, params, chisq)
+    implicit none
+   
+    type(map_type)                        :: inmap 
+    integer(i4b),             intent(in)  :: freq, sb
+    real(dp),                 intent(in)  :: abstemp, omega_ref, f_A, f_D, tsys0
+    real(dp), dimension(4),   intent(in)  :: params
+    real(dp),                 intent(out) :: chisq
+
+    
+    integer(i4b)                :: i, j, nx, ny
+    real(dp)                    :: r, xjup, yjup, x, y
+    real(dp)                    :: tsys, fwhm, mono, gain
+    real(dp)                    :: obstemp, sigma, omega_b, sigma_n
+    integer(i4b), dimension(2)  :: pos
+
+    gain = params(1)
+    fwhm = params(2)
+    xjup = params(3)
+    yjup = params(4)
+    mono = params(5)
+
+    ! Find observed temp at given distance and beam
+    sigma    = fwhm / 60.d0 / sqrt(8.d0*log(2.d0)) * pi/180.d0
+    omega_b  = 2.d0*pi*sigma**2
+    obstemp = abstemp * omega_ref/omega_b * f_A / f_d
+    sigma_n = 10000 ! OBS should be read from file
+    !write(*,*) obstemp, abstemp, 'observed and intrinsic T_jup'
+
+    ! Make theoretical map of Jupiter for given beam, gain and position
+    ! and find chisq between this and observation for each pixel.
+    nx = size(inmap%m,1)
+    ny = size(inmap%m,2)
+
+    !open(16,file='inmap.dat')
+    !open(17,file='residual.dat')
+    do j = 1, ny
+       do i = 1, nx
+          if (inmap%m(i,j,freq,sb) /= 0.) then  
+             x = inmap%x(i)
+             y = inmap%y(j)
+             r = sqrt((yjup-y)**2 + ((xjup-x)/cos(yjup*pi/180.d0))**2) * pi/180.d0
+             if (r*180.d0/pi < 3.d0*fwhm/60.) then !degrees
+               !write(16,*) i, j, inmap%m(i,j,freq,sb)
+               !write(17,*) i, j, (exp(-r**2/sigma**2/2.d0)*obstemp*tsys0/tsys+mono-inmap%m(i,j,freq,sb))
+                !chisq  = chisq + (exp(-r**2/sigma**2/2.d0)*obstemp*tsys0/tsys+mono-inmap%m(i,j,freq,sb))**2 / sigma_n**2
+                chisq  = chisq + (exp(-r**2/sigma**2/2.d0)*obstemp*gain+mono-inmap%m(i,j,freq,sb))**2 / sigma_n**2
+             end if
+          end if
+       end do
+    end do
+    !close(16)
+    !close(17)
+    !write(*,*) 'chisq =', chisq
+
+  end subroutine calculate_chisq
+
+  !----------------------------------------------------------------------------------
   ! subroutine give_user_info
-  !-----------------------------------------------------------------------------------------------
+  !----------------------------------------------------------------------------------
 
   subroutine give_user_info
     implicit none
@@ -5375,6 +5796,10 @@ spectral = beta(1)
        write(*,*) 'extract numcomps infile comps outfile'
        write(*,*) ''
        write(*,*) 'mdmaps numband mdtxtfile nside outprefix'
+       write(*,*) ''
+       write(*,*) 'sims powspec beam pixwin mask nside numside outdir numsim (lmax)'
+       write(*,*) ''
+       write(*,*) 'beta weightmap, map1, val2, outfile lowcut highcut'
        write(*,*) ''
     end if
     call mpi_finalize(ierr)
