@@ -798,6 +798,10 @@ contains
     end do
 99  close(unit)
 
+    do k = 1, ndet
+       if (.not. is_alive(k)) data%freqmask_full(:,:,k) = 0.d0
+    end do
+
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
        data%freqmask = data%freqmask_full
@@ -848,9 +852,10 @@ contains
              tmin = (i-1)*m+1
              tmax = i*m
              el  = data%point_tel(2,tmin:tmax,k)
+             if (any(el == 0.d0)) write(*,*) k, l, j, i
              dat = data%tod(tmin:tmax,j,l,k)
-             write(*,*) tmin, tmax, 'min max'
-             call estimate_gain(el,dat,g,sigma0,chisq)
+             !write(*,*) tmin, tmax, 'min max'
+             call estimate_gain(el,dat,g)
              data%tod(tmin:tmax,j,l,k) = data%tod(tmin:tmax,j,l,k) - g*1/(sin(el*pi/180.))
 !             write(13,*) g
 !             write(13,*) (g-5.6d10)/5.6d10*100
