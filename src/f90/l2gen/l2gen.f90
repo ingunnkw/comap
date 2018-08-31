@@ -835,9 +835,9 @@ contains
     ndet  = size(data%tod,4)
     write(*,*) nfreq, '= nfreq', nsb, '= nsb', ndet, '= ndet'
     write(*,*) '---------------------------------------------------------'
-    allocate(data%time_gain(n), data%gain(n,nfreq,nsb,ndet))
+    !allocate(data%time_gain(n), data%gain(n,nfreq,nsb,ndet))
     allocate(el(m), dat(m))
-    data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
+    !data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
     !open(13,file='gain.dat')
     !open(14,file='chisq.dat')
     do k = 1, ndet
@@ -861,7 +861,7 @@ contains
     end do
     !close(13)
     !close(14)
-    !deallocate(el, dat)
+    deallocate(el, dat)
   end subroutine remove_elevation_gain
 
 end program
