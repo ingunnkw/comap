@@ -843,6 +843,7 @@ contains
     do k = 1, ndet
        do l = 1, nsb
           do j = 1, nfreq
+          if (data%freqmask_full(j,l,k) == 0.d0) cycle
           do i = 1, n
              tmin = (i-1)*m+1
              tmax = i*m
