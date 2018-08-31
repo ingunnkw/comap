@@ -10,6 +10,7 @@ program l2gen
   use quiet_fft_mod
   use spline_1D_mod
   use quiet_status_mod
+  use comap_gain_mod
   implicit none
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
@@ -82,6 +83,10 @@ program l2gen
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
      call update_status(status, 'merge')
+
+     ! Elevation-gain renormalization for circular scans
+!     if (circular) call remove_elevation_gain(data_l2_fullres) 
+     call remove_elevation_gain(data_l2_fullres) 
 
      ! Normalize gain
      if (norm_with_tp) then
@@ -809,5 +814,53 @@ contains
 
   end subroutine initialize_frequency_mask
 
+  subroutine remove_elevation_gain(data) 
+    implicit none
+    type(lx_struct) :: data
+    integer(i4b)    :: n, ndet, nsb, nfreq, i, j, k, l, m, tmin, tmax, parfile_time
+    real(dp)        :: g, a, sigma0, chisq, tsys, tau, dnu, const
+    real(dp), dimension(:), allocatable :: el, dat
+
+!    m=a*data%samprate/data%scanfreq(2)      ! Number of tod-samples per gain estimate
+    m   = (size(data%time))
+    write(*,*) 'Number of samples per gain estimate    =', m
+!    n   = (size(data%time)+m-1)/m           ! Number of gain samples
+    n   = (size(data%time))/m               ! Number of gain samples
+    
+    write(*,*) 'Number of gain estimates for this scan =', n
+    write(*,*) 'n*m                                    =', n*m
+    write(*,*) 'Total number of samples                =', size(data%time)
+    nfreq = size(data%tod,2)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
+    write(*,*) nfreq, '= nfreq', nsb, '= nsb', ndet, '= ndet'
+    write(*,*) '---------------------------------------------------------'
+    allocate(data%time_gain(n), data%gain(n,nfreq,nsb,ndet))
+    allocate(el(m), dat(m))
+    data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
+    !open(13,file='gain.dat')
+    !open(14,file='chisq.dat')
+    do k = 1, ndet
+       do l = 1, nsb
+          do j = 1, nfreq
+          do i = 1, n
+             tmin = (i-1)*m+1
+             tmax = i*m
+             el  = data%point_tel(2,tmin:tmax,k)
+             dat = data%tod(tmin:tmax,j,l,k)
+             write(*,*) tmin, tmax, 'min max'
+             call estimate_gain(el,dat,g,sigma0,chisq)
+             data%tod(tmin:tmax,j,l,k) = data%tod(tmin:tmax,j,l,k) - g*1/(sin(el*pi/180.))
+!             write(13,*) g
+!             write(13,*) (g-5.6d10)/5.6d10*100
+!             write(14,*) chisq
+          end do
+          end do
+       end do
+    end do
+    !close(13)
+    !close(14)
+    !deallocate(el, dat)
+  end subroutine remove_elevation_gain
 
 end program

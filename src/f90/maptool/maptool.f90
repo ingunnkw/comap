@@ -5559,7 +5559,7 @@ spectral = beta(1)
     f_A = 1.d0
 
     ! Calculate temperature at 30 GHz for 4 arcmin fwhm in uK
-    initdist = 4.4d0 !obs
+    initdist = 5.62477d0 !obs
     initfwhm = 4.d0
     inittemp = splint(nu, T_p, T_p2, 30.d0) * 1d6
     sigma    = initfwhm / 60.d0 / sqrt(8.d0*log(2.d0)) * pi/180.d0
@@ -5618,11 +5618,11 @@ spectral = beta(1)
           end do
 
           ! Extract observed parameters
-          dist = 4.4d0
+          dist = 5.62477d0 !obs
           f_d = (dist/dist_fid)**2
           !nu0 = inmap%f(k,l)
           nu0 = 27.953125d0 ! GHz
-          nu0 = 30.d0 ! GHz
+          nu0 = 26.d0 + (l-1)*2.d0 + (k-1)*0.03125d0 ! GHz
           if (myid==0) write(*,*) nu0, '= nu0' !, inmap%f(k,l) 
           !Find intrinsic Jupiter temperature in uK
           abstemp = splint(nu, T_p, T_p2, nu0) * 1d6
