@@ -56,8 +56,9 @@ contains
     implicit none
     character(len=*)       :: filename
     type(acceptlist)       :: alist
+    character(len=9)       :: sid
     character(len=1024)    :: line
-    integer(i4b)           :: i, j, k, unit, sid, det, snum, status, defval
+    integer(i4b)           :: i, j, k, unit, det, snum, status, defval
     integer(i4b)           :: numscans, numdets, numrej, rfreqs 
     integer(i4b), optional :: default
     integer(i4b), dimension(1:2*alist%nfreq) :: rejects
@@ -86,7 +87,6 @@ contains
     do i = 1, numscans
        read(unit,*) sid, numdets
        snum = lookup_scan(sid)
-       snum = sid ! FIXME
        do j = 1, numdets
           ! Read number of rejected frequency ranges
           read(unit,fmt="(a)",end=2) line
@@ -134,7 +134,7 @@ contains
   subroutine get_amatrix_per_scan(alist, sid, amat)
     implicit none
     type(acceptlist)                          :: alist
-    integer(i4b)                              :: sid
+    character(len=9)                          :: sid
     integer(i4b), dimension(:,:), allocatable :: amat
     integer(i4b)                              :: det
     integer(i4b), dimension(:), allocatable   :: avec
@@ -152,7 +152,8 @@ contains
   subroutine get_avector_per_detscan(alist, det, sid, avec)
     implicit none
     type(acceptlist)                          :: alist
-    integer(i4b)                              :: det, sid
+    integer(i4b)                              :: det
+    character(len=9)                          :: sid
     integer(i4b), dimension(:), allocatable   :: avec
     integer(i4b)                              :: i, snum
     
@@ -167,12 +168,11 @@ contains
   function freq_is_accepted(alist, sid, det, freq) result(res)
     implicit none
     type(acceptlist)       :: alist
-    integer(i4b)           :: sid, det, freq
+    integer(i4b)           :: det, freq
+    character(len=9)       :: sid
     logical(lgt)           :: res
     integer(i4b)           :: snum
     snum = lookup_scan(sid)
-
-
   end function freq_is_accepted
 
 
@@ -181,7 +181,7 @@ contains
   function is_accepted(alist, sid, det, freq) result(res)
     implicit none
     type(acceptlist)       :: alist
-    integer(i4b)           :: sid
+    character(len=9)       :: sid
     integer(i4b), optional :: det, freq
     logical(lgt)           :: res
     integer(i4b)           :: snum

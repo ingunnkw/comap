@@ -14,11 +14,12 @@ program l2gen
   implicit none
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet
+  character(len=9)     :: id_old
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter
   logical(lgt)         :: exist, reprocess, check_existing, gonext, norm_with_tp
-  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain
+  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
   type(planck_rng)     :: rng_handle
@@ -54,8 +55,12 @@ program l2gen
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
-  nscan = get_num_scans()
-  do snum = 1+myid, nscan, nproc
+  nscan    = get_num_scans()
+  npercore = nscan / nproc
+  if (nscan > npercore*nproc) npercore = npercore+1
+  id_old  = ''
+  do snum = myid*npercore+1, (myid+1)*npercore
+     if (snum > nscan) exit
      call get_scan_info(snum, scan)
      inquire(file=scan%l2file,exist=exist)
      if(exist .and. .not. reprocess) then
@@ -67,14 +72,19 @@ program l2gen
      else if (exist .and. reprocess) then
         call rm(scan%l2file)
      end if
-     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
+     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa((myid+1)*npercore)) // ")"
      call update_status(status, 'scan_start')
 
-
-     ! Read in Level 1 data
-     num_l1_files = size(scan%l1files)
-     call read_l1_file(scan%l1files(1), data_l1); call update_status(status, 'read_l1')
-     call correct_missing_time_steps(data_l1%time_point)
+     ! Read in Level 1 file
+     if (scan%id(1:6) /= id_old(1:6)) then
+        !call wall_time(t1)
+        call free_lx_struct(data_l1)
+        call read_l1_file(scan%l1file, data_l1); call update_status(status, 'read_l1')
+        call correct_missing_time_steps(data_l1%time_point)
+        id_old = scan%id
+        !call wall_time(t2)
+        !write(*,*) myid, ' -- disk read time = ', real(t2-t1,sp), ' sec'
+     end if
 
      ! Initialize frequency mask
      call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
@@ -86,13 +96,30 @@ program l2gen
 
      ! Elevation-gain renormalization for circular scans
 !     if (circular) call remove_elevation_gain(data_l2_fullres) 
-     call remove_elevation_gain(data_l2_fullres) 
+!!$     open(58,file='tod1.dat')
+!!$     do i = 1, size(data_l2_fullres%tod,1)
+!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
+!!$     end do
+!!$     close(58)
+!     call remove_elevation_gain(data_l2_fullres) 
+!!$     open(58,file='tod2.dat')
+!!$     do i = 1, size(data_l2_fullres%tod,1)
+!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
+!!$     end do
+!!$     close(58)
 
      ! Normalize gain
      if (norm_with_tp) then
         call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
         call update_status(status, 'gain_norm')
      end if
+!!$     open(58,file='tod3.dat')
+!!$     do i = 1, size(data_l2_fullres%tod,1)
+!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
+!!$     end do
+!!$     close(58)
+!!$     call mpi_finalize(ierr)
+!!$     stop
 
      ! Poly-filter if requested
      call polyfilter_TOD(data_l2_fullres, bp_filter)
@@ -110,12 +137,12 @@ program l2gen
      if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
      ! Write L2 file to disk
-     write(*,*) 'Writing ', trim(scan%l2file)
+     !write(*,*) 'Writing ', scan%id
+     call mkdirs(trim(scan%l2file), .true.)
      call write_l2_file(scan%l2file, data_l2_decimated)
      call update_status(status, 'write_l2')
 
      ! Clean up data structures
-     call free_lx_struct(data_l1)
      call free_lx_struct(data_l2_decimated)
      call free_lx_struct(data_l2_fullres)
 

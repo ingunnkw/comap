@@ -58,6 +58,7 @@ contains
     type(hdf_file)                         :: file
     integer(i4b)                           :: nsamp, nfreq, ndet, npoint, nsb, ext4(4), ext1(1)
     logical(lgt)                           :: all
+    real(dp)                               :: t1, t2
     real(sp), allocatable, dimension(:,:) :: buffer
     all = .true.; if (present(only_point)) all = .not. only_point
     call free_lx_struct(data)
@@ -86,7 +87,19 @@ contains
     call read_hdf(file, "scanmode_l1",          data%scanmode_l1)
     call read_hdf(file, "pixels",               data%pixels)
     if (all) call read_hdf(file, "nu_l1",       data%nu)
+    !call wall_time(t1)
     if (all) call read_hdf(file, "tod_l1",      data%tod)
+!!$    call wall_time(t2)
+!!$    write(*,*) 'tod = ', real(t2-t1,sp), ' sec'
+!!$
+!!$    call wall_time(t1)
+!!$    open(58,file='data.unf',form='unformatted')
+!!$    read(58) data%tod
+!!$    call wall_time(t2)
+!!$    write(*,*) 'tod = ', real(t2-t1,sp), ' sec'
+!!$    call mpi_finalize(nsamp)
+!!$    stop
+
     if (all) call read_hdf(file, "flag",        data%flag)
     call close_hdf_file(file)
   end subroutine read_l1_file
