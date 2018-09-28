@@ -282,18 +282,18 @@ contains
     end if
 
     lnL_noise_powell_full = 0.d0
-    !$OMP PARALLEL PRIVATE(i,ssum,P_nu)
+    !!$OMP PARALLEL PRIVATE(i,ssum,P_nu)
     ssum = 0.d0
-    !$OMP DO SCHEDULE(guided)
+    !!$OMP DO SCHEDULE(guided)
     do i = 1, ind_max
        if(mask(i) == 0) cycle
        P_nu  = sigma_sq * (1.d0 + (freqs(i)/f_knee)**alpha)
        ssum  = ssum + f(i) / P_nu + log(P_nu)
     end do
-    !$OMP END DO
-    !$OMP ATOMIC
+    !!$OMP END DO
+    !!$OMP ATOMIC
     lnL_noise_powell_full = lnL_noise_powell_full  + ssum
-    !$OMP END PARALLEL
+    !!$OMP END PARALLEL
 
     ! Add prior on alpha
     lnL_noise_powell_full = lnL_noise_powell_full / sum(mask(1:ind_max))
@@ -326,9 +326,9 @@ contains
     end if
 
     dlnL_noise_powell_full = 0.d0
-    !$OMP PARALLEL PRIVATE(i,ssum,nu,P_nu,dLdP)
+    !!$OMP PARALLEL PRIVATE(i,ssum,nu,P_nu,dLdP)
     ssum = 0.d0
-    !$OMP DO SCHEDULE(guided)
+    !!$OMP DO SCHEDULE(guided)
     do i = 1, ind_max
        if(mask(i) == 0) cycle
        nu        = freqs(i)
@@ -338,12 +338,12 @@ contains
        ssum(2)   = ssum(2) - dLdP * sigma_sq * alpha * (nu/f_knee)**alpha
        ssum(3)   = ssum(3) + dLdP * sigma_sq * alpha * (nu/f_knee)**alpha * log(nu/f_knee)
     end do
-    !$OMP END DO
-    !$OMP ATOMIC
+    !!$OMP END DO
+    !!$OMP ATOMIC
     dlnL_noise_powell_full(1) = dlnL_noise_powell_full(1)  + ssum(1)
     dlnL_noise_powell_full(2) = dlnL_noise_powell_full(2)  + ssum(2)
     dlnL_noise_powell_full(3) = dlnL_noise_powell_full(3)  + ssum(3)
-    !$OMP END PARALLEL
+    !!$OMP END PARALLEL
 
     dlnL_noise_powell_full = dlnL_noise_powell_full / sum(mask(1:ind_max))
   end function dlnL_noise_powell_full

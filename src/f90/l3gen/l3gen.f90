@@ -306,6 +306,7 @@ contains
     call get_scan_info(snum, scan)
     call int2string(info%id, myid_text)
     do i = 1, ndet
+!    do i = 2, 2 
        if (.not. is_alive(i)) then
           data%sigma0(:,:,i) = 0.d0
           data%alpha(:,:,i)  = 0.d0
@@ -313,7 +314,9 @@ contains
           cycle
        end if
        do k = 1, nsb
+!       do k = 1, 1
           do j = 1, nfreq      
+!          do j = 56, 56
              if (.false.) then
                 ! White noise 
                 data%sigma0(j,k,i) = sqrt(variance(data%tod(:,j,k,i)))
@@ -327,6 +330,8 @@ contains
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
                 write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
                      & data%fknee(j,k,i), chisq
+!                call mpi_finalize(ierr)
+!                stop
 !                write(*,*) info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
 !                     & data%fknee(j,k,i), chisq
              end if
