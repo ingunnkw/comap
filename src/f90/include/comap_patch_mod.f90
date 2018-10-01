@@ -7,7 +7,7 @@ module comap_patch_mod
   character(len=512), private :: patchfile
 
   type patch_info
-     character(len=64) :: name
+     character(len=64) :: name, type
      real(dp)          :: pos(2), obj_rad, img_rad, resolution, priority
 !     integer(i4b)      :: eph
      logical(lgt)      :: fixed, noise_dominated, ignore
@@ -61,7 +61,7 @@ contains
     implicit none
     type(patch_info), dimension(:), allocatable :: pinfo
     integer(i4b)       :: i, n, unit
-    character(len=512) :: file, name, theta, phi
+    character(len=512) :: file, name, theta, phi, objtype
     real(dp)           :: orad, irad, res, pri
     logical(lgt)       :: exist
 
@@ -71,7 +71,7 @@ contains
     open(unit,file=trim(file),action="read",status="old")
     i = 0
     do while(.true.)
-       read(unit,*,end=1,err=1) name, phi, theta, orad, irad, res, pri
+       read(unit,*,end=1,err=1) name, phi, theta, orad, irad, res, pri, objtype
        if(name(1:1) == "#") cycle
        i = i+1
     end do
@@ -80,13 +80,14 @@ contains
     allocate(pinfo(n))
     i = 0
     do while(.true.)
-       read(unit,*,end=2,err=2) name, phi, theta, orad, irad, res, pri
+       read(unit,*,end=2,err=2) name, phi, theta, orad, irad, res, pri, objtype
        if(name(1:1) == "#") cycle
        i = i+1
        pinfo(i)%name = name
        pinfo(i)%obj_rad = orad * DEG2RAD
        pinfo(i)%img_rad = irad * DEG2RAD
        pinfo(i)%priority = pri
+       pinfo(i)%type     = objtype
        if(trim(theta) == "x" .or. trim(phi) == "x") then
           pinfo(i)%pos = 0
           pinfo(i)%fixed = .false.

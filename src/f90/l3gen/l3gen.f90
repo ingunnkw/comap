@@ -22,6 +22,7 @@ program l3gen
   !use quiet_filter_mod
   use quiet_hdf_mod
   use spline_1d_mod
+  use comap_patch_mod
   implicit none
 
   type info_struct
@@ -34,11 +35,12 @@ program l3gen
   integer(i4b)          :: num_corr_bins, nscan
   real(dp)              :: fix_highpass_freq_scan, fix_lowpass_freq, t1, t2, scanmask_width
   real(dp)              :: scanfreq_min, scanfreq_max
-  logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates
+  logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates, found
   type(task_list)       :: tasks
   type(info_struct)     :: info
   type(comap_scan_info) :: scan
   type(lx_struct)       :: data
+  type(patch_info)      :: pinfo
   real(sp),     dimension(:,:,:,:), allocatable :: powspecs
   complex(spc), dimension(:,:,:,:), allocatable :: ffts
   logical(lgt), dimension(:,:),     allocatable :: mask
@@ -86,6 +88,7 @@ program l3gen
   call initialize_noise_estimation_mod(parfile); call dmem("noise mod")
   call initialize_comap_pointing_mod(parfile);   call dmem("pointing mod")
   call initialize_gain_mod(parfile);             call dmem("gain mod")
+  call initialize_comap_patch_mod(parfile)
   !call initialize_patch_detect_mod(parfile);     call dmem("patch detect mod")
   !call initialize_filter_mod(parfile);           call dmem("filter mod")
 
@@ -95,6 +98,7 @@ program l3gen
   do snum = 1+info%id, nscan, info%nproc
  !do while(get_next_task(tasks, snum))
      call get_scan_info(snum, scan)
+     found = get_patch_info(scan%object, pinfo) 
      tmpfile = trim(scan%l3file) // ".part"
      inquire(file=tmpfile,exist=exist)
      if(exist) then
@@ -124,10 +128,12 @@ program l3gen
      call calc_point (data,  isys, osys)      ; call dmem("point")
      !call calc_objrel(data,  point_objs)      ; call dmem("objrel")
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
-     call calc_scanfreq(data);                ; call dmem("scanfreq")
-     call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
-     call fit_noise(data, powspecs, snum)     ; call dmem("noise")
-     call calc_gain(data)                     ; call dmem("gain")
+     if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
+        call calc_scanfreq(data);                ; call dmem("scanfreq")
+        call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
+        call fit_noise(data, powspecs, snum)     ; call dmem("noise")
+        call calc_gain(data)                     ; call dmem("gain")
+     end if
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
      !call calc_stats(data)                    ; call dmem("stats")
      !allocate(data%filter_par(size(data%tod,2),NUM_FILTER_PAR))
@@ -328,7 +334,7 @@ contains
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
+                if (j == nfreq/2) write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
                      & data%fknee(j,k,i), chisq
 !                call mpi_finalize(ierr)
 !                stop
@@ -437,7 +443,7 @@ contains
        do l = 1, nsb
           do j = 1, nfreq
              sigma0 = data%sigma0(j,l,k)
-             if (sigma0 == 0) write(*,*) 'sigma0 =', real(sigma0,sp), k, '= det', l, '=sb', j, '= freq'
+             !if (sigma0 == 0) write(*,*) 'sigma0 =', real(sigma0,sp), k, '= det', l, '=sb', j, '= freq'
              g = sigma0*const
              !write(*,*) 'gain =', g
              data%gain(1,j,l,k) = g

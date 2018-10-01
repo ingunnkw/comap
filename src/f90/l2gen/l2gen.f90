@@ -11,19 +11,22 @@ program l2gen
   use spline_1D_mod
   use quiet_status_mod
   use comap_gain_mod
+  use comap_patch_mod
   implicit none
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter
-  logical(lgt)         :: exist, reprocess, check_existing, gonext, norm_with_tp
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0
+  real(dp)             :: todsize
+  logical(lgt)         :: exist, reprocess, check_existing, gonext, found
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
   type(planck_rng)     :: rng_handle
   type(status_file)    :: status
+  type(patch_info)     :: pinfo
 
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',              par_dp=samprate)
@@ -34,13 +37,7 @@ program l2gen
   call get_parameter(unit, parfile, 'FREQUENCY_MASK',           par_string=freqmaskfile)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',    par_dp=nu_gain)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA', par_dp=alpha_gain)
-  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter)
-  call get_parameter(unit, parfile, 'NORMALIZE_GAIN_WITH_TOTAL_POWER', par_lgt=norm_with_tp)
-
-  if (.not. norm_with_tp .and. bp_filter >= 0) then
-     write(*,*) 'Error: Not possible to poly-filter data without first normalize with total power!'
-     stop
-  end if
+  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter0)
 
   check_existing = .true.
   call initialize_scan_mod(parfile)
@@ -50,6 +47,7 @@ program l2gen
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
   call init_status(status, 'l2gen_mon.txt'); 
   call update_status(status, 'init')
+  call initialize_comap_patch_mod(parfile)
   !call dset(id=myid,level=debug)
 
 
@@ -77,13 +75,14 @@ program l2gen
 
      ! Read in Level 1 file
      if (scan%id(1:6) /= id_old(1:6)) then
-        !call wall_time(t1)
+        call wall_time(t1)
         call free_lx_struct(data_l1)
         call read_l1_file(scan%l1file, data_l1); call update_status(status, 'read_l1')
         call correct_missing_time_steps(data_l1%time_point)
         id_old = scan%id
-        !call wall_time(t2)
-        !write(*,*) myid, ' -- disk read time = ', real(t2-t1,sp), ' sec'
+        call wall_time(t2)
+        todsize = real(size(data_l1%tod,1),dp)*real(size(data_l1%tod(1,:,:,:)),dp)*4.d0/1024.d0**2 ! in MB
+        write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
      end if
 
      ! Initialize frequency mask
@@ -108,8 +107,16 @@ program l2gen
 !!$     end do
 !!$     close(58)
 
+     ! Get patch info
+     found = get_patch_info(scan%object, pinfo) 
+     if (.not. found) then
+        write(*,*) 'Error: Patch not found in patchfile = ', trim(scan%object)
+        call mpi_finalize(ierr)
+        stop
+     end if
+
      ! Normalize gain
-     if (norm_with_tp) then
+     if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
         call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
         call update_status(status, 'gain_norm')
      end if
@@ -122,6 +129,7 @@ program l2gen
 !!$     stop
 
      ! Poly-filter if requested
+     bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
      call polyfilter_TOD(data_l2_fullres, bp_filter)
      call update_status(status, 'polyfilter')
 
@@ -174,7 +182,7 @@ contains
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
-       write(*,*) 'Normalizing gains for det = ', i
+       !write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
