@@ -130,9 +130,11 @@ program l3gen
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
         call calc_scanfreq(data);                ; call dmem("scanfreq")
+        !call apply_az_filter(data)               ; call dmem("az_filter")
         call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
         call fit_noise(data, powspecs, snum)     ; call dmem("noise")
         call calc_gain(data)                     ; call dmem("gain")
+        deallocate(ffts, powspecs)
      end if
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
      !call calc_stats(data)                    ; call dmem("stats")
@@ -148,7 +150,6 @@ program l3gen
      call mkdirs(trim(scan%l3file), .true.)
      call mv(tmpfile, scan%l3file)
 
-     deallocate(ffts, powspecs)
      call free_lx_struct(data)
   end do
 
@@ -161,6 +162,88 @@ program l3gen
   write(*,*) 'Time elapsed: ', t2-t1
 contains
 
+
+  subroutine apply_az_filter(data)
+    implicit none
+    type(lx_struct) :: data
+
+    integer(i4b) :: i, j, k, l, det, freq, sb, n, i_high, i_low, n_scan, n_tod
+    real(dp)     :: a, b
+    real(dp), allocatable, dimension(:) :: slopes
+    
+    n_tod  = size(data%tod,1)
+    n_scan = 0.5 * data%samprate / data%scanfreq(1) 
+
+    open(58,file='tod.dat')
+    do i = 1, n_tod-1
+       write(58,*) i, data%tod(i,30,4,3), data%point_tel(1,i+1,1)-data%point_tel(1,i,1)
+    end do
+    close(58)
+    call mpi_finalize(ierr)
+    stop
+
+    i_low = 1
+    open(58,file='az1.dat')
+    open(59,file='az2.dat')
+    do while (i_low <= n_tod)
+       i_high = i_low+1
+       do while (i_high <= n_tod-1 .and. &
+            & ((data%point_tel(1,i_high-1,1)-data%point_tel(1,i_high,1))*&
+            & (data%point_tel(1,i_high,1)-data%point_tel(1,i_high+1,1)) > 0 .or. i_high-i_low < n_scan))
+          i_high = i_high + 1
+       end do
+       n = i_high - i_low + 1
+
+       allocate(slopes(n*(n+1)/2))
+       
+       do j = i_low, i_high
+          write(58,*) j, data%tod(j,30,4,3)-1
+       end do
+
+!       do det = 1, size(data%tod,4)
+!          do sb = 1, size(data%tod,3)
+       do det = 3, 3
+          do sb = 4, 4
+             write(*,*) det, sb
+!             do freq = 1, size(data%tod,2)
+             do freq = 30, 30
+
+                ! Subtract median-evaluated linear azimuth function
+                l = 0
+                do j = i_low, i_high-1
+                   do k = j+1, i_high
+                      l = l+1
+                      if (abs(data%point_tel(1,j,1)-data%point_tel(1,k,1)) / abs(data%point_tel(1,j,1)) < 1.d-6) then
+                         slopes(l) = 1.d30
+                      else
+                         slopes(l) = (data%tod(j,freq,sb,det)-data%tod(k,freq,sb,det)) / &
+                              & (data%point_tel(1,j,1) - data%point_tel(1,k,1))
+                      end if
+                   end do
+                end do
+                a = median(slopes)
+                b = median(data%tod(i_low:i_high,freq,sb,det)-a*data%point_tel(1,i_low:i_high,1))
+                data%tod(i_low:i_high,freq,sb,det) = data%tod(i_low:i_high,freq,sb,det) - &
+                     & (a*data%point_tel(1,i_low:i_high,1)+b)
+
+             end do
+          end do
+       end do
+
+       do j = i_low, i_high
+          write(59,*) j, data%tod(j,30,4,3)
+       end do
+       i_low = i_high+1
+
+       deallocate(slopes)
+    end do
+    close(58)
+    close(59)
+    call mpi_finalize(ierr)
+    stop
+    
+
+  end subroutine apply_az_filter
 
   subroutine calc_weather_template(data)
     implicit none
