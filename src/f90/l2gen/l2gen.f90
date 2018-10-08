@@ -10,18 +10,23 @@ program l2gen
   use quiet_fft_mod
   use spline_1D_mod
   use quiet_status_mod
+  use comap_gain_mod
+  use comap_patch_mod
   implicit none
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet
+  character(len=9)     :: id_old
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter
-  logical(lgt)         :: exist, reprocess, check_existing, gonext, norm_with_tp
-  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0
+  real(dp)             :: todsize
+  logical(lgt)         :: exist, reprocess, check_existing, gonext, found
+  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
   type(planck_rng)     :: rng_handle
   type(status_file)    :: status
+  type(patch_info)     :: pinfo
 
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',              par_dp=samprate)
@@ -32,13 +37,7 @@ program l2gen
   call get_parameter(unit, parfile, 'FREQUENCY_MASK',           par_string=freqmaskfile)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',    par_dp=nu_gain)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA', par_dp=alpha_gain)
-  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter)
-  call get_parameter(unit, parfile, 'NORMALIZE_GAIN_WITH_TOTAL_POWER', par_lgt=norm_with_tp)
-
-  if (.not. norm_with_tp .and. bp_filter >= 0) then
-     write(*,*) 'Error: Not possible to poly-filter data without first normalize with total power!'
-     stop
-  end if
+  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter0)
 
   check_existing = .true.
   call initialize_scan_mod(parfile)
@@ -48,13 +47,18 @@ program l2gen
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
   call init_status(status, 'l2gen_mon.txt'); 
   call update_status(status, 'init')
+  call initialize_comap_patch_mod(parfile)
   !call dset(id=myid,level=debug)
 
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
-  nscan = get_num_scans()
-  do snum = 1+myid, nscan, nproc
+  nscan    = get_num_scans()
+  npercore = nscan / nproc
+  if (nscan > npercore*nproc) npercore = npercore+1
+  id_old  = ''
+  do snum = myid*npercore+1, (myid+1)*npercore
+     if (snum > nscan) exit
      call get_scan_info(snum, scan)
      inquire(file=scan%l2file,exist=exist)
      if(exist .and. .not. reprocess) then
@@ -66,14 +70,20 @@ program l2gen
      else if (exist .and. reprocess) then
         call rm(scan%l2file)
      end if
-     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
+     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa((myid+1)*npercore)) // ")"
      call update_status(status, 'scan_start')
 
-
-     ! Read in Level 1 data
-     num_l1_files = size(scan%l1files)
-     call read_l1_file(scan%l1files(1), data_l1); call update_status(status, 'read_l1')
-     call correct_missing_time_steps(data_l1%time_point)
+     ! Read in Level 1 file
+     if (scan%id(1:6) /= id_old(1:6)) then
+        call wall_time(t1)
+        call free_lx_struct(data_l1)
+        call read_l1_file(scan%l1file, data_l1); call update_status(status, 'read_l1')
+        call correct_missing_time_steps(data_l1%time_point)
+        id_old = scan%id
+        call wall_time(t2)
+        todsize = real(size(data_l1%tod,1),dp)*real(size(data_l1%tod(1,:,:,:)),dp)*4.d0/1024.d0**2 ! in MB
+        write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
+     end if
 
      ! Initialize frequency mask
      call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
@@ -83,13 +93,43 @@ program l2gen
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
      call update_status(status, 'merge')
 
+     ! Elevation-gain renormalization for circular scans
+!     if (circular) call remove_elevation_gain(data_l2_fullres) 
+!!$     open(58,file='tod1.dat')
+!!$     do i = 1, size(data_l2_fullres%tod,1)
+!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
+!!$     end do
+!!$     close(58)
+!     call remove_elevation_gain(data_l2_fullres) 
+!!$     open(58,file='tod2.dat')
+!!$     do i = 1, size(data_l2_fullres%tod,1)
+!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
+!!$     end do
+!!$     close(58)
+
+     ! Get patch info
+     found = get_patch_info(scan%object, pinfo) 
+     if (.not. found) then
+        write(*,*) 'Error: Patch not found in patchfile = ', trim(scan%object)
+        call mpi_finalize(ierr)
+        stop
+     end if
+
      ! Normalize gain
-     if (norm_with_tp) then
+     if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
         call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
         call update_status(status, 'gain_norm')
      end if
+!!$     open(58,file='tod3.dat')
+!!$     do i = 1, size(data_l2_fullres%tod,1)
+!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
+!!$     end do
+!!$     close(58)
+!!$     call mpi_finalize(ierr)
+!!$     stop
 
      ! Poly-filter if requested
+     bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
      call polyfilter_TOD(data_l2_fullres, bp_filter)
      call update_status(status, 'polyfilter')
 
@@ -105,12 +145,12 @@ program l2gen
      if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
      ! Write L2 file to disk
-     write(*,*) 'Writing ', trim(scan%l2file)
+     !write(*,*) 'Writing ', scan%id
+     call mkdirs(trim(scan%l2file), .true.)
      call write_l2_file(scan%l2file, data_l2_decimated)
      call update_status(status, 'write_l2')
 
      ! Clean up data structures
-     call free_lx_struct(data_l1)
      call free_lx_struct(data_l2_decimated)
      call free_lx_struct(data_l2_fullres)
 
@@ -141,7 +181,8 @@ contains
     allocate(dt(2*nsamp), dv(0:n-1))
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
-       if (mod(k,200) == 0) write(*,*) 'Normalizing gains for det = ', i
+       if (.not. is_alive(i)) cycle
+       !write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -155,7 +196,6 @@ contains
                 dv(l) = dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
              end do
              call fft(dt, dv, -1)
-
              data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp)
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
           end do
@@ -195,6 +235,7 @@ contains
     end do
 
     do i = 1, ndet
+       if (.not. is_alive(i)) cycle
        do j = 1, nsb
           !write(*,*) 'Polyfiltering det, sb = ', i, j
 
@@ -484,6 +525,12 @@ contains
     data_l2%time(j:j+nsamp-1)        = data_l1%time(ind(1):ind(2))
 !    data_l2%flag(j:j+nsamp-1)        = data_l1%flag(ind(1):ind(2))
     do i = 1, ndet
+       if (.not. is_alive(i)) then
+          data_l2%point_tel(:,:,i) = 0.d0
+          data_l2%point_cel(:,:,i) = 0.d0
+          data_l2%tod(:,:,:,i)     = 0.d0
+          cycle
+       end if
        do l = 1, 3
           call spline(point_tel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
                & real(data_l1%point_tel(l,ind_point(1):ind_point(2),i),dp))
@@ -518,7 +565,8 @@ contains
     type(Lx_struct),                   intent(out) :: data_out
 
     integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
-    real(dp)     :: weight
+    real(dp)     :: w, weight
+    real(dp), allocatable, dimension(:,:,:) :: sigmasq
 
     nsb                      = size(data_in%tod,3)
     ndet                     = size(data_in%tod,4)
@@ -542,6 +590,7 @@ contains
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
+    allocate(data_out%var_fullres(size(data_in%nu,1),nsb,ndet))
     if (allocated(data_in%mean_tp)) then
        data_out%mean_tp = data_in%mean_tp
     else
@@ -552,13 +601,33 @@ contains
 
     ! Make angles safe for averaging
     do j = 1, ndet
+       if (.not. is_alive(j)) cycle
        call make_angles_safe(data_in%point_tel(1,:,j), real(360.d0,sp)) ! Phi
        call make_angles_safe(data_in%point_tel(3,:,j), real(360.d0,sp)) ! Psi
        call make_angles_safe(data_in%point_cel(1,:,j), real(360.d0,sp)) ! Phi
        call make_angles_safe(data_in%point_cel(3,:,j), real(360.d0,sp)) ! Psi
     end do
 
-    !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight)
+    ! Compute variance per frequency channel
+    !open(58,file='variance.dat')
+    do k = 1, ndet
+       if (.not. is_alive(k)) cycle
+       do j = 1, nsb
+          do i = 1, size(data_in%nu,1)
+             data_out%var_fullres(i,j,k) = variance(data_in%tod(:,i,j,k))
+             !write(58,*) i, data_out%var_fullres(i,j,k)
+          end do
+          !write(58,*)
+       end do
+    end do
+    !close(58)
+!!$    call mpi_finalize(ierr)
+!!$    stop
+
+
+    
+    
+    !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight,w)
     !$OMP DO SCHEDULE(guided)    
     do i = 1, nsamp_out
        data_out%time(i) = mean(data_in%time((i-1)*dt+1:i*dt))  ! Time
@@ -575,13 +644,19 @@ contains
        do j = 1, nsb
           do k = 1, numfreq_out
              do l = 1, ndet           ! Time-ordered data
+                if (.not. is_alive(l)) cycle
                 data_out%nu(k,j,l)    = mean(data_in%nu((k-1)*dnu+1:k*dnu,j,l)) ! Frequency
                 data_out%tod(i,k,j,l) = 0.d0
                 weight                = 0.d0
                 do n = (k-1)*dnu+1, k*dnu
-                   weight = weight + data_in%freqmask_full(n,j,l)
+                   if (data_out%var_fullres(n,j,l) <= 0) then
+                      w = 0.d0
+                   else
+                      w      = 1.d0 / data_out%var_fullres(n,j,l) * data_in%freqmask_full(n,j,l)
+                   end if
+                   weight = weight + w !data_in%freqmask_full(n,j,l)
                    do m = (i-1)*dt+1, i*dt
-                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + data_in%tod(m,n,j,l) * data_in%freqmask_full(n,j,l)
+                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) !* data_in%freqmask_full(n,j,l)
                    end do
                 end do
                 if (weight > 0.d0) then
@@ -601,6 +676,10 @@ contains
     if (data_out%polyorder >= 0) then
        allocate(data_out%tod_poly(nsamp_out, 0:data_out%polyorder, nsb, ndet))
        do l = 1, ndet           
+          if (.not. is_alive(l)) then
+             data_out%tod_poly(:,:,:,l) = 0.d0
+             cycle
+          end if
           do j = 1, nsb
              do k = 0, data_out%polyorder
                 do i = 1, nsamp_out
@@ -754,6 +833,10 @@ contains
     end do
 99  close(unit)
 
+    do k = 1, ndet
+       if (.not. is_alive(k)) data%freqmask_full(:,:,k) = 0.d0
+    end do
+
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
        data%freqmask = data%freqmask_full
@@ -770,5 +853,55 @@ contains
 
   end subroutine initialize_frequency_mask
 
+  subroutine remove_elevation_gain(data) 
+    implicit none
+    type(lx_struct) :: data
+    integer(i4b)    :: n, ndet, nsb, nfreq, i, j, k, l, m, tmin, tmax, parfile_time
+    real(dp)        :: g, a, sigma0, chisq, tsys, tau, dnu, const
+    real(dp), dimension(:), allocatable :: el, dat
+
+!    m=a*data%samprate/data%scanfreq(2)      ! Number of tod-samples per gain estimate
+    m   = (size(data%time))
+    write(*,*) 'Number of samples per gain estimate    =', m
+!    n   = (size(data%time)+m-1)/m           ! Number of gain samples
+    n   = (size(data%time))/m               ! Number of gain samples
+    
+    write(*,*) 'Number of gain estimates for this scan =', n
+    write(*,*) 'n*m                                    =', n*m
+    write(*,*) 'Total number of samples                =', size(data%time)
+    nfreq = size(data%tod,2)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
+    write(*,*) nfreq, '= nfreq', nsb, '= nsb', ndet, '= ndet'
+    write(*,*) '---------------------------------------------------------'
+    !allocate(data%time_gain(n), data%gain(n,nfreq,nsb,ndet))
+    allocate(el(m), dat(m))
+    !data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
+    !open(13,file='gain.dat')
+    !open(14,file='chisq.dat')
+    do k = 1, ndet
+       do l = 1, nsb
+          do j = 1, nfreq
+          if (data%freqmask_full(j,l,k) == 0.d0) cycle
+          do i = 1, n
+             tmin = (i-1)*m+1
+             tmax = i*m
+             el  = data%point_tel(2,tmin:tmax,k)
+             if (any(el == 0.d0)) write(*,*) k, l, j, i
+             dat = data%tod(tmin:tmax,j,l,k)
+             !write(*,*) tmin, tmax, 'min max'
+             call estimate_gain(el,dat,g)
+             data%tod(tmin:tmax,j,l,k) = data%tod(tmin:tmax,j,l,k) - g*1/(sin(el*pi/180.))
+!             write(13,*) g
+!             write(13,*) (g-5.6d10)/5.6d10*100
+!             write(14,*) chisq
+          end do
+          end do
+       end do
+    end do
+    !close(13)
+    !close(14)
+    deallocate(el, dat)
+  end subroutine remove_elevation_gain
 
 end program

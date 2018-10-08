@@ -30,6 +30,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: point         ! Sky coordinates; (phi/theta/psi,time,det)
      real(sp),     allocatable, dimension(:,:,:)     :: mean_tp
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_poly      ! Poly-filter TOD coefficients (time,0:poly,sb,det)
+     real(sp),     allocatable, dimension(:,:,:)     :: var_fullres   ! Full-resolution variance (freq,sb,det)
 
      ! Level 3 fields
      integer(i4b)                                    :: coord_sys
@@ -57,6 +58,7 @@ contains
     type(hdf_file)                         :: file
     integer(i4b)                           :: nsamp, nfreq, ndet, npoint, nsb, ext4(4), ext1(1)
     logical(lgt)                           :: all
+    real(dp)                               :: t1, t2
     real(sp), allocatable, dimension(:,:) :: buffer
     all = .true.; if (present(only_point)) all = .not. only_point
     call free_lx_struct(data)
@@ -85,7 +87,19 @@ contains
     call read_hdf(file, "scanmode_l1",          data%scanmode_l1)
     call read_hdf(file, "pixels",               data%pixels)
     if (all) call read_hdf(file, "nu_l1",       data%nu)
+    !call wall_time(t1)
     if (all) call read_hdf(file, "tod_l1",      data%tod)
+!!$    call wall_time(t2)
+!!$    write(*,*) 'tod = ', real(t2-t1,sp), ' sec'
+!!$
+!!$    call wall_time(t1)
+!!$    open(58,file='data.unf',form='unformatted')
+!!$    read(58) data%tod
+!!$    call wall_time(t2)
+!!$    write(*,*) 'tod = ', real(t2-t1,sp), ' sec'
+!!$    call mpi_finalize(nsamp)
+!!$    stop
+
     if (all) call read_hdf(file, "flag",        data%flag)
     call close_hdf_file(file)
   end subroutine read_l1_file
@@ -126,6 +140,8 @@ contains
        call read_hdf(file, "tod_poly",         data%tod_poly)
     end if
     call read_hdf(file, "pixels",           data%pixels)
+    allocate(data%var_fullres(nfreq_full,nsb,ndet))
+    call read_hdf(file, "var_fullres",      data%var_fullres)
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -243,7 +259,11 @@ contains
     if(allocated(data%freqmask_full)) deallocate(data%freqmask_full)
     if(allocated(data%mean_tp))       deallocate(data%mean_tp)
     if(allocated(data%tod_poly))      deallocate(data%tod_poly)
+    if(allocated(data%sigma0_poly))   deallocate(data%sigma0_poly)
+    if(allocated(data%alpha_poly))    deallocate(data%alpha_poly)
+    if(allocated(data%fknee_poly))    deallocate(data%fknee_poly)
     if(allocated(data%pixels))        deallocate(data%pixels)
+    if(allocated(data%var_fullres))   deallocate(data%var_fullres)
   end subroutine
 
   subroutine write_l2_file(filename, data)
@@ -271,6 +291,7 @@ contains
        call write_hdf(file, "tod_poly",         data%tod_poly)
     end if
     call write_hdf(file, "pixels",            data%pixels)
+    call write_hdf(file, "var_fullres",       data%var_fullres)
     call close_hdf_file(file)
   end subroutine
 
@@ -295,11 +316,11 @@ contains
     call write_hdf(file, "point_tel",         data%point_tel)
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point",             data%point)
-    call write_hdf(file, "sigma0",            data%sigma0)
-    call write_hdf(file, "alpha",             data%alpha)
-    call write_hdf(file, "fknee",             data%fknee)
-    call write_hdf(file, "time_gain",         data%time_gain)
-    call write_hdf(file, "gain",              data%gain)
+    if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
+    if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
+    if (allocated(data%fknee))     call write_hdf(file, "fknee",             data%fknee)
+    if (allocated(data%time_gain)) call write_hdf(file, "time_gain",         data%time_gain)
+    if (allocated(data%gain))      call write_hdf(file, "gain",              data%gain)
     call write_hdf(file, "stats",             data%stats)
     !call write_hdf(file, "det_stats",         data%det_stats)
     !call write_hdf(file, "filter_par",        data%filter_par)
@@ -309,6 +330,7 @@ contains
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
+    call write_hdf(file, "var_fullres",       data%var_fullres)
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",       data%tod_poly)
        call write_hdf(file, "sigma0_poly",    data%sigma0_poly)

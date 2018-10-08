@@ -22,6 +22,7 @@ program l3gen
   !use quiet_filter_mod
   use quiet_hdf_mod
   use spline_1d_mod
+  use comap_patch_mod
   implicit none
 
   type info_struct
@@ -31,14 +32,15 @@ program l3gen
   character(len=512)    :: parfile, odir, outfile
   character(len=512)    :: lockfile, tmpfile, point_objs, tilt_file, offset_mask_file, coord_out
   integer(i4b)          :: ierr, snum, nmod, i, j, isys, osys, mod, nside_l3, debug
-  integer(i4b)          :: num_corr_bins
+  integer(i4b)          :: num_corr_bins, nscan
   real(dp)              :: fix_highpass_freq_scan, fix_lowpass_freq, t1, t2, scanmask_width
   real(dp)              :: scanfreq_min, scanfreq_max
-  logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates
+  logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates, found
   type(task_list)       :: tasks
   type(info_struct)     :: info
   type(comap_scan_info) :: scan
   type(lx_struct)       :: data
+  type(patch_info)      :: pinfo
   real(sp),     dimension(:,:,:,:), allocatable :: powspecs
   complex(spc), dimension(:,:,:,:), allocatable :: ffts
   logical(lgt), dimension(:,:),     allocatable :: mask
@@ -86,13 +88,17 @@ program l3gen
   call initialize_noise_estimation_mod(parfile); call dmem("noise mod")
   call initialize_comap_pointing_mod(parfile);   call dmem("pointing mod")
   call initialize_gain_mod(parfile);             call dmem("gain mod")
+  call initialize_comap_patch_mod(parfile)
   !call initialize_patch_detect_mod(parfile);     call dmem("patch detect mod")
   !call initialize_filter_mod(parfile);           call dmem("filter mod")
 
   ! Process all CES's
-  call init_task_list(tasks, lockfile, get_num_scans(), MPI_COMM_WORLD)
-  do while(get_next_task(tasks, snum))
+  !call init_task_list(tasks, lockfile, get_num_scans(), MPI_COMM_WORLD)
+  nscan = get_num_scans()
+  do snum = 1+info%id, nscan, info%nproc
+ !do while(get_next_task(tasks, snum))
      call get_scan_info(snum, scan)
+     found = get_patch_info(scan%object, pinfo) 
      tmpfile = trim(scan%l3file) // ".part"
      inquire(file=tmpfile,exist=exist)
      if(exist) then
@@ -122,10 +128,14 @@ program l3gen
      call calc_point (data,  isys, osys)      ; call dmem("point")
      !call calc_objrel(data,  point_objs)      ; call dmem("objrel")
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
-     call calc_scanfreq(data);                ; call dmem("scanfreq")
-     call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
-     call fit_noise(data, powspecs, snum)     ; call dmem("noise")
-     call calc_gain(data)                     ; call dmem("gain")
+     if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
+        call calc_scanfreq(data);                ; call dmem("scanfreq")
+        !call apply_az_filter(data)               ; call dmem("az_filter")
+        call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
+        call fit_noise(data, powspecs, snum)     ; call dmem("noise")
+        call calc_gain(data)                     ; call dmem("gain")
+        deallocate(ffts, powspecs)
+     end if
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
      !call calc_stats(data)                    ; call dmem("stats")
      !allocate(data%filter_par(size(data%tod,2),NUM_FILTER_PAR))
@@ -140,7 +150,6 @@ program l3gen
      call mkdirs(trim(scan%l3file), .true.)
      call mv(tmpfile, scan%l3file)
 
-     deallocate(ffts, powspecs)
      call free_lx_struct(data)
   end do
 
@@ -153,6 +162,88 @@ program l3gen
   write(*,*) 'Time elapsed: ', t2-t1
 contains
 
+
+  subroutine apply_az_filter(data)
+    implicit none
+    type(lx_struct) :: data
+
+    integer(i4b) :: i, j, k, l, det, freq, sb, n, i_high, i_low, n_scan, n_tod
+    real(dp)     :: a, b
+    real(dp), allocatable, dimension(:) :: slopes
+    
+    n_tod  = size(data%tod,1)
+    n_scan = 0.5 * data%samprate / data%scanfreq(1) 
+
+    open(58,file='tod.dat')
+    do i = 1, n_tod-1
+       write(58,*) i, data%tod(i,30,4,3), data%point_tel(1,i+1,1)-data%point_tel(1,i,1)
+    end do
+    close(58)
+    call mpi_finalize(ierr)
+    stop
+
+    i_low = 1
+    open(58,file='az1.dat')
+    open(59,file='az2.dat')
+    do while (i_low <= n_tod)
+       i_high = i_low+1
+       do while (i_high <= n_tod-1 .and. &
+            & ((data%point_tel(1,i_high-1,1)-data%point_tel(1,i_high,1))*&
+            & (data%point_tel(1,i_high,1)-data%point_tel(1,i_high+1,1)) > 0 .or. i_high-i_low < n_scan))
+          i_high = i_high + 1
+       end do
+       n = i_high - i_low + 1
+
+       allocate(slopes(n*(n+1)/2))
+       
+       do j = i_low, i_high
+          write(58,*) j, data%tod(j,30,4,3)-1
+       end do
+
+!       do det = 1, size(data%tod,4)
+!          do sb = 1, size(data%tod,3)
+       do det = 3, 3
+          do sb = 4, 4
+             write(*,*) det, sb
+!             do freq = 1, size(data%tod,2)
+             do freq = 30, 30
+
+                ! Subtract median-evaluated linear azimuth function
+                l = 0
+                do j = i_low, i_high-1
+                   do k = j+1, i_high
+                      l = l+1
+                      if (abs(data%point_tel(1,j,1)-data%point_tel(1,k,1)) / abs(data%point_tel(1,j,1)) < 1.d-6) then
+                         slopes(l) = 1.d30
+                      else
+                         slopes(l) = (data%tod(j,freq,sb,det)-data%tod(k,freq,sb,det)) / &
+                              & (data%point_tel(1,j,1) - data%point_tel(1,k,1))
+                      end if
+                   end do
+                end do
+                a = median(slopes)
+                b = median(data%tod(i_low:i_high,freq,sb,det)-a*data%point_tel(1,i_low:i_high,1))
+                data%tod(i_low:i_high,freq,sb,det) = data%tod(i_low:i_high,freq,sb,det) - &
+                     & (a*data%point_tel(1,i_low:i_high,1)+b)
+
+             end do
+          end do
+       end do
+
+       do j = i_low, i_high
+          write(59,*) j, data%tod(j,30,4,3)
+       end do
+       i_low = i_high+1
+
+       deallocate(slopes)
+    end do
+    close(58)
+    close(59)
+    call mpi_finalize(ierr)
+    stop
+    
+
+  end subroutine apply_az_filter
 
   subroutine calc_weather_template(data)
     implicit none
@@ -291,7 +382,7 @@ contains
   subroutine fit_noise(data, powspecs, snum)
     implicit none
     type(lx_struct) :: data
-    integer(i4b) :: ndet, nsb, nfreq, i, j, k, snum, p
+    integer(i4b) :: ndet, nsb, nfreq, i, j, k, l, snum, p
     character(len=4) :: myid_text
     real(sp)     :: powspecs(:,:,:,:)
     real(dp)     :: chisq, nsamp
@@ -304,6 +395,7 @@ contains
     call get_scan_info(snum, scan)
     call int2string(info%id, myid_text)
     do i = 1, ndet
+!    do i = 2, 2 
        if (.not. is_alive(i)) then
           data%sigma0(:,:,i) = 0.d0
           data%alpha(:,:,i)  = 0.d0
@@ -311,7 +403,9 @@ contains
           cycle
        end if
        do k = 1, nsb
+!       do k = 1, 1
           do j = 1, nfreq      
+!          do j = 56, 56
              if (.false.) then
                 ! White noise 
                 data%sigma0(j,k,i) = sqrt(variance(data%tod(:,j,k,i)))
@@ -323,8 +417,10 @@ contains
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
+                if (j == nfreq/2) write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
                      & data%fknee(j,k,i), chisq
+!                call mpi_finalize(ierr)
+!                stop
 !                write(*,*) info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
 !                     & data%fknee(j,k,i), chisq
              end if
@@ -430,7 +526,7 @@ contains
        do l = 1, nsb
           do j = 1, nfreq
              sigma0 = data%sigma0(j,l,k)
-             if (sigma0 == 0) write(*,*) 'sigma0 =', real(sigma0,sp), k, '= det', l, '=sb', j, '= freq'
+             !if (sigma0 == 0) write(*,*) 'sigma0 =', real(sigma0,sp), k, '= det', l, '=sb', j, '= freq'
              g = sigma0*const
              !write(*,*) 'gain =', g
              data%gain(1,j,l,k) = g
