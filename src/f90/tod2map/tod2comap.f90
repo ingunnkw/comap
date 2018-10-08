@@ -29,11 +29,12 @@ program tod2comap
   integer(i4b), allocatable, dimension(:,:) :: pixels
   character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name
   integer(i4b)          :: nscan, i, j, k, det, sb, freq
-  integer(i4b)          :: myid, numprocs, ierr, root
+  integer(i4b)          :: myid, nproc, ierr, root
+  logical               :: binning_split
 
   call mpi_init(ierr)
-  call mpi_comm_rank(mpi_comm_world, myid, ierr)
-  call mpi_comm_size(mpi_comm_world, numprocs, ierr)
+  call mpi_comm_rank(mpi_comm_world, myid,  ierr)
+  call mpi_comm_size(mpi_comm_world, nproc, ierr)
   root = 0
 
 
@@ -45,12 +46,16 @@ program tod2comap
 
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
+  write(*,*) nscan
+  stop
   allocate(tod(nscan))
   !nscan = 1
 !  call free_map_type(map)
 
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
   !call get_parameter()
+
+  binning_split = .false.
 
 
   ! This loop currently requiers that all scans are of the same patch
@@ -61,8 +66,8 @@ program tod2comap
      call get_scan_info(i,scan)
 
      ! Get TOD / read level 3 file
-     filename = scan%l3file
-     !filename = '/mn/stornext/d5/comap/protodir/level3/Ka/ces/jupiter/jupiter_'//trim(itoa(scan%sid))//'_v1.h5'
+     !filename = scan%l3file
+     filename = '/mn/stornext/d5/comap/protodir/level3_new/Ka/'//trim(scan%object)//'/'//trim(scan%object)//'_00'//trim(itoa(scan%sid))//'_01.h5'
      if (i == 1) write(*,*) trim(filename)
      call get_tod(trim(filename), tod(i))
 
@@ -70,6 +75,22 @@ program tod2comap
      alist%status = 0 ! TODO: check if any parts of the scan has been rejected
 
      !prefix = pre//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
+
+     if (binning_split) then
+        call initialize_mapmaker(map, tod(i:i), parfile)
+        call time2pix(tod(i:i), map)
+        do det = 3, 3
+           do sb = 1, tod(i)%nsb
+              do freq = 1, tod(i)%nfreq
+                 call binning(map, tod(i:i), alist, det, sb, freq)
+              end do
+           end do
+        end do
+        call finalize_binning(map)
+        prefix = trim(pre)//trim(scan%object)//'_'//itoa(scan%sid)
+        call output_map(trim(prefix), map)
+     end if
+
   end do
 
   !if (myid == 0) write(*,*) trim(scan%object), trim(itoa(scan%sid))
@@ -85,24 +106,23 @@ program tod2comap
   !call binning(map, tod(i), alist)
   if (myid == 0) write(*,*) "CG mapmaker ..."
   do det = 3, 3
-     do sb = 1, tod(1)%nsb
+     do sb = 3,3!1, tod(1)%nsb
         if (myid == 0) write(*,*) "sb", sb
         !do freq = tod(1)%nfreq/4, tod(1)%nfreq/4
-        !do freq = 2,2
-        do freq = 1, tod(1)%nfreq
+        do freq = 30,30
+        !do freq = 1, tod(1)%nfreq
            if (myid == 0 .and. modulo(freq, 10) == 0) write(*,*) 'freq', freq, 'of', tod(1)%nfreq
            call pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
+           !if (binning) call binning(map, tod, alist, det, sb, freq)
         end do
      end do
   end do
-  
+  !if (binning) call finalize_binning(map)
 
   !end do
   if (myid == 0) write(*,*) "Writing to file ..."
   !write(*,*) trim(itoa(scan%sid))
   prefix = trim(pre)//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
-
-  !if (binning) call finalize_binning(map)
 
   if (myid == 0) call output_map_h5(trim(prefix), map)
 

@@ -18,7 +18,7 @@ contains
     character(len=*)                            :: parfile
 
     integer(i4b) :: i, j, k, l, p, q, fs, st
-    real(dp)     :: x_min, x_max, y_min, y_max, pad, temp
+    real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec
     real(8), parameter :: PI = 4*atan(1.d0)
 
     ! Set up map grid
@@ -30,10 +30,12 @@ contains
        pad = 0.3d0 ! degrees
        map%nfreq = tod(1)%nfreq
        map%nsb   = tod(1)%nsb
-       map%dthetay = 1.d0/60.d0 ! degrees (arcmin/60), resolution
+       map%dthetay = 3.d0/60.d0 ! degrees (arcmin/60), resolution
        map%mean_el = mean(tod(:)%mean_el)
        map%mean_az = mean(tod(:)%mean_az)
-       map%dthetax = map%dthetay !/abs(cos(map%mean_el*PI/180.d0))
+       mean_dec    = mean(tod(1)%point(2,:,3))
+       !map%dthetax = map%dthetay/abs(cos(map%mean_el*PI/180.d0))
+       map%dthetax = map%dthetay/abs(cos(mean_dec*PI/180.d0))
 
        x_min = 1.d3; x_max = -1.d3
        y_min = 1.d3; y_max = -1.d3
@@ -122,7 +124,7 @@ contains
     do sb = 1, tod(1)%nsb
        do freq = 1, tod(1)%nfreq
           where(map%nhit(:,:,freq,sb) > 0)
-             map%rms(:,:,freq,sb) = sigma0(freq,sb)/sqrt(map%nhit(:,:,freq,sb))
+             map%rms(:,:,freq,sb) = sqrt(map%nhit(:,:,freq,sb))/sigma0(freq,sb)
           elsewhere
              map%rms(:,:,freq,sb) = 0.d0
           end where
@@ -141,43 +143,50 @@ contains
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map, tod, alist)
+  subroutine binning(map, tod, alist, det, sb, freq)
     implicit none
-    type(tod_type),   intent(in)    :: tod
+    type(tod_type), dimension(:), intent(in) :: tod
     type(map_type),   intent(inout) :: map
     type(acceptlist), intent(in)    :: alist
+    integer(i4b),     intent(in)    :: det, sb, freq
 
-    integer(i4b) :: i, j, k, l, p, q, fs, st
+    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
     real(dp)     :: x_min, x_max, y_min, y_max
-
-    fs = 200 ! starting point
-    st = tod%nsamp - 200 ! ending point
+    real(dp), allocatable, dimension(:) :: dsum, div
 
     x_min = map%x(1); x_max = map%x(map%n_x)
     y_min = map%y(1); y_max = map%y(map%n_y)
 
+    allocate(dsum(map%n_x*map%n_y), div(map%n_x*map%n_y))
+
     write(*,*) 'Beginning coadding'
 
-    k = 1 ! detector number
+    do scan = 1, size(tod)
+       !fs = 200 ! starting point
+       !st = tod(scan)%nsamp - 200 ! ending point
+       do i = 1, tod(scan)%nsamp
+       !do i = fs, st!tod%nsamp
+          if (alist%status(freq,det) == 0) then
+             if (tod(scan)%g(1,freq,sb,det) .ne. 0.d0) then
+                pix = tod(scan)%pixels(i,det)
+                dsum(pix) = dsum(pix) + tod(scan)%g(1,freq,sb,det)    / tod(scan)%rms(i,freq,sb,det)**2 * tod(scan)%d(i,freq,sb,det)
+                div(pix)  = div(pix)  + tod(scan)%g(1,freq,sb,det)**2 / tod(scan)%rms(i,freq,sb,det)**2
+                !map%nhit(p,q,freq,sb) = map%nhit(p,q,freq,sb) + 1.d0
 
-    do i = fs, st!tod%nsamp
-       p = min(max(int((tod%point(1,i,1)-x_min)/map%dthetax),1),map%n_x)
-       q = min(max(int((tod%point(2,i,1)-y_min)/map%dthetay),1),map%n_y)
-       do l = 1, tod%nsb
-          !do j = 6, 6
-          do j = 1, tod%nfreq
-             if (alist%status(j,k) == 0) then
-                if (tod%g(1,j,l,k) .ne. 0.d0) then
-
-                   map%dsum(p,q,j,l) = map%dsum(p,q,j,l) + tod%g(1,j,l,k)    / tod%rms(i,j,l,k)**2 * tod%d(i,j,l,k)
-                   map%div(p,q,j,l)  = map%div(p,q,j,l)  + tod%g(1,j,l,k)**2 / tod%rms(i,j,l,k)**2
-                   map%nhit(p,q,j,l) = map%nhit(p,q,j,l) + 1.d0
-
-                end if
              end if
-          end do
+          end if
        end do
     end do
+
+    do p = 1, map%n_x
+       do q = 1, map%n_y
+          map%dsum(p,q,freq,sb) = map%dsum(p,q,freq,sb) + dsum((q-1)*map%n_x + p)
+          map%div(p,q,freq,sb) = map%div(p,q,freq,sb) + div((q-1)*map%n_x + p)
+       end do
+    end do
+
+    deallocate(dsum, div)
+
 
     write(*,*) 'Ending coadding'
 
@@ -189,7 +198,7 @@ contains
 
     where(map%nhit > 0)
        map%m   = map%dsum / map%div
-       map%rms = 1.d0 / sqrt(map%div)
+       map%rms = 1.d0 / sqrt(map%div) ! overwrite
     elsewhere
        map%m   = 0.d0
        map%rms = 0.d0
@@ -285,7 +294,8 @@ contains
         !stop
 
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           !rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + Nt(i)
         end do
 
         !open(75,file='rhs.dat',recl=1024)
@@ -343,8 +353,10 @@ contains
         !$OMP PARALLEL PRIVATE(i)
         !$OMP DO SCHEDULE(guided)
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           xt(i) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
-           xt(long_samp-i+1) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
+           !xt(i) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
+           !xt(long_samp-i+1) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
+           xt(i) = x(tod(scan)%pixels(i,det))
+           xt(long_samp-i+1) = x(tod(scan)%pixels(i,det))
         end do
         !$OMP END DO
         !$OMP END PARALLEL
@@ -364,7 +376,8 @@ contains
         Nt = Nt - mean(Nt)
 
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           !Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + Nt(i)
         end do
 
         deallocate(xt, xv)
@@ -501,7 +514,8 @@ contains
     gain = 0.d0
     do scan = 1, tot_scans
        sigma0 = sigma0 + tod(scan)%sigma0(freq,sb,det)**2
-       gain = gain + tod(scan)%g(1,freq,sb,det)
+       !gain = gain + tod(scan)%g(1,freq,sb,det)
+       gain = gain + 1.d0
     end do
     sigma0 = sigma0 / tot_scans
     gain = gain / tot_scans
