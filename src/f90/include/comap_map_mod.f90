@@ -11,6 +11,7 @@ module comap_map_mod
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
+     character(len=512) :: name
      real(dp), allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
      real(dp), allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
      real(dp), allocatable, dimension(:,:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq, nsb)
@@ -28,7 +29,7 @@ contains
     type(hdf_file)     :: file
     character(len=512) :: filename
     
-    filename = trim(prefix)//'_map.h5'
+    filename = trim(prefix)//'_'//trim(map%name)//'.h5'
     call open_hdf_file(trim(filename), file, "w")
     call write_hdf(file, "n_x", map%n_x)
     call write_hdf(file, "n_y", map%n_y)
