@@ -30,17 +30,18 @@ contains
 
   ! Public interface: These are meant to be called from outside.
 
-  subroutine initialize_scan_mod(parfile)
+  subroutine initialize_scan_mod(parfile, object)
     implicit none
     character(len=*)       :: parfile
     character(len=512)     :: runlist
+    character(len=512), optional :: object
     if(initialized) return
     call get_parameter(0, parfile, 'RUNLIST',     par_string=runlist)
     call get_parameter(0, parfile, 'LEVEL1_DIR',  par_string=l1dir)
     call get_parameter(0, parfile, 'LEVEL2_DIR',  par_string=l2dir)
     call get_parameter(0, parfile, 'LEVEL3_DIR',  par_string=l3dir)
 
-    call read_runlist(runlist, l1dir, l2dir, l3dir, scan_db)
+    call read_runlist(runlist, l1dir, l2dir, l3dir, scan_db, object)
     initialized = .true.
   end subroutine
 
@@ -102,10 +103,11 @@ contains
   !--------- The helper routines -----------!
   !-----------------------------------------!
 
-  subroutine read_runlist(file, l1dir, l2dir, l3dir, runlist)
+  subroutine read_runlist(file, l1dir, l2dir, l3dir, runlist, object)
     implicit none
     character(len=*)   :: file
     character(len=512) :: name, l1dir, l2dir, l3dir, line, l1file
+    character(len=512), optional :: object
     character(len=9)   :: subsid
     integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n, cnum, cmax, nsub, feature, a, b, c, d
     real(dp)           :: mjd(2), mjd_file(2)
@@ -125,8 +127,11 @@ contains
           read(line,*) sid, mjd_file, nsub, feature
           l1file = trim(l1dir) // "/" // trim(get_token(line, " ", 6))
           do k = 1, nsub
-             cnum = cnum+1
              read(unit,*) scan%id, scan%mjd, scan%az, scan%el, scan%dk, a, b, c, d
+             if (present(object)) then
+                if (trim(object) /= trim(name)) cycle
+             end if
+             cnum = cnum+1
              scan%sid         = sid
              scan%subsid      = k
              scan%l1file      = l1file
@@ -146,9 +151,10 @@ contains
     runlist%n = size(runlist%scans)
   end subroutine read_runlist
 
-  function count_num_scan(file) result(n)
+  function count_num_scan(file, object) result(n)
     implicit none
     character(len=*)   :: file
+    character(len=512), optional :: object
     character(len=512) :: name, line
     integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n
     real(dp)           :: mjd(2)
@@ -160,6 +166,9 @@ contains
        read(unit,*) name, nscan
        do j = 1, nscan
           read(unit,*) sid, mjd, nfile
+          if (present(object)) then
+             if (trim(object) /= trim(name)) cycle
+          end if
           n = n + nfile
           do k = 1, nfile
              read(unit,'(a)') line
