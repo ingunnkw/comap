@@ -159,7 +159,7 @@ contains
 
     allocate(dsum(map%n_x*map%n_y), div(map%n_x*map%n_y))
 
-    write(*,*) 'Beginning coadding'
+    !write(*,*) 'Beginning coadding'
 
     do scan = 1, size(tod)
        !fs = 200 ! starting point
@@ -169,8 +169,10 @@ contains
           if (alist%status(freq,det) == 0) then
              if (tod(scan)%g(1,freq,sb,det) .ne. 0.d0) then
                 pix = tod(scan)%pixels(i,det)
-                dsum(pix) = dsum(pix) + tod(scan)%g(1,freq,sb,det)    / tod(scan)%rms(i,freq,sb,det)**2 * tod(scan)%d(i,freq,sb,det)
-                div(pix)  = div(pix)  + tod(scan)%g(1,freq,sb,det)**2 / tod(scan)%rms(i,freq,sb,det)**2
+                !dsum(pix) = dsum(pix) + tod(scan)%g(1,freq,sb,det)    / tod(scan)%rms(i,freq,sb,det)**2 * tod(scan)%d(i,freq,sb,det)
+                !div(pix)  = div(pix)  + tod(scan)%g(1,freq,sb,det)**2 / tod(scan)%rms(i,freq,sb,det)**2
+                dsum(pix) = dsum(pix) + 1.d0    / tod(scan)%rms(i,freq,sb,det)**2 * tod(scan)%d(i,freq,sb,det)
+                div(pix)  = div(pix)  + 1.d0**2 / tod(scan)%rms(i,freq,sb,det)**2
                 !map%nhit(p,q,freq,sb) = map%nhit(p,q,freq,sb) + 1.d0
 
              end if
@@ -188,7 +190,7 @@ contains
     deallocate(dsum, div)
 
 
-    write(*,*) 'Ending coadding'
+    !write(*,*) 'Ending coadding'
 
   end subroutine binning
 

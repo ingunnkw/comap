@@ -47,7 +47,7 @@ program tod2comap
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
   write(*,*) nscan
-  stop
+  !stop
   allocate(tod(nscan))
   !nscan = 1
 !  call free_map_type(map)
@@ -55,7 +55,7 @@ program tod2comap
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
   !call get_parameter()
 
-  binning_split = .false.
+  binning_split = .true.
 
 
   ! This loop currently requiers that all scans are of the same patch
@@ -87,8 +87,9 @@ program tod2comap
            end do
         end do
         call finalize_binning(map)
-        prefix = trim(pre)//trim(scan%object)//'_'//itoa(scan%sid)
-        call output_map(trim(prefix), map)
+        prefix = trim(pre)//trim(scan%object)//'_'//trim(itoa(scan%sid))//'_binsplit'
+        call output_map_h5(trim(prefix), map)
+        call free_map_type(map)
      end if
 
   end do
@@ -99,25 +100,26 @@ program tod2comap
   !call mpi_finalize(ierr)
   !stop
 
+  !if (.not. binning_split) then
   call initialize_mapmaker(map, tod, parfile)
   call time2pix(tod, map)
 
   ! Compute and co-add maps
   !call binning(map, tod(i), alist)
-  if (myid == 0) write(*,*) "CG mapmaker ..."
+  if (myid == 0) write(*,*) "mapmaker ..."
   do det = 3, 3
-     do sb = 3,3!1, tod(1)%nsb
+     do sb = 1, tod(1)%nsb
         if (myid == 0) write(*,*) "sb", sb
         !do freq = tod(1)%nfreq/4, tod(1)%nfreq/4
-        do freq = 30,30
-        !do freq = 1, tod(1)%nfreq
+        !do freq = 30,30
+        do freq = 1, tod(1)%nfreq
            if (myid == 0 .and. modulo(freq, 10) == 0) write(*,*) 'freq', freq, 'of', tod(1)%nfreq
-           call pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
-           !if (binning) call binning(map, tod, alist, det, sb, freq)
+           !call pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
+           call binning(map, tod, alist, det, sb, freq)
         end do
      end do
   end do
-  !if (binning) call finalize_binning(map)
+  call finalize_binning(map)
 
   !end do
   if (myid == 0) write(*,*) "Writing to file ..."
@@ -125,6 +127,8 @@ program tod2comap
   prefix = trim(pre)//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
 
   if (myid == 0) call output_map_h5(trim(prefix), map)
+
+  !end if
 
   !end do
 
