@@ -46,8 +46,6 @@ program tod2comap
 
   call initialize_scan_mod(parfile)
   nscan = get_num_scans()
-  write(*,*) nscan
-  stop
   allocate(tod(nscan))
   !nscan = 1
 !  call free_map_type(map)
