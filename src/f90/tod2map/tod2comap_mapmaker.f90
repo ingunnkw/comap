@@ -2,6 +2,7 @@ module tod2comap_mapmaker
   !use comap_lx_mod
   use comap_map_mod
   use comap_acceptlist_mod
+  use comap_patch_mod
   !use quiet_fft_mod
   use tod2comap_utils
   implicit none
@@ -11,10 +12,11 @@ module tod2comap_mapmaker
 contains
 
 
-  subroutine initialize_mapmaker(map, tod, parfile)
+  subroutine initialize_mapmaker(map, tod, parfile, pinfo)
     implicit none
     type(tod_type), dimension(:), intent(in)    :: tod
     type(map_type),               intent(inout) :: map
+    type(patch_info),             intent(in)    :: pinfo
     character(len=*)                            :: parfile
 
     integer(i4b) :: i, j, k, l, p, q, fs, st
@@ -22,26 +24,38 @@ contains
     real(8), parameter :: PI = 4*atan(1.d0)
 
     ! Set up map grid
-    if (.not. allocated(map%x)) then
-       call get_parameter(0, parfile, 'MAP_NAME', par_string=map%name)
+    if (allocated(map%x)) return
+    call get_parameter(0, parfile, 'MAP_NAME', par_string=map%name)
+    call get_parameter(0, parfile, 'NUMFREQ', par_int=map%nfreq)
+    call get_parameter(0, parfile, 'NUM_SIDEBAND', par_int=map%nsb)
 
-       !fs = 1!200
-       !st = tod%nsamp!-200 ! tod%nsamp
-       pad = 0.3d0 ! degrees
-       map%nfreq = tod(1)%nfreq
-       map%nsb   = tod(1)%nsb
-       map%dthetay = 3.d0/60.d0 ! degrees (arcmin/60), resolution
-       map%mean_el = mean(tod(:)%mean_el)
-       map%mean_az = mean(tod(:)%mean_az)
-       mean_dec    = mean(tod(1)%point(2,:,3))
-       !map%dthetax = map%dthetay/abs(cos(map%mean_el*PI/180.d0))
-       map%dthetax = map%dthetay/abs(cos(mean_dec*PI/180.d0))
-
-       x_min = 1.d3; x_max = -1.d3
-       y_min = 1.d3; y_max = -1.d3
-
+    
+    !fs = 1!200
+    !st = tod%nsamp!-200 ! tod%nsamp
+    pad = 0.5d0 ! degrees
+    !write(*,*) pinfo%resolution
+    map%dthetay = pinfo%resolution ! degrees (arcmin/60), resolution
+    map%mean_el = 0.d0!mean(tod(:)%mean_el)
+    map%mean_az = 0.d0!mean(tod(:)%mean_az)
+    if (pinfo%fixed) then 
+       mean_dec = pinfo%pos(2)
+    else 
        do i = 1, size(tod)
-          do j = 3, 3!tod(i)%ndet
+          mean_dec = mean(tod(i)%point(2,:,1))
+       end do
+       mean_dec = mean_dec/size(tod)
+    end if
+    !map%dthetax = map%dthetay/abs(cos(map%mean_el*PI/180.d0))
+    map%dthetax = map%dthetay/abs(cos(mean_dec*PI/180.d0))
+
+    if (pinfo%fixed) then
+       x_min = pinfo%pos(1) - pinfo%obj_rad
+       x_max = pinfo%pos(1) + pinfo%obj_rad !+ 40.d0*pad
+       y_min = pinfo%pos(2) - pinfo%obj_rad !- 10.d0*pad
+       y_max = pinfo%pos(2) + pinfo%obj_rad
+    else
+       do i = 1, size(tod)
+          do j = 1, tod(i)%ndet
              temp = minval(tod(i)%point(1,:,j)) - pad
              if (temp .le. x_min) x_min = temp
              temp = maxval(tod(i)%point(1,:,j)) + pad
@@ -52,33 +66,42 @@ contains
              if (temp .ge. y_max) y_max = temp
           end do
        end do
-
-       !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) - pad
-       !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) - pad
-       map%n_x = int((x_max-x_min)/map%dthetax); map%n_y = int((y_max-y_min)/map%dthetay)
-       allocate(map%x(map%n_x), map%y(map%n_y))
-       do i = 1, map%n_x
-          map%x(i) = x_min + (i-0.5d0)*map%dthetax
-       end do
-       do i = 1, map%n_y
-          map%y(i) = y_min + (i-0.5d0)*map%dthetay
-       end do
     end if
 
+    !write(*,*) x_min, x_max
+    !write(*,*) y_min, y_max
+    
+
+    !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) - pad
+    !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) - pad
+    !write(*,*) map%dthetax, map%dthetay
+    map%n_x = int((x_max-x_min)/map%dthetax); map%n_y = int((y_max-y_min)/map%dthetay)
+    !write(*,*) map%n_x, map%n_y
+    !call mpi_finalize(i)
+    !stop
+
+    allocate(map%x(map%n_x), map%y(map%n_y))
+    do i = 1, map%n_x
+       map%x(i) = x_min + (i-0.5d0)*map%dthetax
+    end do
+    do i = 1, map%n_y
+       map%y(i) = y_min + (i-0.5d0)*map%dthetay
+    end do
+ 
     ! Set up map structures
-    if (.not. allocated(map%dsum)) then
-       allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb), &
-            & map%dsum(map%n_x, map%n_y, map%nfreq, map%nsb), &
-            & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb), &
-            & map%div(map%n_x, map%n_y, map%nfreq, map%nsb), &
-            & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb))
-       map%dsum = 0.d0
-       map%nhit = 0.d0
-       map%div  = 0.d0
-       map%m    = 0.d0
-       map%rms  = 0.d0
-    end if
-
+    allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%dsum(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%div(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%freq(map%nfreq, map%nsb))
+    map%dsum = 0.d0
+    map%nhit = 0.d0
+    map%div  = 0.d0
+    map%m    = 0.d0
+    map%rms  = 0.d0
+    map%freq = 0.d0
+    
   end subroutine initialize_mapmaker
 
 
@@ -101,8 +124,13 @@ contains
     !!$OMP PARALLEL PRIVATE(scan,j,i,p,q,sb,freq)
     !!$OMP DO SCHEDULE(guided)
     do scan = 1, size(tod)
-       do j = 3, 3!tod(scan)%ndet
+       do j = 1, tod(scan)%ndet
+          if (.not. is_alive(j)) cycle
           do i = 1, tod(scan)%nsamp
+             if (tod(scan)%point(1,i,j) < x_min) write(*,*) "Expand your grid! (x_min)"
+             if (tod(scan)%point(1,i,j) > x_max) write(*,*) "Expand your grid! (x_max)"
+             if (tod(scan)%point(2,i,j) < y_min) write(*,*) "Expand your grid! (y_min)"
+             if (tod(scan)%point(2,i,j) > y_max) write(*,*) "Expand your grid! (y_max)"
              p = min(max(nint((tod(scan)%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
              q = min(max(nint((tod(scan)%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
              tod(scan)%pixels(i,j) = (q-1)*map%n_x + p
@@ -124,7 +152,7 @@ contains
     do sb = 1, tod(1)%nsb
        do freq = 1, tod(1)%nfreq
           where(map%nhit(:,:,freq,sb) > 0)
-             map%rms(:,:,freq,sb) = sqrt(map%nhit(:,:,freq,sb))/sigma0(freq,sb)
+             map%rms(:,:,freq,sb) = map%rms(:,:,freq,sb) + map%nhit(:,:,freq,sb)/sigma0(freq,sb)**2
           elsewhere
              map%rms(:,:,freq,sb) = 0.d0
           end where
@@ -143,56 +171,77 @@ contains
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map, tod, alist, det, sb, freq)
+  subroutine binning(map_tot, map_scan, tod, alist)
     implicit none
-    type(tod_type), dimension(:), intent(in) :: tod
-    type(map_type),   intent(inout) :: map
+    type(tod_type),   intent(in)    :: tod
+    type(map_type),   intent(inout) :: map_tot, map_scan
     type(acceptlist), intent(in)    :: alist
-    integer(i4b),     intent(in)    :: det, sb, freq
 
+    integer(i4b) :: det, sb, freq, ndet, nsb, nfreq
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
     real(dp)     :: x_min, x_max, y_min, y_max
     real(dp), allocatable, dimension(:) :: dsum, div
 
-    x_min = map%x(1); x_max = map%x(map%n_x)
-    y_min = map%y(1); y_max = map%y(map%n_y)
+    x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
+    y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
 
-    allocate(dsum(map%n_x*map%n_y), div(map%n_x*map%n_y))
+    ndet = size(tod%d,4)
+    nsb = map_tot%nsb 
+    nfreq = map_tot%nfreq
 
     !write(*,*) 'Beginning coadding'
 
-    do scan = 1, size(tod)
-       !fs = 200 ! starting point
-       !st = tod(scan)%nsamp - 200 ! ending point
-       do i = 1, tod(scan)%nsamp
-       !do i = fs, st!tod%nsamp
-          if (alist%status(freq,det) == 0) then
-             if (tod(scan)%g(1,freq,sb,det) .ne. 0.d0) then
-                pix = tod(scan)%pixels(i,det)
-                !dsum(pix) = dsum(pix) + tod(scan)%g(1,freq,sb,det)    / tod(scan)%rms(i,freq,sb,det)**2 * tod(scan)%d(i,freq,sb,det)
-                !div(pix)  = div(pix)  + tod(scan)%g(1,freq,sb,det)**2 / tod(scan)%rms(i,freq,sb,det)**2
-                dsum(pix) = dsum(pix) + 1.d0    / tod(scan)%rms(i,freq,sb,det)**2 * tod(scan)%d(i,freq,sb,det)
-                div(pix)  = div(pix)  + 1.d0**2 / tod(scan)%rms(i,freq,sb,det)**2
-                !map%nhit(p,q,freq,sb) = map%nhit(p,q,freq,sb) + 1.d0
-
-             end if
-          end if
+    !fs = 200 ! starting point
+    !st = tod(scan)%nsamp - 200 ! ending point
+    do i = 1, tod%nsamp
+       do det = 1, ndet
+          if (.not. is_alive(det)) cycle
+          p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
+          q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+          write(*,*) map_tot%dthetax, map_tot%dthetay
+          do sb = 1, nsb
+             do freq = 1, nfreq
+!                if (alist%status(freq,det) == 0) then
+                   !write(*,*) tod%rms(i,freq,sb,det)
+                   map_scan%dsum(p,q,freq,sb) = map_scan%dsum(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
+                   map_scan%div(p,q,freq,sb) = map_scan%div(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2
+!                end if
+             end do
+          end do
        end do
     end do
-
-    do p = 1, map%n_x
-       do q = 1, map%n_y
-          map%dsum(p,q,freq,sb) = map%dsum(p,q,freq,sb) + dsum((q-1)*map%n_x + p)
-          map%div(p,q,freq,sb) = map%div(p,q,freq,sb) + div((q-1)*map%n_x + p)
-       end do
-    end do
-
-    deallocate(dsum, div)
-
+    map_tot%dsum = map_tot%dsum + map_scan%dsum
+    map_tot%div  = map_tot%div  + map_scan%div
 
     !write(*,*) 'Ending coadding'
 
   end subroutine binning
+
+
+  subroutine finalize_scan_binning(map)
+    implicit none
+    type(map_type), intent(inout) :: map
+    
+    integer(i4b) :: p, q
+
+    do p = 1, map%n_x
+       do q = 1, map%n_y
+          map%dsum(p,q,1,1) = sum(map%dsum(p,q,:,:))
+          map%div(p,q,1,1)  = sum(map%div(p,q,:,:))
+       end do
+    end do
+
+    where(map%nhit > 0)
+       map%m   = map%dsum / map%div
+       map%rms = 1.d0 / sqrt(map%div)!sqrt(map%rms) ! overwrite
+    elsewhere
+       map%m   = 0.d0
+       map%rms = 0.d0
+    end where
+
+  end subroutine finalize_scan_binning
+
+
 
   subroutine finalize_binning(map)
     implicit none

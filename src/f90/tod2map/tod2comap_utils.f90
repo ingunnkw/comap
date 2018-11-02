@@ -15,13 +15,14 @@ module tod2comap_utils
 
 contains
 
-  subroutine get_tod(l3file, tod)
+  subroutine get_tod(l3file, tod, parfile)
     implicit none
-    character(len=*), intent(in)    :: l3file
+    character(len=*), intent(in)    :: l3file, parfile
     type(tod_type),   intent(inout) :: tod
 
     integer(i4b) :: i, j, k, l
     real(dp)     :: nu_cut
+    logical(lgt) :: hifreq
     type(lx_struct) :: data
 
     nu_cut = 0.1d0
@@ -29,6 +30,8 @@ contains
     ! Read data
     call read_l3_file(l3file, data)
     call free_tod_type(tod)
+
+    call get_parameter(0, parfile, 'APPLY_HIGHPASS_FILTER', par_lgt=hifreq)
 
     tod%samprate = 50.d0 !data%samprate
     tod%nsamp = size(data%time)
@@ -52,7 +55,7 @@ contains
     tod%t = data%time; tod%f = data%nu
     tod%point = data%point!_cel ! call make_angles_safe(tod%point(1,:),maxang)
     tod%point_tel = data%point_tel
-    tod%g     = data%gain
+    !tod%g     = data%gain
     tod%sigma0 = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
@@ -71,7 +74,7 @@ contains
              ! Apply high pass filter
              tod%d(:,j,l,k) = tod%d_raw(:,j,l,k)
              !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
-             !call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
+             if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
              ! Estimate RMS
              tod%rms(:,j,l,k) = sqrt(variance(tod%d(:,j,l,k)))

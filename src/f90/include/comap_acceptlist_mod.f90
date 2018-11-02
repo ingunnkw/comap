@@ -25,9 +25,19 @@ module comap_acceptlist_mod
 
   type acceptlist
      integer(i4b) :: nfreq, ndet, nscan
+     integer(i4b),      dimension(:),   allocatable :: scans
      integer(i4b),      dimension(:,:), allocatable :: status  !(ndet, nscan)
      type(rejectfreqs), dimension(:,:), allocatable :: rf      !(ndet, nscan)
   end type acceptlist
+
+  type afreq
+     integer(i4b) :: n
+     integer(i4b), allocatable, dimension(:) :: rejected
+  end type afreq
+
+  type adet
+     type(afreq), allocatable, dimension(:,:) :: adet_sb
+  end type adet
 
   logical(lgt), private :: initialized = .false.
   integer(i4b), parameter :: REJECTED_NONE = 0, REJECTED_ALIST = 1, REJECTED_NOREASON = 2, REJECTED_TARGET = 3, REJECTED_SPLIT = 4
@@ -54,63 +64,110 @@ contains
 
   subroutine initialize_accept_list(filename, alist, default)
     implicit none
-    character(len=*)       :: filename
-    type(acceptlist)       :: alist
-    character(len=9)       :: sid
-    character(len=1024)    :: line
-    integer(i4b)           :: i, j, k, unit, det, snum, status, defval
-    integer(i4b)           :: numscans, numdets, numrej, rfreqs 
-    integer(i4b), optional :: default
-    integer(i4b), dimension(1:2*alist%nfreq) :: rejects
-    ! Is this a dummy wildcard file? If so, don't add anything, but
-    ! set the default value to be accept instead of reject.
-    !defval = REJECTED_ALIST; if(present(default)) defval = default
+    character(len=*)    :: filename
+    type(acceptlist)    :: alist
+    character(len=8)    :: sid
+    character(len=1024) :: line
+    integer(i4b)        :: i, j, k, l, unit, numscans, numdet, numsb, numrej, rfreq
+
     !call allocate_acceptlist(alist)
-    !if(filename == "*") then
-    !   call accept(alist)
-    !   return
-    !end if
-    alist%status = 0 ! Everything accepted as default
-    ! Read number of scans
+    
     unit = getlun()
-    open(unit,file=filename,action="read")
+    open(unit, file=filename, action="read")
+    ! Read number of scans
     do
-       read(unit,fmt="(a)",end=2) line
-       if(line(1:1) == '#') then 
+       read(unit, fmt="(a)", end=2) line
+       if (line(1:1) == '#') then
           cycle
        else
           read(line,*) numscans
+          !alist%nscan = numscans
+          allocate(alist%scans(numscans))
           exit
        end if
     end do
     ! Read rejections per scan
     do i = 1, numscans
-       read(unit,*) sid, numdets
-       snum = lookup_scan(sid)
-       do j = 1, numdets
-          ! Read number of rejected frequency ranges
-          read(unit,fmt="(a)",end=2) line
-          read(line,*) det, numrej
-          rfreqs=0
-          if (numrej /= 0) then
-             allocate(alist%rf(det,snum)%ranges(2,numrej))
-             alist%rf(det,snum)%numranges = numrej
-             read(line,*) det, numrej, rejects
-             do k = 1, numrej
-                alist%rf(det,snum)%ranges(1:2,k) = rejects(2*k-1:2*k) 
+       read(unit, fmt="a", end=2)
+       read(line,*) sid, numdet
+       do j = 1, numdet
+          read(unit, fmt="a", end=2)
+          read(line,*) det, numsb
+          do k = 1, numsb
+             read(unit, fmt="a", end=2)
+             read(line,*) sb, numrej
+             allocate(adet_sb(det,sb)%rejected(numrej))
+             do l = 1, numrej
+                read(unit, fmt="a", end=2)
+                read(line,*) rfreq
+                adet_sb(det,sb)%rejected(l) = rfreq
              end do
-             ! Count number of rejected frequencies
-             do k = 1, numrej
-                rfreqs = rfreqs + alist%rf(det,snum)%ranges(2,k)-alist%rf(det,snum)%ranges(1,k)+1
-             end do
-          end if
-          alist%rf(det,snum)%numrf = rfreqs
-          alist%status = rfreqs
-          alist%rf(det,snum)%ranges(3,k) = REJECTED_ALIST 
+          end do
        end do
     end do
-2   close(unit)
+
   end subroutine initialize_accept_list
+
+
+!  subroutine initialize_accept_list(filename, alist, default)
+!     implicit none
+!     character(len=*)       :: filename
+!     type(acceptlist)       :: alist
+!     character(len=9)       :: sid
+!     character(len=1024)    :: line
+!     integer(i4b)           :: i, j, k, unit, det, snum, status, defval
+!     integer(i4b)           :: numscans, numdets, numrej, rfreqs 
+!     integer(i4b), optional :: default
+!     integer(i4b), dimension(1:2*alist%nfreq) :: rejects
+!     ! Is this a dummy wildcard file? If so, don't add anything, but
+!     ! set the default value to be accept instead of reject.
+!     !defval = REJECTED_ALIST; if(present(default)) defval = default
+!     !call allocate_acceptlist(alist)
+!     !if(filename == "*") then
+!     !   call accept(alist)
+!     !   return
+!     !end if
+!     alist%status = 0 ! Everything accepted as default
+!     ! Read number of scans
+!     unit = getlun()
+!     open(unit,file=filename,action="read")
+!     do
+!        read(unit,fmt="(a)",end=2) line
+!        if(line(1:1) == '#') then 
+!           cycle
+!        else
+!           read(line,*) numscans
+!           exit
+!        end if
+!     end do
+!     ! Read rejections per scan
+!     do i = 1, numscans
+!        read(unit,*) sid, numdets
+!        snum = lookup_scan(sid)
+!        do j = 1, numdets
+!           ! Read number of rejected frequency ranges
+!           read(unit,fmt="(a)",end=2) line
+!           read(line,*) det, numrej
+!           rfreqs=0
+!           if (numrej /= 0) then
+!              allocate(alist%rf(det,snum)%ranges(2,numrej))
+!              alist%rf(det,snum)%numranges = numrej
+!              read(line,*) det, numrej, rejects
+!              do k = 1, numrej
+!                 alist%rf(det,snum)%ranges(1:2,k) = rejects(2*k-1:2*k) 
+!              end do
+!              ! Count number of rejected frequencies
+!              do k = 1, numrej
+!                 rfreqs = rfreqs + alist%rf(det,snum)%ranges(2,k)-alist%rf(det,snum)%ranges(1,k)+1
+!              end do
+!           end if
+!           alist%rf(det,snum)%numrf = rfreqs
+!           alist%status = rfreqs
+!           alist%rf(det,snum)%ranges(3,k) = REJECTED_ALIST 
+!        end do
+!     end do
+! 2   close(unit)
+!   end subroutine initialize_accept_list
 
   subroutine get_accepted_scans(alist, snums)
     implicit none

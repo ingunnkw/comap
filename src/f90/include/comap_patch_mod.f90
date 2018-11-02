@@ -84,8 +84,9 @@ contains
        if(name(1:1) == "#") cycle
        i = i+1
        pinfo(i)%name = name
-       pinfo(i)%obj_rad = orad * DEG2RAD
-       pinfo(i)%img_rad = irad * DEG2RAD
+       pinfo(i)%obj_rad = orad! * DEG2RAD
+       pinfo(i)%img_rad = irad! * DEG2RAD
+       pinfo(i)%resolution = res/60.d0
        pinfo(i)%priority = pri
        pinfo(i)%type     = objtype
        if(trim(theta) == "x" .or. trim(phi) == "x") then
@@ -95,8 +96,8 @@ contains
        else
           read(theta,*) pinfo(i)%pos(2)
           read(phi,*)   pinfo(i)%pos(1)
-          pinfo(i)%pos = pinfo(i)%pos * DEG2RAD
-          pinfo(i)%pos(2) = PI/2 - pinfo(i)%pos(2)
+          pinfo(i)%pos = pinfo(i)%pos! * DEG2RAD
+          !pinfo(i)%pos(2) = 90.d0 - pinfo(i)%pos(2)
           pinfo(i)%fixed = .true.
  !         pinfo(i)%eph = 0
        end if
@@ -112,7 +113,7 @@ contains
     type(patch_info) :: pinfos(:)
     integer(i4b)     :: i
     do i = size(pinfos), 1, -1
-       if(pinfos(i)%name == name) exit
+       if(trim(pinfos(i)%name) == trim(name)) exit
     end do
   end function
 

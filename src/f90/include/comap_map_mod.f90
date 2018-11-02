@@ -21,10 +21,11 @@ module comap_map_mod
 contains
 
   ! Writes an h5 file with maps/rms/nhit
-  subroutine output_map_h5(prefix,map)
+  subroutine output_map_h5(prefix,map, det, sb)
     implicit none
     character(len=*), intent(in)    :: prefix
     type(map_type),   intent(inout) :: map
+    integer(i4b), optional :: det, sb
 
     type(hdf_file)     :: file
     character(len=512) :: filename
@@ -35,18 +36,26 @@ contains
     call write_hdf(file, "n_y", map%n_y)
     call write_hdf(file, "x",   map%x)
     call write_hdf(file, "y",   map%y)
-    call write_hdf(file, "map", map%m)
-    call write_hdf(file, "rms", map%rms)
-    call write_hdf(file, "nhit", map%nhit)
+    if (present(det)) then
+       call write_hdf(file, "map", map%m(:,:,sb:sb,det:det))
+       call write_hdf(file, "rms", map%rms(:,:,sb:sb,det:det))
+       call write_hdf(file, "nhit", map%nhit(:,:,sb:sb,det:det))
+    else
+       call write_hdf(file, "map", map%m)
+       call write_hdf(file, "rms", map%rms)
+       call write_hdf(file, "nhit", map%nhit)
+    end if
     call write_hdf(file, "freq", map%freq)
     call write_hdf(file, "mean_az", map%mean_az)
     call write_hdf(file, "mean_el", map%mean_el)
     call write_hdf(file, "time", map%time)
     call close_hdf_file(file)
 
-    call free_map_type(map)
+    !call free_map_type(map)
 
   end subroutine output_map_h5
+
+
 
 
   ! Reads an h5 file
@@ -155,6 +164,18 @@ contains
     call free_map_type(map)
 
   end subroutine output_maps
+
+  subroutine nullify_map_type(map)
+    implicit none
+    type(map_type), intent(inout) :: map
+
+    map%m    = 0.d0
+    map%rms  = 0.d0
+    map%dsum = 0.d0
+    map%div  = 0.d0
+
+
+  end subroutine nullify_map_type
 
 
   subroutine free_map_type(map)
