@@ -24,10 +24,11 @@ module comap_acceptlist_mod
   end type rejectfreqs
 
   type acceptlist
-     integer(i4b) :: nfreq, ndet, nscan
+     integer(i4b) :: nfreq, nsb, ndet, nscan
      integer(i4b),      dimension(:),   allocatable :: scans
      integer(i4b),      dimension(:,:), allocatable :: status  !(ndet, nscan)
      type(rejectfreqs), dimension(:,:), allocatable :: rf      !(ndet, nscan)
+     type(adet),        dimension(:),   allocatable :: ascans
   end type acceptlist
 
   type afreq
@@ -62,13 +63,13 @@ contains
     if (allocated(alist%rf))     deallocate(alist%rf)
   end subroutine deallocate_acceptlist
 
-  subroutine initialize_accept_list(filename, alist, default)
+  subroutine initialize_accept_list(filename, alist)!, default)
     implicit none
     character(len=*)    :: filename
     type(acceptlist)    :: alist
     character(len=8)    :: sid
     character(len=1024) :: line
-    integer(i4b)        :: i, j, k, l, unit, numscans, numdet, numsb, numrej, rfreq
+    integer(i4b)        :: i, j, k, l, unit, numscans, numdet, det, numsb, sb, numrej, rfreq
 
     !call allocate_acceptlist(alist)
     
@@ -83,29 +84,31 @@ contains
           read(line,*) numscans
           !alist%nscan = numscans
           allocate(alist%scans(numscans))
+          allocate(alist%ascans(numscans))
           exit
        end if
     end do
     ! Read rejections per scan
     do i = 1, numscans
-       read(unit, fmt="a", end=2)
+       read(unit, fmt="(a)", end=2)
        read(line,*) sid, numdet
        do j = 1, numdet
-          read(unit, fmt="a", end=2)
+          read(unit, fmt="(a)", end=2)
           read(line,*) det, numsb
+          if (j == 1) allocate(alist%ascans(i)%adet_sb(numdet,numsb))
           do k = 1, numsb
-             read(unit, fmt="a", end=2)
+             read(unit, fmt="(a)", end=2)
              read(line,*) sb, numrej
-             allocate(adet_sb(det,sb)%rejected(numrej))
+             allocate(alist%ascans(i)%adet_sb(det,sb)%rejected(numrej))
              do l = 1, numrej
-                read(unit, fmt="a", end=2)
+                read(unit, fmt="(a)", end=2)
                 read(line,*) rfreq
-                adet_sb(det,sb)%rejected(l) = rfreq
+                alist%ascans(i)%adet_sb(det,sb)%rejected(l) = rfreq
              end do
           end do
        end do
     end do
-
+2   close(unit)
   end subroutine initialize_accept_list
 
 
@@ -169,77 +172,77 @@ contains
 ! 2   close(unit)
 !   end subroutine initialize_accept_list
 
-  subroutine get_accepted_scans(alist, snums)
-    implicit none
-    type(acceptlist)                        :: alist
-    integer(i4b), dimension(:), allocatable :: snums
-    integer(i4b)                            :: i, n
-    n = 0
-    do i = 1, size(alist%status,2)
-       if(any(alist%status(:,i) /= alist%nfreq)) n = n+1
-    end do
-    allocate(snums(n))
-    n = 0
-    do i = 1, size(alist%status,2)
-       if(any(alist%status(:,i) /= alist%nfreq)) then
-          n = n+1
-          snums(n) = i
-       end if
-    end do
-  end subroutine
+  ! subroutine get_accepted_scans(alist, snums)
+  !   implicit none
+  !   type(acceptlist)                        :: alist
+  !   integer(i4b), dimension(:), allocatable :: snums
+  !   integer(i4b)                            :: i, n
+  !   n = 0
+  !   do i = 1, size(alist%status,2)
+  !      if(any(alist%status(:,i) /= alist%nfreq)) n = n+1
+  !   end do
+  !   allocate(snums(n))
+  !   n = 0
+  !   do i = 1, size(alist%status,2)
+  !      if(any(alist%status(:,i) /= alist%nfreq)) then
+  !         n = n+1
+  !         snums(n) = i
+  !      end if
+  !   end do
+  ! end subroutine
 
-  subroutine get_amatrix_per_scan(alist, sid, amat)
-    implicit none
-    type(acceptlist)                          :: alist
-    character(len=9)                          :: sid
-    integer(i4b), dimension(:,:), allocatable :: amat
-    integer(i4b)                              :: det
-    integer(i4b), dimension(:), allocatable   :: avec
+  ! subroutine get_amatrix_per_scan(alist, sid, amat)
+  !   implicit none
+  !   type(acceptlist)                          :: alist
+  !   character(len=9)                          :: sid
+  !   integer(i4b), dimension(:,:), allocatable :: amat
+  !   integer(i4b)                              :: det
+  !   integer(i4b), dimension(:), allocatable   :: avec
 
-    ! allocate(amat(alist%nfreq,alist%ndet))
-    amat = 0;
-    allocate(avec(alist%nfreq))
-    do det = 1, alist%ndet
-       call get_avector_per_detscan(alist, det, sid, avec)
-       amat(:,det) = avec
-    end do
+  !   ! allocate(amat(alist%nfreq,alist%ndet))
+  !   amat = 0;
+  !   allocate(avec(alist%nfreq))
 
-  end subroutine get_amatrix_per_scan
+  !   do det = 1, alist%ndet
+  !      call get_avector_per_detscan(alist, det, sid, avec)
+  !      amat(:,det) = avec
+  !   end do
 
-  subroutine get_avector_per_detscan(alist, det, sid, avec)
-    implicit none
-    type(acceptlist)                          :: alist
-    integer(i4b)                              :: det
-    character(len=9)                          :: sid
-    integer(i4b), dimension(:), allocatable   :: avec
-    integer(i4b)                              :: i, snum
+  ! end subroutine get_amatrix_per_scan
+
+  ! subroutine get_avector_per_detscan(alist, det, sid, avec)
+  !   implicit none
+  !   type(acceptlist)                          :: alist
+  !   integer(i4b)                              :: det
+  !   character(len=9)                          :: sid
+  !   integer(i4b), dimension(:), allocatable   :: avec
+  !   integer(i4b)                              :: i, snum
     
-    !allocate(avec(alist%nfreq))
-    avec = 0;
-    snum = lookup_scan(sid)    
-    do i = 1, alist%rf(det,snum)%numranges
-       avec(alist%rf(det,snum)%ranges(1:2,i)) = avec(alist%rf(det,snum)%ranges(3,i))
-    end do
-  end subroutine get_avector_per_detscan
+  !   !allocate(avec(alist%nfreq))
+  !   avec = 0;
+  !   snum = lookup_scan(sid)    
+  !   do i = 1, alist%rf(det,snum)%numranges
+  !      avec(alist%rf(det,snum)%ranges(1:2,i)) = avec(alist%rf(det,snum)%ranges(3,i))
+  !   end do
+  ! end subroutine get_avector_per_detscan
 
-  function freq_is_accepted(alist, sid, det, freq) result(res)
+  ! function freq_is_accepted(alist, sid, det, freq) result(res)
+  !   implicit none
+  !   type(acceptlist)       :: alist
+  !   integer(i4b)           :: det, freq
+  !   character(len=9)       :: sid
+  !   logical(lgt)           :: res
+  !   integer(i4b)           :: snum
+  !   snum = lookup_scan(sid)
+  ! end function freq_is_accepted
+
+
+
+  function is_accepted(alist, sid, det, sb, freq) result(res)
     implicit none
     type(acceptlist)       :: alist
-    integer(i4b)           :: det, freq
     character(len=9)       :: sid
-    logical(lgt)           :: res
-    integer(i4b)           :: snum
-    snum = lookup_scan(sid)
-  end function freq_is_accepted
-
-
-
-
-  function is_accepted(alist, sid, det, freq) result(res)
-    implicit none
-    type(acceptlist)       :: alist
-    character(len=9)       :: sid
-    integer(i4b), optional :: det, freq
+    integer(i4b), optional :: det, sb, freq
     logical(lgt)           :: res
     integer(i4b)           :: snum
 
@@ -248,7 +251,7 @@ contains
     if (present(freq)) then
        !res  = alist%status(freq,det,snum) == REJECTED_NONE
     else
-       
+       !alist%ascans(snum)%adet_sb(det,sb)%rejected
 
     end if
 
