@@ -50,27 +50,28 @@ module comap_lx_mod
 
 contains
 
-  subroutine read_l1_file(filename, data, only_point)
+  subroutine read_l1_file(filename, data, n_trim, only_point)
     implicit none
     character(len=*), intent(in)           :: filename
     logical(lgt),     intent(in), optional :: only_point
+    integer(i4b),     intent(in)           :: n_trim
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
     integer(i4b)                           :: nsamp, nfreq, ndet, npoint, nsb, ext4(4), ext1(1)
     logical(lgt)                           :: all
     real(dp)                               :: t1, t2
-    real(sp), allocatable, dimension(:,:) :: buffer
+    integer(i4b), allocatable, dimension(:)       :: buffer_int
+    real(sp),     allocatable, dimension(:)       :: buffer_1d
+    real(sp),     allocatable, dimension(:,:,:,:) :: buffer_4d
     all = .true.; if (present(only_point)) all = .not. only_point
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod_l1", ext4)
-    nsamp = ext4(1); nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
+    nsamp = ext4(1)-n_trim; nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
     call get_size_hdf(file, "time_point", ext1)
     npoint = ext1(1)
              allocate(data%time(nsamp))
              allocate(data%time_point(npoint))
-!             allocate(data%point_tel(3,nsamp))
-!             allocate(data%point_cel(3,nsamp))
              allocate(data%point_tel(3,npoint,ndet))
              allocate(data%point_cel(3,npoint,ndet))
              allocate(data%scanmode_l1(npoint))
@@ -78,9 +79,13 @@ contains
     if (all) allocate(data%nu(nfreq,nsb,ndet))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
+    if (all) allocate(buffer_int(nsamp+n_trim))
+    if (all) allocate(buffer_1d(nsamp+n_trim))
+    if (all) allocate(buffer_4d(nsamp+n_trim,nfreq,nsb,ndet))
     call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
-    call read_hdf(file, "time",                 data%time)
+    call read_hdf(file, "time",                 buffer_1d)
+    data%time = buffer_1d(1:nsamp)
     call read_hdf(file, "time_point",           data%time_point)
     call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
@@ -88,7 +93,8 @@ contains
     call read_hdf(file, "pixels",               data%pixels)
     if (all) call read_hdf(file, "nu_l1",       data%nu)
     !call wall_time(t1)
-    if (all) call read_hdf(file, "tod_l1",      data%tod)
+    if (all) call read_hdf(file, "tod_l1",      buffer_4d)
+    if (all) data%tod = buffer_4d(1:nsamp,:,:,:)
 !!$    call wall_time(t2)
 !!$    write(*,*) 'tod = ', real(t2-t1,sp), ' sec'
 !!$
@@ -100,8 +106,10 @@ contains
 !!$    call mpi_finalize(nsamp)
 !!$    stop
 
-    if (all) call read_hdf(file, "flag",        data%flag)
+    if (all) call read_hdf(file, "flag",        buffer_int)
+    if (all) data%flag = buffer_int(1:nsamp)
     call close_hdf_file(file)
+    if (all) deallocate(buffer_1d,buffer_4d,buffer_int)
   end subroutine read_l1_file
 
 
