@@ -16,7 +16,7 @@ program l2gen
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
   character(len=9)     :: id_old
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, n_trim
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0
   real(dp)             :: todsize
@@ -29,15 +29,16 @@ program l2gen
   type(patch_info)     :: pinfo
 
   call getarg(1, parfile)
-  call get_parameter(unit, parfile, 'L2_SAMPRATE',              par_dp=samprate)
-  call get_parameter(unit, parfile, 'NUMFREQ',                  par_int=numfreq)
-  call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES',      par_lgt=reprocess)
-  call get_parameter(unit, parfile, 'DEBUG',                    par_int=debug)
-  call get_parameter(unit, parfile, 'SEED',                     par_int=seed)
-  call get_parameter(unit, parfile, 'FREQUENCY_MASK',           par_string=freqmaskfile)
-  call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',    par_dp=nu_gain)
-  call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA', par_dp=alpha_gain)
-  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',    par_int=bp_filter0)
+  call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
+  call get_parameter(unit, parfile, 'NUMFREQ',                   par_int=numfreq)
+  call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES',       par_lgt=reprocess)
+  call get_parameter(unit, parfile, 'DEBUG',                     par_int=debug)
+  call get_parameter(unit, parfile, 'SEED',                      par_int=seed)
+  call get_parameter(unit, parfile, 'FREQUENCY_MASK',            par_string=freqmaskfile)
+  call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',     par_dp=nu_gain)
+  call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA',  par_dp=alpha_gain)
+  call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',     par_int=bp_filter0)
+  call get_parameter(unit, parfile, 'TRIM_NUMSAMP_AT_ENDOFFILE', par_int=n_trim)
 
   check_existing = .true.
   call initialize_scan_mod(parfile)
@@ -77,7 +78,7 @@ program l2gen
      if (scan%id(1:6) /= id_old(1:6)) then
         call wall_time(t1)
         call free_lx_struct(data_l1)
-        call read_l1_file(scan%l1file, data_l1); call update_status(status, 'read_l1')
+        call read_l1_file(scan%l1file, data_l1, n_trim); call update_status(status, 'read_l1')
         call correct_missing_time_steps(data_l1%time_point)
         id_old = scan%id
         call wall_time(t2)
@@ -182,7 +183,7 @@ contains
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
-       !write(*,*) '    Normalizing gains for det = ', i
+       write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -614,8 +615,9 @@ contains
        if (.not. is_alive(k)) cycle
        do j = 1, nsb
           do i = 1, size(data_in%nu,1)
+             if (data_out%freqmask_full(i,j,k) == 0) cycle
              data_out%var_fullres(i,j,k) = variance(data_in%tod(:,i,j,k))
-             !write(58,*) i, data_out%var_fullres(i,j,k)
+             !write(58,*) k, j, i, data_out%var_fullres(i,j,k)
           end do
           !write(58,*)
        end do
@@ -624,9 +626,6 @@ contains
 !!$    call mpi_finalize(ierr)
 !!$    stop
 
-
-    
-    
     !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight,w)
     !$OMP DO SCHEDULE(guided)    
     do i = 1, nsamp_out
@@ -649,14 +648,15 @@ contains
                 data_out%tod(i,k,j,l) = 0.d0
                 weight                = 0.d0
                 do n = (k-1)*dnu+1, k*dnu
+                   if (data_out%freqmask_full(n,j,l) == 0) cycle
                    if (data_out%var_fullres(n,j,l) <= 0) then
                       w = 0.d0
                    else
                       w      = 1.d0 / data_out%var_fullres(n,j,l) * data_in%freqmask_full(n,j,l)
                    end if
-                   weight = weight + w !data_in%freqmask_full(n,j,l)
+                   weight = weight + w 
                    do m = (i-1)*dt+1, i*dt
-                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) !* data_in%freqmask_full(n,j,l)
+                      data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) 
                    end do
                 end do
                 if (weight > 0.d0) then
