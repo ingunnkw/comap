@@ -61,7 +61,7 @@ contains
     logical(lgt)                           :: all
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
-    real(sp),     allocatable, dimension(:)       :: buffer_1d
+    real(dp),     allocatable, dimension(:)       :: buffer_1d
     real(sp),     allocatable, dimension(:,:,:,:) :: buffer_4d
     all = .true.; if (present(only_point)) all = .not. only_point
     call free_lx_struct(data)

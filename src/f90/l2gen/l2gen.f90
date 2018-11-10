@@ -59,6 +59,7 @@ program l2gen
   if (nscan > npercore*nproc) npercore = npercore+1
   id_old  = ''
   do snum = myid*npercore+1, (myid+1)*npercore
+!  do snum = myid, nscan, nprocs
      if (snum > nscan) exit
      call get_scan_info(snum, scan)
      inquire(file=scan%l2file,exist=exist)
@@ -86,13 +87,22 @@ program l2gen
         write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
      end if
 
+!!$     write(*,*) myid, 'a'
+!!$     call mpi_barrier(mpi_comm_world, ierr)
+     
      ! Initialize frequency mask
-     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
+     call initialize_frequency_mask(freqmaskfile, numfreq, data_l1, data_l2_fullres, scan%id)
      call update_status(status, 'freq_mask')
+
+!!$     write(*,*) myid, 'b'
+!!$     call mpi_barrier(mpi_comm_world, ierr)
 
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
      call update_status(status, 'merge')
+
+!!$     write(*,*) myid, 'c'
+!!$     call mpi_barrier(mpi_comm_world, ierr)
 
      ! Elevation-gain renormalization for circular scans
 !     if (circular) call remove_elevation_gain(data_l2_fullres) 
@@ -116,11 +126,17 @@ program l2gen
         stop
      end if
 
+!!$     write(*,*) myid, 'd'
+!!$     call mpi_barrier(mpi_comm_world, ierr)
+
      ! Normalize gain
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
         call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
         call update_status(status, 'gain_norm')
      end if
+!!$     write(*,*) myid, 'e'
+!!$     call mpi_barrier(mpi_comm_world, ierr)
+
 !!$     open(58,file='tod3.dat')
 !!$     do i = 1, size(data_l2_fullres%tod,1)
 !!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
@@ -133,6 +149,9 @@ program l2gen
      bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
      call polyfilter_TOD(data_l2_fullres, bp_filter)
      call update_status(status, 'polyfilter')
+
+!!$     write(*,*) myid, 'f'
+!!$     call mpi_barrier(mpi_comm_world, ierr)
 
      ! Fourier transform frequency direction
      !call convert_GHz_to_k(data_l2_fullres(i))
@@ -179,15 +198,17 @@ contains
     samprate    = data_l2%samprate    
     n           = nsamp+1
 
-    allocate(dt(2*nsamp), dv(0:n-1))
+
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
+          !$OMP PARALLEL PRIVATE(k,l,dt,dv,nu)
+          allocate(dt(2*nsamp), dv(0:n-1))
+          !$OMP DO SCHEDULE(guided)
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
-
              dt(1:nsamp)            = data_l2%tod(:,k,j,i)
              dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
              call fft(dt, dv, 1)
@@ -200,9 +221,12 @@ contains
              data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp)
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
           end do
+          !$OMP END DO
+          deallocate(dt, dv)
+          !$OMP END PARALLEL
        end do
     end do
-    deallocate(dt, dv)
+
 
   end subroutine normalize_gain
 
@@ -240,6 +264,8 @@ contains
        do j = 1, nsb
           !write(*,*) 'Polyfiltering det, sb = ', i, j
 
+          if (all(data_l2%freqmask_full(:,j,i) == 0.d0)) cycle
+
           ! Pre-compute Cholesky factor of coupling matrix for current sideband
           do m = 0, p
              do n = 0, m
@@ -253,7 +279,11 @@ contains
           !$OMP DO SCHEDULE(guided)
           do k = 1, nsamp
              do m = 0, p
-                x(m) = sum(data_l2%tod(k,:,j,i)*T(:,m)*data_l2%freqmask_full(:,j,i))
+                x(m) = 0.d0
+                do l = 1, nfreq
+                   if (data_l2%freqmask_full(l,j,i) == 0.d0) cycle
+                   x(m) = x(m) + data_l2%tod(k,l,j,i)*T(l,m)
+                end do
              end do
              call dpotrs( 'L', p+1, 1, A, p+1, x, p+1, stat)
 
@@ -779,10 +809,11 @@ contains
 
   end subroutine correct_missing_time_steps
 
-  subroutine initialize_frequency_mask(freqmaskfile, nfreq, data)
+  subroutine initialize_frequency_mask(freqmaskfile, nfreq, data_l1, data, sid)
     implicit none
-    character(len=*),                                intent(in)    :: freqmaskfile
+    character(len=*),                                intent(in)    :: freqmaskfile, sid
     integer(i4b),                                    intent(in)    :: nfreq
+    type(Lx_struct),                                 intent(in)    :: data_l1
     type(Lx_struct),                                 intent(inout) :: data
     
 
@@ -837,6 +868,20 @@ contains
        if (.not. is_alive(k)) data%freqmask_full(:,:,k) = 0.d0
     end do
 
+    ! Exclude frequencies with any NaNs
+    do k = 1, ndet
+       do j = 1, nsb
+          do i = 1, nfreq_full
+             if (data%freqmask_full(i,j,k) == 0.d0) cycle
+             if (any(data_l1%tod(:,i,j,k) .ne. data_l1%tod(:,i,j,k))) then
+                write(*,fmt='(a,a,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
+                data%freqmask_full(i,j,k) = 0.d0
+             end if
+          end do
+       end do
+    end do
+    
+    ! Downgrade mask
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
        data%freqmask = data%freqmask_full
