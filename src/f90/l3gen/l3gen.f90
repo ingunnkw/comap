@@ -385,7 +385,7 @@ contains
     integer(i4b) :: ndet, nsb, nfreq, i, j, k, l, snum, p
     character(len=4) :: myid_text
     real(sp)     :: powspecs(:,:,:,:)
-    real(dp)     :: chisq, nsamp
+    real(dp)     :: chisq, nsamp, scale
     type(comap_scan_info) :: scan
     nsamp  = size(data%tod,1)
     nfreq  = size(data%tod,2)
@@ -394,6 +394,7 @@ contains
     allocate(data%sigma0(nfreq,nsb,ndet), data%alpha(nfreq,nsb,ndet), data%fknee(nfreq,nsb,ndet))
     call get_scan_info(snum, scan)
     call int2string(info%id, myid_text)
+    scale = 1.d0 / sqrt(abs(data%nu(1,1,1)-data%nu(2,1,1))*1d9/data%samprate)
     do i = 1, ndet
 !    do i = 2, 2 
        if (.not. is_alive(i)) then
@@ -417,8 +418,8 @@ contains
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                if (j == nfreq/2) write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
-                     & data%fknee(j,k,i), chisq
+                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0(j,k,i)/scale, data%alpha(j,k,i), &
+                     & data%fknee(j,k,i), chisq, '   '//trim(scan%object)
 !                call mpi_finalize(ierr)
 !                stop
 !                write(*,*) info%id, i, j, k, data%sigma0(j,k,i), data%alpha(j,k,i), &
@@ -451,8 +452,8 @@ contains
                    call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0_poly(j,k,i), &
                         & data%alpha_poly(j,k,i), data%fknee_poly(j,k,i), tod=real(data%tod_poly(:,j,k,i),dp), &
                         & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                   write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0_poly(j,k,i), data%alpha_poly(j,k,i), &
-                        & data%fknee_poly(j,k,i), chisq
+                   write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0_poly(j,k,i)/scale, data%alpha_poly(j,k,i), &
+                     & data%fknee_poly(j,k,i), chisq, '   '//trim(scan%object)//' (no poly)'
                 end if
              end do
           end do
