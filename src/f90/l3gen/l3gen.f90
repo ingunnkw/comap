@@ -430,7 +430,7 @@ contains
        p = data%polyorder
        allocate(data%sigma0_poly(0:p,nsb,ndet), data%alpha_poly(0:p,nsb,ndet), data%fknee_poly(0:p,nsb,ndet))
        do i = 1, ndet
-          if (.not. is_alive(i)) then
+          if (.true. .or. .not. is_alive(i)) then
              data%sigma0_poly(:,:,i) = 0.d0
              data%alpha_poly(:,:,i)  = 0.d0
              data%fknee_poly(:,:,i)  = 0.d0
