@@ -8,16 +8,19 @@ module comap_noise_estimation_mod
   implicit none
 
   real(dp),                            private :: samprate_int
-  integer(i4b),                        private :: ind_max
+  integer(i4b),                        private :: ind_min, ind_max
   real(dp), allocatable, dimension(:), private :: f, freqs
   real(dp), allocatable, dimension(:), private :: mask
 
   integer(i4b), private :: FIT_ALPHA  = 1
   integer(i4b), private :: FIT_F_KNEE = 2
+  real(dp),     private :: DEFAULT_ALPHA = -1.d0
+  real(dp),     private :: DEFAULT_FKNEE =  1.d0
 
-  integer(i4b), parameter, private :: npar = 2
+  logical(lgt) :: fit_param(2)
+
   real(dp),                private :: nu_low_wn, nu_high_wn
-  real(dp),                private :: prior(npar,2), f_scan_int(2), df_scan_int
+  real(dp),                private :: f_scan_int(2), df_scan_int
   logical(lgt),            private :: initialized = .false.
 
 contains
@@ -30,28 +33,23 @@ contains
     call get_parameter(0, parfile, 'NOISE_EST_LOW_NU', par_dp=nu_low_wn)
     call get_parameter(0, parfile, 'NOISE_EST_HIGH_NU', par_dp=nu_high_wn)
 
-    ! Set up priors
-    prior(FIT_ALPHA,1)   = -10.d0
-    prior(FIT_ALPHA,2)   = -0.1d0
-    prior(FIT_F_KNEE,1)  = 1.d-5
-    prior(FIT_F_KNEE,2)  = 1.d0
-    ! We're not using these anymore
-
     initialized = .true.
   end subroutine initialize_noise_estimation_mod
 
   subroutine fit_1overf_profile(samprate, f_scan, df_scan, sigma0, alpha, f_knee, tod, tod_ps, &
-       & snum, frequency, detector, chisq_out, apply_scanmask, refit, limits)
+       & snum, frequency, detector, chisq_out, apply_scanmask, refit, limits, fit_par)
     implicit none
 
     real(dp),                intent(in)            :: samprate, f_scan(2), df_scan
-    integer(i4b),            intent(in),  optional :: snum, frequency, detector, limits(2) 
+    real(dp),                intent(in),  optional :: limits(2)
+    integer(i4b),            intent(in),  optional :: snum, frequency, detector
+    logical(lgt),            intent(in),  optional :: fit_par(2)
     real(dp), dimension(1:),              optional :: tod, tod_ps
     real(dp),                intent(inout)         :: sigma0, alpha, f_knee 
     real(dp),                intent(out), optional :: chisq_out
     logical(lgt),            intent(in),  optional :: apply_scanmask, refit 
 
-    integer(i4b) :: i, j, n, m, numsamp, numbin, ind1, ind2, ierr, iter, numiter
+    integer(i4b) :: i, j, n, m, numsamp, numbin, ind1, ind2, ierr, iter, numiter, npar
     logical(lgt) :: accept, est_sigma0_from_low_freq, use_grid, apply_scanmask_, refit_ ! TMR
     real(dp)     :: alpha_min, alpha_max, f_knee_min, f_knee_max, dalpha, df_knee, nu, P_nu, &
          & dnu_wn, fret, gtol, sigma1
@@ -65,6 +63,7 @@ contains
 
     apply_scanmask_ = .true.; if(present(apply_scanmask)) apply_scanmask_ = apply_scanmask
     refit_ = .false.;         if(present(refit)) refit_ = refit 
+    fit_param = .true.;       if(present(fit_par)) fit_param = fit_par
 
     accept = .false.
     ! Check that the module isn't dead
@@ -132,7 +131,7 @@ contains
              mask(ind1:ind2) = 0.d0
           end do
        end if
-       if (f_scan_int(2) > 0.d0) then
+       if (.false. .and. f_scan_int(2) > 0.d0) then
           ind1   = 0
           ind2   = 0
           nu     = 0.d0
@@ -148,9 +147,22 @@ contains
     mask(n-1) = 0.d0
 
     if (present(limits)) then
-       mask(0:limits(1)) = 0.d0
-       mask(limits(2):n-1) = 0.d0
+       ind_min             = freq2ind(limits(1), samprate, n)
+       ind_max             = freq2ind(limits(2), samprate, n)
+       mask(0:ind_min-1)   = 0.d0
+       mask(ind_max+1:n-1) = 0.d0
+    else
+       ind_min = 1
+       ind_max = n-1 
     end if
+
+!!$    open(57,file='pow.dat')
+!!$    do i = 1, n-1
+!!$       write(57,*) freqs(i), f(i)!, sigma0**2 * (1 + (freqs(i)/f_knee)**alpha)
+!!$    end do
+!!$    close(57)
+!!$    call mpi_finalize(i)
+!!$    stop
 
 !!$    open(58,file='powspec_noise.dat')
 !!$    do i = 1, n
@@ -160,40 +172,37 @@ contains
 !!$    call mpi_finalize(i)
 !!$    stop
 
+    npar = count(fit_param)
+    allocate(p(npar))
 
-    allocate(p(0:npar-1))
+    ! Compute white noise solution
+    ind1    = max(nint(nu_low_wn / dnu_wn),2)
+    ind2    = min(nint(nu_high_wn / dnu_wn),n-2)
+    if (all(.not. fit_param)) then
+       ! Return white noise only
+       alpha   = -2.d0
+       f_knee  = 1d-6
+       sigma0  = sqrt(compute_sigma_sq(alpha, f_knee))
+       deallocate(p,f,mask,freqs)
+       return
+    end if
 
-    if (.not. refit_) then
-
-       ! This is the measured sigma0 in the signal region under the assumption
-       ! that we have no 1/f component. 
-       ind1    = max(nint(nu_low_wn / dnu_wn),2)
-       ind2    = min(nint(nu_high_wn / dnu_wn),n-2)
-       sigma1  = sqrt(sum(f(ind1:ind2)*mask(ind1:ind2)) / sum(mask(ind1:ind2)))
-       ind_max = n-1
-
-       p_full(0) = log(sigma1**2)    ! variance
-       p_full(1) = log(1.d0) ! f_knee
-       p_full(2) = log(2.d0) ! alpha
-
-    else
-       ! Refit: Do the noise fit on full filtered spectrum.
-       if(present(limits)) then
-          ind_max = limits(2)
-       else
-          ind_max = n-1 
-       end if
-       ! Using results from first fit as initial values for refit
-       p_full(0) = log(sigma0**2)    ! variance
-       p_full(1) = log(f_knee) ! f_knee
-       p_full(2) = log(-alpha) ! alpha
+    ! Initialize search parameters
+    i = 1
+    if (fit_param(1)) then
+       p(i) = log(DEFAULT_FKNEE) ! f_knee
+       i    = i+1
+    end if
+    if (fit_param(2)) then
+       p(i) = log(-DEFAULT_ALPHA) ! alpha
+       i    = i+1
     end if
 
     gtol = 1.d-5
     numiter = 5
     do i = 1, numiter
-       call dfpmin(p_full,gtol,iter,fret,lnL_noise_powell_full,dlnL_noise_powell_full, ierr=ierr)
-
+       call dfpmin(p,gtol,iter,fret,lnL_noise_powell_full,dlnL_noise_powell_full, ierr=ierr)
+       
        if (ierr == 1) then
           if (present(snum)) then
              write(*,*) 'Error: NaNs in noise fit -- {snum,freq,det} = ', snum, frequency, detector
@@ -204,22 +213,27 @@ contains
           sigma0 = 0; alpha = 0; f_knee = 0
           goto 101                                    ! This aborts the noise estimation
           stop
-       else if (ierr == 2) then
-          sigma0 = sqrt(exp(p_full(0)))
-          f_knee = exp(p_full(1))
-          alpha  = -exp(p_full(2))
+       else 
+          j = 1
+          if (fit_param(1)) then
+             f_knee = exp(p(j))
+             j      = j+1
+          else
+             f_knee = 1e-6
+          end if
+          if (fit_param(2)) then
+             alpha  = -exp(p(j))
+          else
+             alpha = DEFAULT_ALPHA
+          end if
+          sigma0 = sqrt(compute_sigma_sq(alpha, f_knee))
 
-          ! Check goodness-of-fit
-          ind1   = nint(0.2d0 / dnu_wn)
-          ind2   = nint(nu_high_wn / dnu_wn)
+          ! Check goodness-of-fit between 0.03 and 3 Hz
+          ind1   = nint(0.03d0 / dnu_wn)
+          ind2   = nint(3.00d0 / dnu_wn)
           accept = check_noise_fit(sigma0, alpha, f_knee, ind1, ind2, samprate, f, chisq)
           if(dtest(2) .and. abs(chisq) > 10.d0 .and. i == numiter) &
                & write(*,*) 'Warning: Noise fit did not converge properly. Estimates may be OK anyway'
-       else
-          sigma0 = sqrt(exp(p_full(0)))
-          f_knee = exp(p_full(1))
-          alpha  = -exp(p_full(2))
-          exit
        end if
     end do
     deallocate(p)
@@ -241,8 +255,8 @@ contains
 
     if (present(chisq_out)) then
        ! Check goodness-of-fit
-       ind1   = nint(0.2d0 / dnu_wn)
-       ind2   = nint(nu_high_wn / dnu_wn)
+       ind1   = nint(0.03d0 / dnu_wn)
+       ind2   = nint(3.00d0 / dnu_wn)
        accept = check_noise_fit(sigma0, alpha, f_knee, ind1, ind2, samprate, f, chisq)
        chisq_out = chisq
     end if
@@ -251,6 +265,79 @@ contains
     deallocate(mask, freqs)
 
   end subroutine fit_1overf_profile
+
+  function compute_sigma_sq(alpha, f_knee)
+    implicit none
+    real(dp), intent(in) :: alpha, f_knee
+    real(dp)             :: compute_sigma_sq
+    
+    integer(i4b) :: i
+    real(dp)     :: A, b, P_nu
+
+    A = 0.d0
+    b = 0.d0
+    do i = 1, ind_max
+       if(mask(i) == 0) cycle
+       P_nu  = 1.d0 + (freqs(i)/f_knee)**alpha
+       A     = A + P_nu * f(i)
+       b     = b + P_nu * P_nu
+    end do
+
+    compute_sigma_sq = A/b
+
+  end function compute_sigma_sq
+
+  function compute_dsigma0_dalpha(alpha, f_knee)
+    implicit none
+    real(dp), intent(in) :: alpha, f_knee
+    real(dp)             :: compute_dsigma0_dalpha
+    
+    integer(i4b) :: i
+    real(dp)     :: A, b, P_nu, dAda, dbda
+
+    A    = 0.d0
+    b    = 0.d0
+    dAda = 0.d0
+    dbda = 0.d0
+    do i = 1, ind_max
+       if(mask(i) == 0) cycle
+       P_nu  = 1.d0 + (freqs(i)/f_knee)**alpha
+       A     = A + P_nu * f(i)
+       b     = b + P_nu * P_nu
+
+       dAda = dAda + f(i) * (freqs(i)/f_knee)**alpha * log(freqs(i)/f_knee)
+       dbda = dbda + 2.d0 * P_nu * (freqs(i)/f_knee)**alpha * log(freqs(i)/f_knee)
+    end do
+
+    compute_dsigma0_dalpha = (dAda * b - A * dbda) / b**2
+
+  end function compute_dsigma0_dalpha
+
+  function compute_dsigma0_dfknee(alpha, f_knee)
+    implicit none
+    real(dp), intent(in) :: alpha, f_knee
+    real(dp)             :: compute_dsigma0_dfknee
+    
+    integer(i4b) :: i
+    real(dp)     :: A, b, P_nu, dAda, dbda
+
+    A    = 0.d0
+    b    = 0.d0
+    dAda = 0.d0
+    dbda = 0.d0
+    do i = 1, ind_max
+       if(mask(i) == 0) cycle
+       P_nu  = 1.d0 + (freqs(i)/f_knee)**alpha
+       A     = A + P_nu * f(i)
+       b     = b + P_nu * P_nu
+
+       dAda = dAda + f(i) * alpha * (freqs(i)/f_knee)**(alpha-1) * (-freqs(i)/f_knee**2)
+       dbda = dbda + 2.d0 * P_nu * alpha * (freqs(i)/f_knee)**(alpha-1) * (-freqs(i)/f_knee**2)
+    end do
+
+    compute_dsigma0_dfknee = (dAda * b - A * dbda) / b**2
+
+  end function compute_dsigma0_dfknee
 
   function lnL_noise_powell_full(p)
     use healpix_types
@@ -262,24 +349,35 @@ contains
     integer(i4b) :: i
     real(dp)     :: P_nu, alpha, f_knee, x, sigma_sq, ssum
 
-    sigma_sq =  exp(min(p(1),200.d0))
-    if (p(2) < -10.d0) then
-       f_knee = exp(-10.d0)
-    else if (p(2) > 3.d0) then
-       f_knee = exp(3.d0)
+    i = 1
+    if (fit_param(1)) then
+       if (p(i) < -10d0) then
+          f_knee = exp(-10.d0)
+       else if (p(i) > 3.d0) then
+          f_knee = exp(3.d0)
+       else
+          f_knee = exp(p(i))
+       end if
+       i      = i+1
     else
-       f_knee   =  exp(p(2))
+       f_knee = 1e-6
     end if
-    if (p(3) > 6.d0) then ! Avoid overflow
-       alpha = -exp(6.d0)
+    if (fit_param(2)) then
+       if (p(i) > 6.d0) then
+          alpha = -exp(6.d0)
+       else
+          alpha  = -exp(p(i))
+       end if
+       i      = i+1
     else
-       alpha    = -exp(p(3))
+       alpha = DEFAULT_ALPHA
     end if
 
-    if (f_knee > 25.d0 .or. alpha < -10.d0 .or. alpha > -1d-2 .or. sigma_sq < 1e-6) then
+    if (f_knee > 10.d0 .or. alpha < -10.d0 .or. alpha > -0.01d0) then
        lnL_noise_powell_full = 1.d30
        return
     end if
+    sigma_sq = compute_sigma_sq(alpha, f_knee)
 
     lnL_noise_powell_full = 0.d0
     !!$OMP PARALLEL PRIVATE(i,ssum,P_nu)
@@ -295,8 +393,10 @@ contains
     lnL_noise_powell_full = lnL_noise_powell_full  + ssum
     !!$OMP END PARALLEL
 
-    ! Add prior on alpha
+    ! Normalize for better numerical precision
     lnL_noise_powell_full = lnL_noise_powell_full / sum(mask(1:ind_max))
+
+    !write(*,*) real(sigma_sq,sp), real(alpha,sp), real(f_knee,sp), real(lnL_noise_powell_full,sp)
 
   end function lnL_noise_powell_full
 
@@ -307,23 +407,38 @@ contains
     real(dp), dimension(:), intent(in) :: p
     real(dp), dimension(size(p))        :: dlnL_noise_powell_full
 
-    integer(i4b) :: i
+    integer(i4b) :: i, j
     real(dp)     :: nu, P_nu, alpha, f_knee, x, dPda, dPdf, current_sigma0, &
-         & dS2da, dS2df, sigma_sq, dLdP, ssum(3)
+         & dS2da, dS2df, sigma_sq, dLdP, ssum(3), dsda, dsdf
 
-    sigma_sq =  exp(min(p(1),200.d0))
-    if (p(2) < -10.d0) then
-       f_knee = exp(-10.d0)
-    else if (p(2) > 3.d0) then
-       f_knee = exp(3.d0)
+    i = 1
+    if (fit_param(1)) then
+       if (p(i) < -10d0) then
+          f_knee = exp(-10.d0)
+       else if (p(i) > 3.d0) then
+          f_knee = exp(3.d0)
+       else
+          f_knee = exp(p(i))
+       end if
+       i      = i+1
     else
-       f_knee   =  exp(p(2))
+       f_knee = 1d-6
     end if
-    if (p(3) > 6.d0) then ! Avoid overflow
-       alpha = -exp(6.d0)
+    if (fit_param(2)) then
+       if (p(i) > 6.d0) then
+          alpha = -exp(6.d0)
+       else
+          alpha  = -exp(p(i))
+       end if
+       i      = i+1
     else
-       alpha    = -exp(p(3))
+       alpha = DEFAULT_ALPHA
     end if
+    sigma_sq = compute_sigma_sq(alpha, f_knee)
+
+    dsda = compute_dsigma0_dalpha(alpha, f_knee)
+    dsdf = compute_dsigma0_dfknee(alpha, f_knee)
+          
 
     dlnL_noise_powell_full = 0.d0
     !!$OMP PARALLEL PRIVATE(i,ssum,nu,P_nu,dLdP)
@@ -334,18 +449,33 @@ contains
        nu        = freqs(i)
        P_nu      = sigma_sq * (1.d0 + (nu/f_knee)**alpha)
        dLdP      = -f(i)/P_nu**2 + 1.d0 / P_nu
-       ssum(1)   = ssum(1) + dLdP * (1.d0 + (nu/f_knee)**alpha) * sigma_sq
-       ssum(2)   = ssum(2) - dLdP * sigma_sq * alpha * (nu/f_knee)**alpha
-       ssum(3)   = ssum(3) + dLdP * sigma_sq * alpha * (nu/f_knee)**alpha * log(nu/f_knee)
+
+       j = 1
+       if (fit_param(1)) then
+          ! dL/dtheta = dL/dP * dP/da * da/dtheta
+          ssum(j) = ssum(j) + dLdP * (sigma_sq * alpha * (nu/f_knee)**(alpha-1) * (-nu/f_knee**2) + dsdf * (1.d0+(nu/f_knee)**alpha)) * f_knee
+          j = j+1
+       end if
+
+       if (fit_param(2)) then
+          ssum(j) = ssum(j) + dLdP * (sigma_sq * (nu/f_knee)**alpha * log(nu/f_knee) + dsda * (1+(nu/f_knee)**alpha)) * alpha
+          !ssum(j) = ssum(j) - dLdP * sigma_sq * alpha * (nu/f_knee)**alpha 
+          !ssum(j) = ssum(j) - dLdP * dsda * (nu/f_knee)**alpha !* alpha
+       end if
     end do
     !!$OMP END DO
-    !!$OMP ATOMIC
-    dlnL_noise_powell_full(1) = dlnL_noise_powell_full(1)  + ssum(1)
-    dlnL_noise_powell_full(2) = dlnL_noise_powell_full(2)  + ssum(2)
-    dlnL_noise_powell_full(3) = dlnL_noise_powell_full(3)  + ssum(3)
+    do j = 1, size(p)
+       !!$OMP ATOMIC
+       dlnL_noise_powell_full(j) = dlnL_noise_powell_full(j)  + ssum(j)
+    end do
     !!$OMP END PARALLEL
 
     dlnL_noise_powell_full = dlnL_noise_powell_full / sum(mask(1:ind_max))
+
+!    write(*,*) real(alpha,sp), real(p(1),sp), '-0.0035964393', real(dlnL_noise_powell_full,sp)
+!    stop
+
+
   end function dlnL_noise_powell_full
 
 
