@@ -6,10 +6,11 @@ module tod2comap_utils
      real(dp)     :: samprate, Tsys
      integer(i4b) :: nsamp, ndet, nfreq, nsb
      real(dp)     :: fmin, fmax, df, mean_el, mean_az
+     real(sp), allocatable, dimension(:,:,:)   :: freqmask             ! (freq, sb, det)
      real(dp), allocatable, dimension(:)       :: t                    ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
      real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
-     real(dp), allocatable, dimension(:,:)     :: pixels            ! (sb, freq) or (time, det)
+     real(dp), allocatable, dimension(:,:)     :: pixels               ! (sb, freq) or (time, det)
      real(dp), allocatable, dimension(:,:,:)   :: point, point_tel     ! (det, 3, time)
   end type tod_type
 
@@ -50,7 +51,8 @@ contains
          & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%alpha(tod%nfreq, tod%nsb, tod%ndet))
+         & tod%alpha(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%freqmask(tod%nfreq, tod%nsb, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
     tod%point = data%point!_cel ! call make_angles_safe(tod%point(1,:),maxang)
@@ -59,6 +61,7 @@ contains
     tod%sigma0 = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
+    tod%freqmask = data%freqmask
     tod%mean_el = mean(data%point_tel(2,:,1)) ! Mean boresight
     tod%mean_az = mean(data%point_tel(1,:,1)) ! Mean boresight
     !write(*,*) shape(data%point), tod%nsamp
@@ -66,13 +69,14 @@ contains
     do k = 1, tod%ndet
        do l = 1, tod%nsb
           do j = 1, tod%nfreq
+             if (tod%freqmask(j,l,k) == 0) cycle
              !do j = 6, 6
              do i = 1, tod%nsamp
                 tod%d_raw(i,j,l,k) = data%tod(i,j,l,k)
              end do
 
              ! Apply high pass filter
-             tod%d(:,j,l,k) = tod%d_raw(:,j,l,k)
+             tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) - 1.d0 ! remove at some point
              !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
              if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 

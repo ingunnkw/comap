@@ -48,14 +48,18 @@ contains
     !map%dthetax = map%dthetay/abs(cos(map%mean_el*PI/180.d0))
     map%dthetax = map%dthetay/abs(cos(mean_dec*PI/180.d0))
 
+    x_min = 500.d0; x_max = -500.d0
+    y_min = 500.d0; y_max = -500.d0
+
     if (pinfo%fixed) then
-       x_min = pinfo%pos(1) - pinfo%obj_rad
+       x_min = pinfo%pos(1) - pinfo%obj_rad !- 30.d0*pad
        x_max = pinfo%pos(1) + pinfo%obj_rad !+ 40.d0*pad
        y_min = pinfo%pos(2) - pinfo%obj_rad !- 10.d0*pad
-       y_max = pinfo%pos(2) + pinfo%obj_rad
+       y_max = pinfo%pos(2) + pinfo%obj_rad !+ 30.d0*pad
     else
        do i = 1, size(tod)
           do j = 1, tod(i)%ndet
+             if (all(tod(i)%point(1:2,:,j) == 0.d0)) cycle
              temp = minval(tod(i)%point(1,:,j)) - pad
              if (temp .le. x_min) x_min = temp
              temp = maxval(tod(i)%point(1,:,j)) + pad
@@ -68,8 +72,17 @@ contains
        end do
     end if
 
-    !write(*,*) x_min, x_max
-    !write(*,*) y_min, y_max
+!!$    write(*,*) x_min, x_max
+!!$    write(*,*) y_min, y_max
+!!$    call mpi_finalize(i)
+!!$    stop
+
+!!$    do k = 1, size(tod)
+!!$       write(*,*) k, minval(tod(k)%point(1,:,:)), maxval(tod(k)%point(1,:,:))
+!!$       write(*,*) k, minval(tod(k)%point(2,:,:)), maxval(tod(k)%point(2,:,:))
+!!$    end do
+!!$    call mpi_finalize(i)
+!!$    stop
     
 
     !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) - pad
@@ -77,8 +90,6 @@ contains
     !write(*,*) map%dthetax, map%dthetay
     map%n_x = int((x_max-x_min)/map%dthetax); map%n_y = int((y_max-y_min)/map%dthetay)
     !write(*,*) map%n_x, map%n_y
-    !call mpi_finalize(i)
-    !stop
 
     allocate(map%x(map%n_x), map%y(map%n_y))
     do i = 1, map%n_x
@@ -127,8 +138,8 @@ contains
        do j = 1, tod(scan)%ndet
           if (.not. is_alive(j)) cycle
           do i = 1, tod(scan)%nsamp
-             if (tod(scan)%point(1,i,j) < x_min) write(*,*) "Expand your grid! (x_min)"
-             if (tod(scan)%point(1,i,j) > x_max) write(*,*) "Expand your grid! (x_max)"
+             if (tod(scan)%point(1,i,j) < x_min) write(*,*) "Expand your grid! (x_min)", scan, i,j,tod(scan)%point(1,i,j), x_min
+             if (tod(scan)%point(1,i,j) > x_max) write(*,*) "Expand your grid! (x_max)", scan, i,j,tod(scan)%point(1,i,j), x_max
              if (tod(scan)%point(2,i,j) < y_min) write(*,*) "Expand your grid! (y_min)"
              if (tod(scan)%point(2,i,j) > y_max) write(*,*) "Expand your grid! (y_max)"
              p = min(max(nint((tod(scan)%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
@@ -136,6 +147,7 @@ contains
              tod(scan)%pixels(i,j) = (q-1)*map%n_x + p
              do sb = 1, tod(scan)%nsb
                 do freq = 1, tod(scan)%nfreq
+                   if (tod(scan)%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
                    map%nhit(p,q,freq,sb) = map%nhit(p,q,freq,sb) + 1.d0
                    sigma0(freq,sb) = sigma0(freq,sb) + tod(scan)%sigma0(freq,sb,j)
@@ -171,7 +183,7 @@ contains
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map_tot, map_scan, tod, alist)
+  subroutine binning(map_tot, map_scan, tod, alist, scan)
     implicit none
     type(tod_type),   intent(in)    :: tod
     type(map_type),   intent(inout) :: map_tot, map_scan
@@ -198,14 +210,16 @@ contains
           if (.not. is_alive(det)) cycle
           p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
           q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
-          write(*,*) map_tot%dthetax, map_tot%dthetay
           do sb = 1, nsb
              do freq = 1, nfreq
-!                if (alist%status(freq,det) == 0) then
-                   !write(*,*) tod%rms(i,freq,sb,det)
-                   map_scan%dsum(p,q,freq,sb) = map_scan%dsum(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
-                   map_scan%div(p,q,freq,sb) = map_scan%div(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2
-!                end if
+                !if (tod%fknee(freq,sb,det) > 0.2d0) cycle
+                if (tod%freqmask(freq,sb,det) == 0) cycle
+                !write(*,*) i, det, sb, freq
+                !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
+                !write(*,*) tod%rms(i,freq,sb,det)
+                map_scan%dsum(p,q,freq,sb) = map_scan%dsum(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
+                map_scan%div(p,q,freq,sb) = map_scan%div(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2
+                !end if
              end do
           end do
        end do
@@ -231,7 +245,7 @@ contains
        end do
     end do
 
-    where(map%nhit > 0)
+    where(map%div > 0)
        map%m   = map%dsum / map%div
        map%rms = 1.d0 / sqrt(map%div)!sqrt(map%rms) ! overwrite
     elsewhere
@@ -247,7 +261,9 @@ contains
     implicit none
     type(map_type), intent(inout) :: map
 
-    where(map%nhit > 0)
+    write(*,*) count(map%div > 0)
+    where(map%div > 0)
+       !write(*,*) map%dsum, map%div
        map%m   = map%dsum / map%div
        map%rms = 1.d0 / sqrt(map%div) ! overwrite
     elsewhere
