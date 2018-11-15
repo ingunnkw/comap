@@ -48,13 +48,15 @@ program tod2comap
 
   call getarg(1, parfile)
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
-  call get_parameter(0,parfile, 'TARGET_NAME', par_string=object)
+  call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+  call get_parameter(0, parfile, 'ACCEPTLIST', par_string=acceptfile)
   binning_split = .true.
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
   !call get_parameter()
   call initialize_scan_mod(parfile, object)
   call initialize_comap_patch_mod(parfile)
   call initialize_detector_mod(parfile)
+  call initialize_accept_list(trim(acceptfile), alist)
   found = get_patch_info(object, pinfo)
   if (.not. found) then
      write(*,*) "Error: patch not found"
@@ -128,15 +130,14 @@ program tod2comap
 
      !if (binning_split) then
 
+        call time2pix(tod(i:i), map_scan)
         call time2pix(tod(i:i), map_tot)
         call nullify_map_type(map_scan)
         write(*,*) myid, "making maps, scan", i
         call binning(map_tot, map_scan, tod(i), alist, i)
         call finalize_scan_binning(map_scan)
-        do det = 1, tod(i)%ndet
-           prefix = trim(pre)//trim(scan%object)//'_'//scan%id//'_'//trim(itoa(det,2))
-           call output_map_h5(trim(prefix), map_scan, 1, det)
-        end do
+        prefix = trim(pre)//trim(scan%object)//'_'//scan%id
+        call output_map_h5(trim(prefix), map_scan)
         !call free_map_type(map_scan)
      !end if
 

@@ -69,9 +69,12 @@ contains
     type(acceptlist)    :: alist
     character(len=8)    :: sid
     character(len=1024) :: line
-    integer(i4b)        :: i, j, k, l, unit, numscans, numdet, det, numsb, sb, numrej, rfreq
+    integer(i4b)        :: i, j, k, l, unit, numscans, numdet, det, numsb, sb, numrej, rfreq, det_tot, sb_tot
 
     !call allocate_acceptlist(alist)
+
+    sb_tot = get_num_sideband()
+    det_tot = get_num_dets()
     
     unit = getlun()
     open(unit, file=filename, action="read")
@@ -90,19 +93,16 @@ contains
     end do
     ! Read rejections per scan
     do i = 1, numscans
-       read(unit, fmt="(a)", end=2)
-       read(line,*) sid, numdet
+       allocate(alist%ascans(i)%adet_sb(det_tot,sb_tot))
+       read(unit, *, end=2) sid, numdet 
        do j = 1, numdet
-          read(unit, fmt="(a)", end=2)
-          read(line,*) det, numsb
-          if (j == 1) allocate(alist%ascans(i)%adet_sb(numdet,numsb))
+          read(unit, *, end=2) det, numsb
           do k = 1, numsb
-             read(unit, fmt="(a)", end=2)
-             read(line,*) sb, numrej
+             read(unit, *, end=2) sb, numrej
+             !write(*,*) i, det, sb, numrej, allocated(alist%ascans(i)%adet_sb(det,sb)%rejected)
              allocate(alist%ascans(i)%adet_sb(det,sb)%rejected(numrej))
              do l = 1, numrej
-                read(unit, fmt="(a)", end=2)
-                read(line,*) rfreq
+                read(unit, *, end=2) rfreq
                 alist%ascans(i)%adet_sb(det,sb)%rejected(l) = rfreq
              end do
           end do
