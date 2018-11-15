@@ -244,6 +244,12 @@ contains
     samprate    = data_l2%samprate    
     n           = nsamp+1
 
+    if (nsamp == 0) then
+       allocate(data_l2%mean_tp(nfreq,nsb,ndet))
+       data_l2%mean_tp = 0.d0
+       return
+    end if
+
 
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
@@ -295,6 +301,12 @@ contains
     nsb         = size(data_l2%tod,3)
     ndet        = size(data_l2%tod,4)
     p           = bp_filter
+
+    if (nsamp == 0) then
+       allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
+       data_l2%tod_poly = 0.d0
+       return
+    end if
 
     allocate(T(nfreq,0:p), A(0:p,0:p), x(0:p))
     allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
@@ -555,13 +567,15 @@ contains
     
     ! Find start position
     ind(1) = 1
-    do while (data_l1%time(ind(1)) < mjd_min .and. ind(1) <= nsamp)
+    do while (ind(1) <= nsamp)
+       if (data_l1%time(ind(1)) > mjd_min) exit
        ind(1) = ind(1) + 1
     end do
     
     ! Find end position
     ind(2) = nsamp
-    do while (data_l1%time(ind(2)) > mjd_max .and. ind(2) >= 1)
+    do while (ind(2) >= 1)
+       if (data_l1%time(ind(2)) < mjd_max) exit
        ind(2) = ind(2) - 1
     end do
     
@@ -585,6 +599,7 @@ contains
     allocate(data_l2%tod(nsamp_tot, nfreq, nsb, ndet))
     allocate(data_l2%point_tel(3,nsamp_tot,ndet))
     allocate(data_l2%point_cel(3,nsamp_tot,ndet))
+    allocate(data_l2%pixels(ndet))
     !allocate(data_l2%flag(nsamp_tot))
 
     ! Merge L1 data
@@ -593,6 +608,7 @@ contains
     data_l2%samprate        = samprate
     data_l2%scanmode        = data_l1%scanmode_l1(1)
     data_l2%nu              = data_l1%nu
+    data_l2%pixels          = data_l1%pixels
     j                       = 1
 
     allocate(point_tel_spline(3), point_cel_spline(3))
@@ -668,6 +684,7 @@ contains
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
     allocate(data_out%var_fullres(size(data_in%nu,1),nsb,ndet))
+    allocate(data_out%pixels(ndet))
     if (allocated(data_in%mean_tp)) then
        data_out%mean_tp = data_in%mean_tp
     else
@@ -675,6 +692,7 @@ contains
     end if
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
+    data_out%pixels        = data_in%pixels
 
     ! Make angles safe for averaging
     do j = 1, ndet
@@ -689,6 +707,7 @@ contains
     !open(58,file='variance.dat')
 !    open(58,file='freqmask_2036.dat')
     do k = 1, ndet
+       if (nsamp_out == 0) cycle
        if (.not. is_alive(k)) cycle
        do j = 1, nsb
           do i = 1, size(data_in%nu,1)
