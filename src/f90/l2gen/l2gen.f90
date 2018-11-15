@@ -16,7 +16,7 @@ program l2gen
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
   character(len=9)     :: id_old
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, n_trim
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0
   real(dp)             :: todsize
@@ -38,7 +38,6 @@ program l2gen
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',     par_dp=nu_gain)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA',  par_dp=alpha_gain)
   call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',     par_int=bp_filter0)
-  call get_parameter(unit, parfile, 'TRIM_NUMSAMP_AT_ENDOFFILE', par_int=n_trim)
 
   check_existing = .true.
   call initialize_scan_mod(parfile)
@@ -72,14 +71,23 @@ program l2gen
      else if (exist .and. reprocess) then
         call rm(scan%l2file)
      end if
-     write(*,fmt="(i3,a,i4,a)") myid, " processing scan ", scan%sid, " (" // trim(itoa(snum)) // "/" // trim(itoa((myid+1)*npercore)) // ")"
+     write(*,fmt="(i3,a,a,a)") myid, " processing scan ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa((myid+1)*npercore)) // ")"
      call update_status(status, 'scan_start')
+
+     ! Initialize frequency mask
+     call free_lx_struct(data_l2_fullres)
+     call initialize_fullres_frequency_mask(freqmaskfile, data_l2_fullres)
+     call update_status(status, 'freq_mask1')
 
      ! Read in Level 1 file
      if (scan%id(1:6) /= id_old(1:6)) then
         call wall_time(t1)
         call free_lx_struct(data_l1)
-        call read_l1_file(scan%l1file, data_l1, n_trim); call update_status(status, 'read_l1')
+        call read_l1_file(scan%l1file, data_l1, scan%id, freqmask=data_l2_fullres%freqmask_full); call update_status(status, 'read_l1')
+        if (size(data_l1%tod,1) <100) then
+           write(*,*) 'Too few samples in ', scan%id
+           cycle
+        end if
         call correct_missing_time_steps(data_l1%time_point)
         id_old = scan%id
         call wall_time(t2)
@@ -89,10 +97,14 @@ program l2gen
 
 !!$     write(*,*) myid, 'a'
 !!$     call mpi_barrier(mpi_comm_world, ierr)
-     
-     ! Initialize frequency mask
-     call initialize_frequency_mask(freqmaskfile, numfreq, data_l1, data_l2_fullres, scan%id)
-     call update_status(status, 'freq_mask')
+
+     ! Interpolate over single NaNs
+     call interpolate_nans(data_l1, scan%id)
+     call update_status(status, 'nan_interp')
+
+     ! Finalize frequency mask
+     call postprocess_frequency_mask(numfreq, data_l1, data_l2_fullres, scan%id)
+     call update_status(status, 'freq_mask2')
 
 !!$     write(*,*) myid, 'b'
 !!$     call mpi_barrier(mpi_comm_world, ierr)
@@ -180,6 +192,40 @@ program l2gen
   call free_status(status)
 
 contains
+
+  subroutine interpolate_nans(data, id)
+    implicit none
+    type(Lx_struct),  intent(inout) :: data
+    character(len=*), intent(in)    :: id
+
+    integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, n
+
+    nsamp       = size(data%tod,1)
+    nfreq       = size(data%tod,2)
+    nsb         = size(data%tod,3)
+    ndet        = size(data%tod,4)
+
+    n = 0
+    do i = 1, ndet
+       do j = 1, nsb
+          do k = 1, nfreq
+             do l = 2, nsamp-1
+                if (data%tod(l,k,j,i) .ne. data%tod(l,k,j,i)) then
+                   ! Only interpolate over single missing NaNs, not multiple in a row; these must be dealt with
+                   ! in other ways
+                   if (data%tod(l-1,k,j,i) .eq. data%tod(l-1,k,j,i) .and. &
+                        & data%tod(l+1,k,j,i) .eq. data%tod(l+1,k,j,i)) then
+                      data%tod(l,k,j,i) = 0.5 * (data%tod(l-1,k,j,i)+data%tod(l+1,k,j,i))
+                      n                 = n+1
+                   end if
+                end if
+             end do
+          end do
+       end do
+    end do
+    if (n > 0) write(*,*) '  Interpolated over NaN samples in ', id, ', n = ', n
+
+  end subroutine interpolate_nans
 
   subroutine normalize_gain(data_l2, nu_gain, alpha_gain)
     implicit none
@@ -641,20 +687,25 @@ contains
 
     ! Compute variance per frequency channel
     !open(58,file='variance.dat')
+!    open(58,file='freqmask_2036.dat')
     do k = 1, ndet
        if (.not. is_alive(k)) cycle
        do j = 1, nsb
           do i = 1, size(data_in%nu,1)
-             if (data_out%freqmask_full(i,j,k) == 0) cycle
+             if (data_out%freqmask_full(i,j,k) == 0) then
+                data_out%var_fullres(i,j,k) = 2.8d-5
+                cycle
+             end if
              data_out%var_fullres(i,j,k) = variance(data_in%tod(:,i,j,k))
+!             if (data_out%var_fullres(i,j,k) > 2.8d-5) write(58,*) '   ', i, j, k
              !write(58,*) k, j, i, data_out%var_fullres(i,j,k)
           end do
           !write(58,*)
        end do
     end do
-    !close(58)
-!!$    call mpi_finalize(ierr)
-!!$    stop
+!    close(58)
+!    call mpi_finalize(ierr)
+!    stop
 
     !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight,w)
     !$OMP DO SCHEDULE(guided)    
@@ -809,13 +860,10 @@ contains
 
   end subroutine correct_missing_time_steps
 
-  subroutine initialize_frequency_mask(freqmaskfile, nfreq, data_l1, data, sid)
+  subroutine initialize_fullres_frequency_mask(freqmaskfile, data)
     implicit none
-    character(len=*),                                intent(in)    :: freqmaskfile, sid
-    integer(i4b),                                    intent(in)    :: nfreq
-    type(Lx_struct),                                 intent(in)    :: data_l1
+    character(len=*),                                intent(in)    :: freqmaskfile
     type(Lx_struct),                                 intent(inout) :: data
-    
 
     integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
     logical(lgt) :: first
@@ -832,7 +880,6 @@ contains
        if (line(1:1) == '#') cycle
        if (first) then
           read(line,*) nfreq_full
-          allocate(data%freqmask(nfreq,nsb,ndet))
           allocate(data%freqmask_full(nfreq_full,nsb,ndet))
           data%freqmask_full = 1.d0
           first = .false.
@@ -868,6 +915,24 @@ contains
        if (.not. is_alive(k)) data%freqmask_full(:,:,k) = 0.d0
     end do
 
+  end subroutine initialize_fullres_frequency_mask
+
+  subroutine postprocess_frequency_mask(nfreq, data_l1, data, sid)
+    implicit none
+    character(len=*),                                intent(in)    :: sid
+    integer(i4b),                                    intent(in)    :: nfreq
+    type(Lx_struct),                                 intent(in)    :: data_l1
+    type(Lx_struct),                                 intent(inout) :: data
+    
+
+    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
+    logical(lgt) :: first
+    character(len=1024) :: line, val, equal
+
+    ndet       = get_num_dets()
+    nsb        = get_num_sideband()
+    nfreq_full = size(data%freqmask_full,1)
+
     ! Exclude frequencies with any NaNs
     do k = 1, ndet
        do j = 1, nsb
@@ -882,6 +947,7 @@ contains
     end do
     
     ! Downgrade mask
+    allocate(data%freqmask(nfreq,nsb,ndet))
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
        data%freqmask = data%freqmask_full
@@ -896,7 +962,7 @@ contains
        end do
     end if
 
-  end subroutine initialize_frequency_mask
+  end subroutine postprocess_frequency_mask
 
   subroutine remove_elevation_gain(data) 
     implicit none

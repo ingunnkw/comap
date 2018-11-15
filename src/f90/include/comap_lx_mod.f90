@@ -50,15 +50,15 @@ module comap_lx_mod
 
 contains
 
-  subroutine read_l1_file(filename, data, n_trim, only_point)
+  subroutine read_l1_file(filename, data, id, only_point, freqmask)
     implicit none
-    character(len=*), intent(in)           :: filename
+    character(len=*), intent(in)           :: filename, id
     logical(lgt),     intent(in), optional :: only_point
-    integer(i4b),     intent(in)           :: n_trim
+    real(sp), dimension(:,:,:), intent(in), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
-    integer(i4b)                           :: nsamp, nfreq, ndet, npoint, nsb, ext4(4), ext1(1)
-    logical(lgt)                           :: all
+    integer(i4b)                           :: i, j, k, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1)
+    logical(lgt)                           :: all, ok
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
     real(dp),     allocatable, dimension(:)       :: buffer_1d
@@ -67,25 +67,17 @@ contains
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod_l1", ext4)
-    nsamp = ext4(1)-n_trim; nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
+    nsamp_tot = ext4(1); nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
     call get_size_hdf(file, "time_point", ext1)
     npoint = ext1(1)
-             allocate(data%time(nsamp))
              allocate(data%time_point(npoint))
              allocate(data%point_tel(3,npoint,ndet))
              allocate(data%point_cel(3,npoint,ndet))
              allocate(data%scanmode_l1(npoint))
              allocate(data%pixels(ndet))
     if (all) allocate(data%nu(nfreq,nsb,ndet))
-    if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
-    if (all) allocate(data%flag(nsamp))
-    if (all) allocate(buffer_int(nsamp+n_trim))
-    if (all) allocate(buffer_1d(nsamp+n_trim))
-    if (all) allocate(buffer_4d(nsamp+n_trim,nfreq,nsb,ndet))
     call read_hdf(file, "mjd_start",            data%mjd_start)
     call read_hdf(file, "samprate",             data%samprate)
-    call read_hdf(file, "time",                 buffer_1d)
-    data%time = buffer_1d(1:nsamp)
     call read_hdf(file, "time_point",           data%time_point)
     call read_hdf(file, "point_tel",            data%point_tel)
     call read_hdf(file, "point_cel",            data%point_cel)
@@ -93,8 +85,6 @@ contains
     call read_hdf(file, "pixels",               data%pixels)
     if (all) call read_hdf(file, "nu_l1",       data%nu)
     !call wall_time(t1)
-    if (all) call read_hdf(file, "tod_l1",      buffer_4d)
-    if (all) data%tod = buffer_4d(1:nsamp,:,:,:)
 !!$    call wall_time(t2)
 !!$    write(*,*) 'tod = ', real(t2-t1,sp), ' sec'
 !!$
@@ -106,10 +96,57 @@ contains
 !!$    call mpi_finalize(nsamp)
 !!$    stop
 
+    ! Do elements that may have NaNs
+    allocate(buffer_1d(nsamp_tot))
+    if (all) allocate(buffer_int(nsamp_tot))
+    if (all) allocate(buffer_4d(nsamp_tot,nfreq,nsb,ndet))
+
+    call read_hdf(file, "time",                 buffer_1d)
+    if (all) call read_hdf(file, "tod_l1",      buffer_4d)
     if (all) call read_hdf(file, "flag",        buffer_int)
+
+    ! Find number of samples at end of file with NaNs
+    if (present(freqmask)) then
+       nsamp = nsamp_tot
+       do while (nsamp > 0)
+          ok = .true.
+          do i = 1, ndet
+             do j = 1, nsb
+                do k = 1, nfreq
+                   if (freqmask(k,j,i) == 0.) cycle
+                   if (buffer_4d(nsamp,k,j,i) .ne. buffer_4d(nsamp,k,j,i)) then
+!                      write(*,*) nsamp, i, j, k, id, buffer_4d(nsamp,k,j,i) 
+                      ok = .false.
+                      exit
+                   end if
+                end do
+             end do
+          end do
+          if (ok) then
+             exit
+          else
+             nsamp = nsamp-1
+          end if
+       end do
+    else
+       nsamp = nsamp_tot
+    end if
+
+    if (nsamp /= nsamp_tot) then
+       write(*,*) '  Number of NaN elements in ', id, ' = ', nsamp_tot-nsamp, ' of ', nsamp_tot
+    end if
+
+             allocate(data%time(nsamp))
+    if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
+    if (all) allocate(data%flag(nsamp))
+
+    data%time = buffer_1d(1:nsamp)
     if (all) data%flag = buffer_int(1:nsamp)
+    if (all) data%tod = buffer_4d(1:nsamp,:,:,:)
+
     call close_hdf_file(file)
-    if (all) deallocate(buffer_1d,buffer_4d,buffer_int)
+    deallocate(buffer_1d)
+    if (all) deallocate(buffer_4d,buffer_int)
   end subroutine read_l1_file
 
 

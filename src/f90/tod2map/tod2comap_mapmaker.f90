@@ -19,7 +19,7 @@ contains
     type(patch_info),             intent(in)    :: pinfo
     character(len=*)                            :: parfile
 
-    integer(i4b) :: i, j, k, l, p, q, fs, st
+    integer(i4b) :: i, j, k, l, p, q, fs, st, ierr
     real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec
     real(8), parameter :: PI = 4*atan(1.d0)
 
@@ -40,9 +40,11 @@ contains
     if (pinfo%fixed) then 
        mean_dec = pinfo%pos(2)
     else 
+       mean_dec = 0.d0
        do i = 1, size(tod)
-          mean_dec = mean(tod(i)%point(2,:,1))
+          if (allocated(tod(i)%point)) mean_dec = mean_dec + mean(tod(i)%point(2,:,1))
        end do
+       call mpi_allreduce(MPI_IN_PLACE, mean_dec, 1, mpi_double_precision, mpi_sum, mpi_comm_world, ierr)
        mean_dec = mean_dec/size(tod)
     end if
     !map%dthetax = map%dthetay/abs(cos(map%mean_el*PI/180.d0))
@@ -58,6 +60,7 @@ contains
        y_max = pinfo%pos(2) + pinfo%obj_rad !+ 30.d0*pad
     else
        do i = 1, size(tod)
+          if (.not. allocated(tod(i)%point)) cycle
           do j = 1, tod(i)%ndet
              if (all(tod(i)%point(1:2,:,j) == 0.d0)) cycle
              temp = minval(tod(i)%point(1,:,j)) - pad
@@ -70,6 +73,10 @@ contains
              if (temp .ge. y_max) y_max = temp
           end do
        end do
+       call mpi_allreduce(MPI_IN_PLACE, x_min, 1, mpi_double_precision, mpi_min, mpi_comm_world, ierr)
+       call mpi_allreduce(MPI_IN_PLACE, x_max, 1, mpi_double_precision, mpi_max, mpi_comm_world, ierr)
+       call mpi_allreduce(MPI_IN_PLACE, y_min, 1, mpi_double_precision, mpi_min, mpi_comm_world, ierr)
+       call mpi_allreduce(MPI_IN_PLACE, y_max, 1, mpi_double_precision, mpi_max, mpi_comm_world, ierr)
     end if
 
 !!$    write(*,*) x_min, x_max

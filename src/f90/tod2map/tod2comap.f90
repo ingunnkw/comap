@@ -144,7 +144,6 @@ program tod2comap
 
   end do
 
-  
   call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
   call mpi_reduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
 
@@ -152,6 +151,7 @@ program tod2comap
   if (myid == 0) then
      map_tot%div = buffer%div
      map_tot%dsum = buffer%dsum
+     write(*,*) 'sum', sum(abs(map_tot%dsum)), sum(abs(map_tot%div))
      write(*,*) "Finalising"
      call finalize_binning(map_tot)
      prefix = trim(pre)//trim(scan%object)
