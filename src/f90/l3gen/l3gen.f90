@@ -29,17 +29,17 @@ program l3gen
      integer(i4b)       :: id, nproc
   end type info_struct
 
-  character(len=512)    :: parfile, odir, outfile
+  character(len=512)    :: parfile, odir, outfile, tsys_loc, freqmaskfile
   character(len=512)    :: lockfile, tmpfile, point_objs, tilt_file, offset_mask_file, coord_out
   integer(i4b)          :: ierr, snum, nmod, i, j, isys, osys, mod, nside_l3, debug
-  integer(i4b)          :: num_corr_bins, nscan
+  integer(i4b)          :: num_corr_bins, nscan, numfreq, unit
   real(dp)              :: fix_highpass_freq_scan, fix_lowpass_freq, t1, t2, scanmask_width
   real(dp)              :: scanfreq_min, scanfreq_max
   logical(lgt)          :: reprocess, exist, scanmask, inter_module, no_filters, use_templates, found
   type(task_list)       :: tasks
   type(info_struct)     :: info
   type(comap_scan_info) :: scan
-  type(lx_struct)       :: data
+  type(lx_struct)       :: data, data_l2_fullres
   type(patch_info)      :: pinfo
   real(sp),     dimension(:,:,:,:), allocatable :: powspecs
   complex(spc), dimension(:,:,:,:), allocatable :: ffts
@@ -47,6 +47,10 @@ program l3gen
 
   call getarg(1, parfile)
   call get_parameter(0, parfile, 'OUTPUT_DIR',           par_string=odir)
+  call get_parameter(0, parfile, 'TSYS_LOC',             par_string=tsys_loc)
+  call get_parameter(unit, parfile, 'FREQUENCY_MASK',    par_string=freqmaskfile)
+  call get_parameter(unit, parfile, 'NUMFREQ',           par_int=numfreq)
+
   call get_parameter(0, parfile, 'REPROCESS_ALL_FILES',  par_lgt=reprocess)
   call get_parameter(0, parfile, 'DEBUG',                par_int=debug)
   call get_parameter(0, parfile, 'L3_FAST',              par_lgt=no_filters, desc=&
@@ -123,6 +127,12 @@ program l3gen
      ! Read L2 data
      call read_L2_file(scan%l2file, data)     ; call dmem("read l2")
 
+     ! Initialize frequency mask                                                                                                               \
+                                                                                                                                                
+     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
+     call apply_gain_cal(tsys_loc,data)
+
+
      ! Process it
      !call calc_weather_template(data)         ; call dmem("weather")
      call calc_point (data,  isys, osys)      ; call dmem("point")
@@ -161,6 +171,160 @@ program l3gen
 
   write(*,*) 'Time elapsed: ', t2-t1
 contains
+
+  subroutine initialize_frequency_mask(freqmaskfile, nfreq, data)
+    implicit none
+    character(len=*),                                intent(in)    :: freqmaskfile
+    integer(i4b),                                    intent(in)    :: nfreq
+    type(Lx_struct),                                 intent(inout) :: data
+
+
+    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
+    logical(lgt) :: first
+    character(len=1024) :: line, val, equal
+
+    ndet = get_num_dets()
+    nsb  = get_num_sideband()
+    unit = getlun()
+    open(unit, file=trim(freqmaskfile), recl=1024)
+    first = .true.
+    do while (.true.)
+       read(unit,'(a)', end=99) line
+       line = trim(adjustl(line))
+       if (line(1:1) == '#') cycle
+       if (first) then
+          read(line,*) nfreq_full
+          allocate(data%freqmask(nfreq,nsb,ndet))
+          allocate(data%freqmask_full(nfreq_full,nsb,ndet))
+          data%freqmask_full = 1.d0
+          first = .false.
+       else
+          read(line,*) freq, sb, det
+          if (det == 0 .and. sb == 0 .and. freq == 0) then
+             write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             stop
+          else if (det == 0 .and. sb == 0) then
+             data%freqmask_full(freq,:,:) = 0.d0
+          else if (det == 0 .and. freq == 0) then
+             data%freqmask_full(:,sb,:) = 0.d0
+          else if (sb == 0 .and. freq == 0) then
+             data%freqmask_full(:,:,det) = 0.d0
+          else if (det == 0) then
+             data%freqmask_full(freq,sb,:) = 0.d0
+          else if (sb == 0) then
+             data%freqmask_full(freq,:,det) = 0.d0
+          else if (freq == 0) then
+             data%freqmask_full(:,sb,det) = 0.d0
+          else
+             data%freqmask_full(freq,sb,det) = 0.d0
+          end if
+          if (all(data%freqmask_full == 0)) then
+             write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             stop
+             stop
+          end if
+       end if
+    end do
+99  close(unit)
+
+    do k = 1, ndet
+       if (.not. is_alive(k)) data%freqmask_full(:,:,k) = 0.d0
+    end do
+
+    dfreq = nfreq_full/nfreq
+    if (dfreq == 1) then
+       data%freqmask = data%freqmask_full
+    else
+       data%freqmask = 1.
+       do k = 1, ndet
+          do j = 1, nsb
+             do i = 1, nfreq
+                if (all(data%freqmask_full((i-1)*dfreq+1:i*dfreq,j,k) == 0.d0)) data%freqmask(i,j,k) = 0.0
+             end do
+          end do
+       end do
+    end if
+
+  end subroutine initialize_frequency_mask
+
+  subroutine apply_gain_cal(tsys_file, data)
+    implicit none
+    character(len=*),            intent(in)       :: tsys_file
+    type(Lx_struct),             intent(inout)    :: data
+    type(hdf_file)                                :: file
+    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres, tsys_binned
+    integer(i4b)                                  :: nfreq, nsb, ndet, i, j, k, l, mjd_index 
+    integer(i4b)                                  :: nsamp(7), num_bin, n
+    real(dp)                                      :: mjd_start, mjd_high,w, sum_w_t, sum_w, t1, t2
+    real(dp), dimension(:), allocatable           :: time
+    ! 1) get tsys-values                                                                                                                       \
+                                                                                                                                                
+    call open_hdf_file(tsys_file, file, "r")
+    call read_hdf(file, "ndet", ndet)
+    call read_hdf(file, "nfreq", nfreq)
+    call read_hdf(file, "nsb", nsb)
+    call get_size_hdf(file, "MJD", nsamp)
+
+    allocate(tsys_fullres(nsamp(1), nfreq,nsb,ndet))
+    allocate(tsys_binned(nsamp(1), 64, nsb, ndet))
+    allocate(time(nsamp(1)))
+
+    call read_hdf(file, "MJD", time)
+    call read_hdf(file, "tsys", tsys_fullres)
+    call close_hdf_file(file)
+
+    ! finding closest time-value                                                                                                               \
+                                                                                                                                                
+    mjd_start = data%mjd_start
+    mjd_high = 1.d10
+    mjd_index = 10000000
+    do i = 1, nsamp(1)
+       if (abs(mjd_start-time(i)) < mjd_high) then
+          mjd_high = abs(mjd_start-time(i))
+          mjd_index = i
+       end if
+    end do
+
+    do i=1, ndet
+       if (.not. is_alive(i)) cycle
+       do j=1, nsb
+          num_bin = 1
+          l = 1
+          sum_w_t = 0
+          sum_w = 0
+
+          do k=1, nfreq
+             if (l == 16) then
+                if (sum_w > 0.d0) then
+                   data%tod(:,num_bin,j,i) = data%tod(:,num_bin,j,i)*sum_w_t/sum_w
+                else
+                   data%tod(:,num_bin,j,i) = 0
+                end if
+
+                sum_w_t = 0
+                sum_w = 0
+                l = 0
+                num_bin = num_bin + 1
+             end if
+             if (data%var_fullres(k,j,i) <= 0) then
+                w = 0.d0
+             else
+                w = 1.d0/data%var_fullres(k,j,i)*data_l2_fullres%freqmask_full(k,j,i)
+             end if
+             sum_w_t = sum_w_t + w*tsys_fullres(mjd_index,k,j,i)
+             sum_w = sum_w + w
+
+             l = l+1
+
+          end do
+       end do
+    end do
+
+  deallocate(tsys_fullres)
+  deallocate(tsys_binned)
+  deallocate(time)
+
+  end subroutine apply_gain_cal
 
 
   subroutine apply_az_filter(data)
