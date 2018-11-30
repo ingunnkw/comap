@@ -76,7 +76,7 @@ contains
              end do
 
              ! Apply high pass filter
-             tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) - 1.d0 ! remove at some point
+             tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) !- 1.d0 ! remove at some point
              !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
              if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 

@@ -54,10 +54,10 @@ contains
     y_min = 500.d0; y_max = -500.d0
 
     if (pinfo%fixed) then
-       x_min = pinfo%pos(1) - pinfo%obj_rad !- 30.d0*pad
-       x_max = pinfo%pos(1) + pinfo%obj_rad !+ 40.d0*pad
-       y_min = pinfo%pos(2) - pinfo%obj_rad !- 10.d0*pad
-       y_max = pinfo%pos(2) + pinfo%obj_rad !+ 30.d0*pad
+       x_min = pinfo%pos(1) - pinfo%obj_rad 
+       x_max = pinfo%pos(1) + pinfo%obj_rad 
+       y_min = pinfo%pos(2) - pinfo%obj_rad 
+       y_max = pinfo%pos(2) + pinfo%obj_rad 
     else
        do i = 1, size(tod)
           if (.not. allocated(tod(i)%point)) cycle
@@ -219,10 +219,10 @@ contains
           q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
           do sb = 1, nsb
              do freq = 1, nfreq
-                !if (tod%fknee(freq,sb,det) > 0.2d0) cycle
+                if (tod%fknee(freq,sb,det) > 0.2d0) cycle
                 if (tod%freqmask(freq,sb,det) == 0) cycle
                 !write(*,*) i, det, sb, freq
-                !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
+                if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                 !write(*,*) tod%rms(i,freq,sb,det)
                 map_scan%dsum(p,q,freq,sb) = map_scan%dsum(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
                 map_scan%div(p,q,freq,sb) = map_scan%div(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2
