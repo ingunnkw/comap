@@ -418,7 +418,7 @@ contains
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), limits=[0.01d0,5.d0], &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask, fit_par=[.true.,.false.])
-                if (.true. .or. j == nfreq/2) write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0(j,k,i)/scale, data%alpha(j,k,i), &
+                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0(j,k,i)/scale, data%alpha(j,k,i), &
                      & data%fknee(j,k,i), chisq, '   '//trim(scan%object)
              end if
           end do
