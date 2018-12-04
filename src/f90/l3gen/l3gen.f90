@@ -127,9 +127,10 @@ program l3gen
      ! Read L2 data
      call read_L2_file(scan%l2file, data)     ; call dmem("read l2")
 
-     ! Initialize frequency mask                                                                                                               \
-                                                                                                                                                
-     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
+     ! Initialize frequency mask
+     !call initialize_frequency_mask(freqmaskfile, numfreq, data)
+
+     ! Apply gain calibration
      call apply_gain_cal(tsys_loc,data)
 
 
@@ -309,7 +310,7 @@ contains
              if (data%var_fullres(k,j,i) <= 0) then
                 w = 0.d0
              else
-                w = 1.d0/data%var_fullres(k,j,i)*data_l2_fullres%freqmask_full(k,j,i)
+                w = 1.d0/data%var_fullres(k,j,i)*data%freqmask_full(k,j,i)
              end if
              sum_w_t = sum_w_t + w*tsys_fullres(mjd_index,k,j,i)
              sum_w = sum_w + w
