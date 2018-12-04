@@ -130,21 +130,18 @@ program l3gen
      ! Initialize frequency mask
      !call initialize_frequency_mask(freqmaskfile, numfreq, data)
 
-     ! Apply gain calibration
-     call apply_gain_cal(tsys_loc,data)
-
-
      ! Process it
      !call calc_weather_template(data)         ; call dmem("weather")
      call calc_point (data,  isys, osys)      ; call dmem("point")
      !call calc_objrel(data,  point_objs)      ; call dmem("objrel")
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
+        call apply_gain_cal(tsys_loc,data)
         call calc_scanfreq(data);                ; call dmem("scanfreq")
         !call apply_az_filter(data)               ; call dmem("az_filter")
         call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
         call fit_noise(data, powspecs, snum)     ; call dmem("noise")
-        call calc_gain(data)                     ; call dmem("gain")
+        !call calc_gain(data)                     ; call dmem("gain")
         deallocate(ffts, powspecs)
      end if
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
@@ -286,6 +283,10 @@ contains
        end if
     end do
 
+
+    allocate(data%gain(1,nfreq,nsb,ndet), data%time_gain(1))
+    data%time_gain(1) = mjd_start
+
     do i=1, ndet
        if (.not. is_alive(i)) cycle
        do j=1, nsb
@@ -296,6 +297,7 @@ contains
 
           do k=1, nfreq
              if (l == 16) then
+                data%gain(1,k,j,i) = sum_w_t/sum_w
                 if (sum_w > 0.d0) then
                    data%tod(:,num_bin,j,i) = data%tod(:,num_bin,j,i)*sum_w_t/sum_w
                 else
@@ -572,19 +574,28 @@ contains
 !       do k = 1, 1
           do j = 1, nfreq      
 !          do j = 56, 56
+             if (data%gain(1,j,k,i) == 0) then
+                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,a)') scan%id, i, k, j, ' -- zero Tsys'
+                cycle
+             end if
              if (.false.) then
                 ! White noise 
                 data%sigma0(j,k,i) = sqrt(variance(data%tod(:,j,k,i)))
                 data%alpha(j,k,i)  = -10.d0
                 data%fknee(j,k,i)  = 1d-6
                 chisq = (sum((data%tod(:,j,k,i)/data%sigma0(j,k,i))**2)-nsamp)/sqrt(2.d0*nsamp)
-                write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i)
+                write(*,fmt='(4i8,e10.2,3f10.3)') info%id, i, j, k, data%sigma0(j,k,i)
              else
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), limits=[0.01d0,5.d0], &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask, fit_par=[.true.,.false.])
-                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0(j,k,i)/scale, data%alpha(j,k,i), &
-                     & data%fknee(j,k,i), chisq, '   '//trim(scan%object)
+                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,f10.3,2f8.3,f8.1,f8.3,a)') scan%id, i, k, j, &
+                     & data%sigma0(j,k,i)/scale/data%gain(1,j,k,i), data%alpha(j,k,i), &
+                     & data%fknee(j,k,i), data%gain(1,j,k,i), chisq, '   '//trim(scan%object)
+!!$                write(*,*) scan%id, i, k, j, &
+!!$                     & data%sigma0(j,k,i)/scale/data%gain(1,j,k,i), data%alpha(j,k,i), &
+!!$                     & data%fknee(j,k,i), data%gain(1,j,k,i), chisq, '   '//trim(scan%object)
+!!$                stop
              end if
           end do
        end do
@@ -613,7 +624,7 @@ contains
                    call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0_poly(j,k,i), &
                         & data%alpha_poly(j,k,i), data%fknee_poly(j,k,i), tod=real(data%tod_poly(:,j,k,i),dp), &
                         & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                   write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0_poly(j,k,i)/scale, data%alpha_poly(j,k,i), &
+                   write(*,fmt='(a,i4,i3,i6,3f8.3,f8.3,a)') scan%id, i, k, j, data%sigma0_poly(j,k,i)/scale, data%alpha_poly(j,k,i), &
                      & data%fknee_poly(j,k,i), chisq, '   '//trim(scan%object)//' (no poly)'
                 end if
              end do

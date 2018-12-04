@@ -229,7 +229,7 @@ contains
           sigma0 = sqrt(compute_sigma_sq(alpha, f_knee))
 
           ! Check goodness-of-fit between 0.03 and 3 Hz
-          ind1   = nint(0.03d0 / dnu_wn)
+          ind1   = max(nint(0.03d0 / dnu_wn),2)
           ind2   = nint(3.00d0 / dnu_wn)
           accept = check_noise_fit(sigma0, alpha, f_knee, ind1, ind2, samprate, f, chisq)
           if(dtest(2) .and. abs(chisq) > 10.d0 .and. i == numiter) &
@@ -255,7 +255,7 @@ contains
 
     if (present(chisq_out)) then
        ! Check goodness-of-fit
-       ind1   = nint(0.03d0 / dnu_wn)
+       ind1   = max(nint(0.03d0 / dnu_wn),2)
        ind2   = nint(3.00d0 / dnu_wn)
        accept = check_noise_fit(sigma0, alpha, f_knee, ind1, ind2, samprate, f, chisq)
        chisq_out = chisq

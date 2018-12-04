@@ -270,7 +270,7 @@ contains
                 dv(l) = dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
              end do
              call fft(dt, dv, -1)
-             data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp)
+             data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp) - 1.d0 
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
           end do
           !$OMP END DO
