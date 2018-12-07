@@ -281,7 +281,51 @@ contains
 
 
   end subroutine normalize_gain
+  
+  subroutine pca_filter_TOD(data_l2, var)
+    implicit none
+    type(Lx_struct),                            intent(inout) :: data_l2
+    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, iters
+    real(dp)     :: eigval, tol, err, dotsum
+    real(dp),     allocatable, dimension(:)   :: r, s
+    
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%tod,2)
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    
+    allocate(r(nsamp), s(nsamp))
+    n = 10  ! max iterations
+    tol = 1.d-5  ! error tolerance
+    err = 1.d0
+    r = data_l2%tod(:,0,0,0)
+    do while ((err > tol) .and. (iters < n + 1))
+       s = 0.d0
+       do i = 1, ndet
+          do j = 1, n_sb
+             do k = 1, nfreq
+                dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
+                s(:) = s(:) + dotsum * data_l2%tod(:,k,j,i)
+             end do
+          end do
+       end do
 
+       eigenv = sum(s(:) * r(:))
+
+       err = sqrt(sum((eigenv * r(l) - s(l)) ** 2))
+       r(:) = s(:)/sqrt(sum(s(:) ** 2))
+    end do
+    do i = 1, ndet
+       do j = 1, n_sb
+          do k = 1, nfreq
+             amp = sum(r(:) * data_l2%tod(:,k,j,i))
+             data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - amp * r(:)
+          end do
+       end do
+    end do
+    deallocate(r, s)
+
+  end subroutine pca_filter_TOD
 
   subroutine polyfilter_TOD(data_l2, bp_filter)
     implicit none
