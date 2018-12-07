@@ -90,36 +90,6 @@ program tod2comap
   end do
 
 
-!!$    open(58,file='/mn/stornext/d5/comap/protodir/auxiliary/Receiver_offset.dat')
-!!$    allocate(offsets(19,5))
-!!$    read(58,*)
-!!$    read(58,*)
-!!$    read(58,*)
-!!$    do k = 1, 19
-!!$       read(58,*) offsets(k,:)
-!!$    end do
-!!$    close(58)
-!!$    offsets = offsets / 60.
-!!$
-!!$    my_x_max = maxval(tod(1)%point(1,:,1))
-!!$    my_y_max = maxval(tod(1)%point(2,:,1))
-!!$    do k = 1, size(tod)
-!!$       do j = 1, tod(k)%ndet
-!!$          if (j == 9 .or. j == 10) cycle
-!!$          do i = 1, size(tod(k)%point(1,:,j))
-!!$             if (sqrt((tod(k)%point(1,i,j)-237.9)**2 + (tod(k)%point(2,i,j)+19.44)**2) > 0.1) then
-!!$                tod(k)%d(i,:,:,j) = 0.d0
-!!$                tod(k)%point(1,i,j) = my_x_max
-!!$                tod(k)%point(2,i,j) = my_y_max
-!!$             end if
-!!$          end do
-!!$
-!!$          tod(k)%point(1,:,j) = tod(k)%point(1,:,j) + offsets(j,4)
-!!$          tod(k)%point(2,:,j) = tod(k)%point(2,:,j) + offsets(j,5)
-!!$       end do
-!!$    end do
-
-
   if (myid==0) write(*,*) "Initialising mapmaker"
   call initialize_mapmaker(map_scan, tod, parfile, pinfo)
   call initialize_mapmaker(map_tot,  tod, parfile, pinfo)

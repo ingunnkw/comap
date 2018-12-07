@@ -36,6 +36,7 @@ module comap_lx_mod
      integer(i4b)                                    :: coord_sys
      real(dp)                                        :: scanfreq(2), pixsize 
      real(dp)                                        :: point_lim(4)         ! (RA_min, RA_max, dec_min, dec_max)
+     real(dp),     allocatable, dimension(:)         :: sec                  ! (time) in seconds since start
      real(dp),     allocatable, dimension(:)         :: time_gain            ! (time)
      real(sp),     allocatable, dimension(:,:,:,:)   :: gain                 ! (time, freq, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
@@ -54,10 +55,10 @@ contains
     implicit none
     character(len=*), intent(in)           :: filename, id
     logical(lgt),     intent(in), optional :: only_point
-    real(sp), dimension(:,:,:), intent(in), optional :: freqmask
+    real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
-    integer(i4b)                           :: i, j, k, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1)
+    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1), numbad
     logical(lgt)                           :: all, ok
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
@@ -107,6 +108,28 @@ contains
 
     ! Find number of samples at end of file with NaNs
     if (present(freqmask)) then
+       ! Update frequency mask with channels that are all NaNs
+       do i = 1, ndet
+          do j = 1, nsb
+             do k = 1, nfreq
+                if (freqmask(k,j,i) == 0.) cycle
+!                ok = .false.
+                numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
+!                do l = 1, nsamp_tot
+!                   if (buffer_4d(l,k,j,i) .eq. buffer_4d(l,k,j,i)) then
+!                      ok = .true.
+!                      exit
+!                   end if
+!                end do
+                if (numbad > 0.1*nfreq) then
+                   write(*,fmt='(a,a,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
+                   freqmask(k,j,i) = 0.
+                end if
+             end do
+          end do
+       end do
+
+       ! Trim end for NaNs
        nsamp = nsamp_tot
        do while (nsamp > 0)
           ok = .true.
@@ -352,6 +375,8 @@ contains
     call write_hdf(file, "nu",                data%nu)
     call write_hdf(file, "decimation_time",   data%decimation_time)
     call write_hdf(file, "decimation_nu",     data%decimation_nu)
+    call write_hdf(file, "mjd_start",         data%mjd_start)
+    call write_hdf(file, "sec",               data%sec)
     call write_hdf(file, "scanfreq",          data%scanfreq)
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "coord_sys",         data%coord_sys)

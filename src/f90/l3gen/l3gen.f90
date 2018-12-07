@@ -127,11 +127,8 @@ program l3gen
      ! Read L2 data
      call read_L2_file(scan%l2file, data)     ; call dmem("read l2")
 
-     ! Initialize frequency mask                                                                                                               \
-                                                                                                                                                
-     call initialize_frequency_mask(freqmaskfile, numfreq, data_l2_fullres)
-     call apply_gain_cal(tsys_loc,data)
-
+     ! Initialize frequency mask
+     !call initialize_frequency_mask(freqmaskfile, numfreq, data)
 
      ! Process it
      !call calc_weather_template(data)         ; call dmem("weather")
@@ -139,12 +136,14 @@ program l3gen
      !call calc_objrel(data,  point_objs)      ; call dmem("objrel")
      !call calc_pixels(data, nside_l3)         ; call dmem("pixels")
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
+        call apply_gain_cal(tsys_loc,data)
         call calc_scanfreq(data);                ; call dmem("scanfreq")
         !call apply_az_filter(data)               ; call dmem("az_filter")
         call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
         call fit_noise(data, powspecs, snum)     ; call dmem("noise")
-        call calc_gain(data)                     ; call dmem("gain")
-        deallocate(ffts, powspecs)
+        !call calc_gain(data)                     ; call dmem("gain")
+        if (allocated(ffts)) deallocate(ffts)
+        if (allocated(powspecs)) deallocate(powspecs)
      end if
      !call calc_diode_stats(data, powspecs)    ; call dmem("diode_stats")
      !call calc_stats(data)                    ; call dmem("stats")
@@ -252,76 +251,67 @@ contains
     character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
     type(hdf_file)                                :: file
-    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres, tsys_binned
-    integer(i4b)                                  :: nfreq, nsb, ndet, i, j, k, l, mjd_index 
-    integer(i4b)                                  :: nsamp(7), num_bin, n
-    real(dp)                                      :: mjd_start, mjd_high,w, sum_w_t, sum_w, t1, t2
+    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
+    integer(i4b)                                  :: nfreq, nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index, nsamp, dnu
+    integer(i4b)                                  :: nsamp_gain(7), num_bin, n
+    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys
     real(dp), dimension(:), allocatable           :: time
-    ! 1) get tsys-values                                                                                                                       \
-                                                                                                                                                
-    call open_hdf_file(tsys_file, file, "r")
-    call read_hdf(file, "ndet", ndet)
-    call read_hdf(file, "nfreq", nfreq)
-    call read_hdf(file, "nsb", nsb)
-    call get_size_hdf(file, "MJD", nsamp)
 
-    allocate(tsys_fullres(nsamp(1), nfreq,nsb,ndet))
-    allocate(tsys_binned(nsamp(1), 64, nsb, ndet))
-    allocate(time(nsamp(1)))
+    nsamp = size(data%tod,1)
+    nfreq = size(data%tod,2)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
+    allocate(data%gain(1,nfreq,nsb,ndet), data%time_gain(1))
+    data%time_gain(1) = data%mjd_start
+    if (nsamp == 0) return
+
+    ! 1) get tsys-values
+    call open_hdf_file(tsys_file, file, "r")
+    call read_hdf(file, "nfreq", nfreq_fullres)
+    call get_size_hdf(file, "MJD", nsamp_gain)
+
+    allocate(tsys_fullres(nsamp_gain(1), nfreq_fullres, nsb, ndet))
+    allocate(time(nsamp_gain(1)))
 
     call read_hdf(file, "MJD", time)
     call read_hdf(file, "tsys", tsys_fullres)
     call close_hdf_file(file)
 
-    ! finding closest time-value                                                                                                               \
-                                                                                                                                                
-    mjd_start = data%mjd_start
-    mjd_high = 1.d10
-    mjd_index = 10000000
-    do i = 1, nsamp(1)
-       if (abs(mjd_start-time(i)) < mjd_high) then
-          mjd_high = abs(mjd_start-time(i))
-          mjd_index = i
-       end if
-    end do
+    ! finding closest time-value
+    mjd_index = max(locate(time, data%mjd_start),1)
+    write(*,*) 'time = ', time(mjd_index), data%mjd_start, mjd_index
+!!$    mjd_start = data%mjd_start
+!!$    mjd_high = 1.d10
+!!$    mjd_index = 10000000
+!!$    do i = 1, nsamp(1)
+!!$       if (abs(mjd_start-time(i)) < mjd_high) then
+!!$          mjd_high = abs(mjd_start-time(i))
+!!$          mjd_index = i
+!!$       end if
+!!$    end do
 
+
+    dnu   = nfreq_fullres/nfreq
     do i=1, ndet
        if (.not. is_alive(i)) cycle
        do j=1, nsb
-          num_bin = 1
-          l = 1
-          sum_w_t = 0
-          sum_w = 0
-
           do k=1, nfreq
-             if (l == 16) then
-                if (sum_w > 0.d0) then
-                   data%tod(:,num_bin,j,i) = data%tod(:,num_bin,j,i)*sum_w_t/sum_w
-                else
-                   data%tod(:,num_bin,j,i) = 0
-                end if
-
-                sum_w_t = 0
-                sum_w = 0
-                l = 0
-                num_bin = num_bin + 1
-             end if
-             if (data%var_fullres(k,j,i) <= 0) then
-                w = 0.d0
+             if (sum(data%freqmask_full((k-1)*dnu+1:k*dnu,j,i)) == 0) then
+                ! No live frequencies; return zero
+                tsys = 0.d0
+                data%tod(:,k,j,i) = 0
              else
-                w = 1.d0/data%var_fullres(k,j,i)*data_l2_fullres%freqmask_full(k,j,i)
+                tsys = sum(tsys_fullres(mjd_index,(k-1)*dnu+1:k*dnu,j,i) * &
+                     & 1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i)) / &
+                     & sum(1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i))
+                data%gain(1,k,j,i) = tsys
+                data%tod(:,k,j,i) = data%tod(:,k,j,i)*tsys
              end if
-             sum_w_t = sum_w_t + w*tsys_fullres(mjd_index,k,j,i)
-             sum_w = sum_w + w
-
-             l = l+1
-
           end do
        end do
     end do
 
   deallocate(tsys_fullres)
-  deallocate(tsys_binned)
   deallocate(time)
 
   end subroutine apply_gain_cal
@@ -511,6 +501,7 @@ contains
     nsamp = size(data%tod,1)
     ndet  = size(data%tod,4)
     allocate(data%point(3,nsamp,ndet))
+    if (nsamp == 0) return
     do j = 1, ndet
        do i = 1, nsamp
           op = data%point_cel(:,i,j)
@@ -525,20 +516,21 @@ contains
 
     ! Find map extent
     do j = 1, ndet
-       call make_angles_safe(data%point(:,1,j),real(360.d0,sp))
+       call make_angles_safe(data%point(1,:,j),real(360.d0,sp))
     end do
-    data%point_lim(1) = minval(data%point(:,1,:))
-    data%point_lim(2) = maxval(data%point(:,1,:))
-    data%point_lim(3) = minval(data%point(:,2,:))
-    data%point_lim(4) = maxval(data%point(:,2,:))
+    data%point_lim(1) = minval(data%point(1,:,:))
+    data%point_lim(2) = maxval(data%point(1,:,:))
+    data%point_lim(3) = minval(data%point(2,:,:))
+    data%point_lim(4) = maxval(data%point(2,:,:))
     do j = 1, ndet
-       data%point(:,1,j)   = mod(data%point(:,1,j),360.)
+       data%point(1,:,j)   = mod(data%point(1,:,j),360.)
     end do
   end subroutine
 
   subroutine calc_scanfreq(data)
     implicit none
     type(lx_struct) :: data
+    if (size(data%tod,1) == 0) return
     call get_scanfreq(data%point_tel(1,:,1), data%samprate, data%scanfreq(1))
     call get_scanfreq(data%point_tel(2,:,1), data%samprate, data%scanfreq(2))
   end subroutine calc_scanfreq
@@ -556,6 +548,12 @@ contains
     nsb    = size(data%tod,3)
     ndet   = size(data%tod,4)
     allocate(data%sigma0(nfreq,nsb,ndet), data%alpha(nfreq,nsb,ndet), data%fknee(nfreq,nsb,ndet))
+    if (nsamp == 0) then
+       data%sigma0 = 0.d0
+       data%alpha  = 0.d0
+       data%fknee  = 0.d0
+       return
+    end if
     call get_scan_info(snum, scan)
     call int2string(info%id, myid_text)
     scale = 1.d0 / sqrt(abs(data%nu(1,1,1)-data%nu(2,1,1))*1d9/data%samprate)
@@ -571,19 +569,28 @@ contains
 !       do k = 1, 1
           do j = 1, nfreq      
 !          do j = 56, 56
+             if (data%gain(1,j,k,i) == 0) then
+                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,a)') scan%id, i, k, j, ' -- zero Tsys'
+                cycle
+             end if
              if (.false.) then
                 ! White noise 
                 data%sigma0(j,k,i) = sqrt(variance(data%tod(:,j,k,i)))
                 data%alpha(j,k,i)  = -10.d0
                 data%fknee(j,k,i)  = 1d-6
                 chisq = (sum((data%tod(:,j,k,i)/data%sigma0(j,k,i))**2)-nsamp)/sqrt(2.d0*nsamp)
-                write(*,fmt='(4i8,e10.2,3f8.3)') info%id, i, j, k, data%sigma0(j,k,i)
+                write(*,fmt='(4i8,e10.2,3f10.3)') info%id, i, j, k, data%sigma0(j,k,i)
              else
                 call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0(j,k,i), &
                      & data%alpha(j,k,i), data%fknee(j,k,i), tod_ps=real(powspecs(:,j,k,i),dp), limits=[0.01d0,5.d0], &
                      & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask, fit_par=[.true.,.false.])
-                if (.true. .or. j == nfreq/2) write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0(j,k,i)/scale, data%alpha(j,k,i), &
-                     & data%fknee(j,k,i), chisq, '   '//trim(scan%object)
+                if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,f10.3,2f8.3,f8.1,f8.3,a)') scan%id, i, k, j, &
+                     & data%sigma0(j,k,i)/scale/data%gain(1,j,k,i), data%alpha(j,k,i), &
+                     & data%fknee(j,k,i), data%gain(1,j,k,i), chisq, '   '//trim(scan%object)
+!!$                write(*,*) scan%id, i, k, j, &
+!!$                     & data%sigma0(j,k,i)/scale/data%gain(1,j,k,i), data%alpha(j,k,i), &
+!!$                     & data%fknee(j,k,i), data%gain(1,j,k,i), chisq, '   '//trim(scan%object)
+!!$                stop
              end if
           end do
        end do
@@ -612,7 +619,7 @@ contains
                    call fit_1overf_profile(data%samprate, data%scanfreq, scanmask_width, data%sigma0_poly(j,k,i), &
                         & data%alpha_poly(j,k,i), data%fknee_poly(j,k,i), tod=real(data%tod_poly(:,j,k,i),dp), &
                         & snum=scan%sid, frequency=j, detector=i, chisq_out=chisq, apply_scanmask=scanmask)
-                   write(*,fmt='(a,i4,i3,i6,4f8.3,a)') scan%id, i, k, j, data%sigma0_poly(j,k,i)/scale, data%alpha_poly(j,k,i), &
+                   write(*,fmt='(a,i4,i3,i6,3f8.3,f8.3,a)') scan%id, i, k, j, data%sigma0_poly(j,k,i)/scale, data%alpha_poly(j,k,i), &
                      & data%fknee_poly(j,k,i), chisq, '   '//trim(scan%object)//' (no poly)'
                 end if
              end do
@@ -982,6 +989,7 @@ contains
     integer(i4b)    :: nfreq, nsb, ndet, i, j, k, nf
     complex(spc), dimension(:,:,:,:), allocatable :: ffts
     real(sp),     dimension(:,:,:,:), allocatable :: powspecs
+    if (size(data%tod,1) == 0) return
     nfreq = size(data%tod,2)
     nsb   = size(data%tod,3)
     ndet  = size(data%tod,4)
