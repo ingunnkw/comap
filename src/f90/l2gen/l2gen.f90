@@ -83,9 +83,9 @@ program l2gen
      if (scan%id(1:6) /= id_old(1:6)) then
         call wall_time(t1)
         call free_lx_struct(data_l1)
-        call read_l1_file(scan%l1file, data_l1, scan%id, freqmask=data_l2_fullres%freqmask_full); call update_status(status, 'read_l1')
+        call read_l1_file(scan%l1file, data_l1, scan%id(1:6), freqmask=data_l2_fullres%freqmask_full); call update_status(status, 'read_l1')
         if (size(data_l1%tod,1) <100) then
-           write(*,*) 'Too few samples in ', scan%id
+           write(*,*) 'Too few samples in ', scan%id(1:6)
            cycle
         end if
         call correct_missing_time_steps(data_l1%time_point)
@@ -95,9 +95,6 @@ program l2gen
         write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
      end if
 
-!!$     write(*,*) myid, 'a'
-!!$     call mpi_barrier(mpi_comm_world, ierr)
-
      ! Interpolate over single NaNs
      call interpolate_nans(data_l1, scan%id)
      call update_status(status, 'nan_interp')
@@ -106,29 +103,9 @@ program l2gen
      call postprocess_frequency_mask(numfreq, data_l1, data_l2_fullres, scan%id)
      call update_status(status, 'freq_mask2')
 
-!!$     write(*,*) myid, 'b'
-!!$     call mpi_barrier(mpi_comm_world, ierr)
-
      ! Reformat L1 data into L2 format, and truncate
      call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
      call update_status(status, 'merge')
-
-!!$     write(*,*) myid, 'c'
-!!$     call mpi_barrier(mpi_comm_world, ierr)
-
-     ! Elevation-gain renormalization for circular scans
-!     if (circular) call remove_elevation_gain(data_l2_fullres) 
-!!$     open(58,file='tod1.dat')
-!!$     do i = 1, size(data_l2_fullres%tod,1)
-!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
-!!$     end do
-!!$     close(58)
-!     call remove_elevation_gain(data_l2_fullres) 
-!!$     open(58,file='tod2.dat')
-!!$     do i = 1, size(data_l2_fullres%tod,1)
-!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
-!!$     end do
-!!$     close(58)
 
      ! Get patch info
      found = get_patch_info(scan%object, pinfo) 
@@ -138,32 +115,16 @@ program l2gen
         stop
      end if
 
-!!$     write(*,*) myid, 'd'
-!!$     call mpi_barrier(mpi_comm_world, ierr)
-
      ! Normalize gain
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
-        call normalize_gain(data_l2_fullres, nu_gain, alpha_gain)
+        call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
         call update_status(status, 'gain_norm')
      end if
-!!$     write(*,*) myid, 'e'
-!!$     call mpi_barrier(mpi_comm_world, ierr)
-
-!!$     open(58,file='tod3.dat')
-!!$     do i = 1, size(data_l2_fullres%tod,1)
-!!$        write(58,*) data_l2_fullres%tod(i,32,1,2)
-!!$     end do
-!!$     close(58)
-!!$     call mpi_finalize(ierr)
-!!$     stop
 
      ! Poly-filter if requested
      bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
      call polyfilter_TOD(data_l2_fullres, bp_filter)
      call update_status(status, 'polyfilter')
-
-!!$     write(*,*) myid, 'f'
-!!$     call mpi_barrier(mpi_comm_world, ierr)
 
      ! Fourier transform frequency direction
      !call convert_GHz_to_k(data_l2_fullres(i))
@@ -177,7 +138,7 @@ program l2gen
      if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
      ! Write L2 file to disk
-     !write(*,*) 'Writing ', scan%id
+     write(*,*) 'Writing ', scan%id, ' to disk'
      call mkdirs(trim(scan%l2file), .true.)
      call write_l2_file(scan%l2file, data_l2_decimated)
      call update_status(status, 'write_l2')
@@ -227,10 +188,11 @@ contains
 
   end subroutine interpolate_nans
 
-  subroutine normalize_gain(data_l2, nu_gain, alpha_gain)
+  subroutine normalize_gain(data_l2, nu_gain, alpha_gain, id)
     implicit none
     type(Lx_struct),                            intent(inout) :: data_l2
     real(dp),                                   intent(in)    :: nu_gain, alpha_gain
+    character(len=*),                           intent(in)    :: id
 
     integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet
     real(dp)     :: samprate, nu
@@ -254,11 +216,11 @@ contains
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
-       write(*,*) '    Normalizing gains for det = ', i
+       !write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
-          !$OMP PARALLEL PRIVATE(k,l,dt,dv,nu)
+          !!$OMP PARALLEL PRIVATE(k,l,dt,dv,nu)
           allocate(dt(2*nsamp), dv(0:n-1))
-          !$OMP DO SCHEDULE(guided)
+          !!$OMP DO SCHEDULE(guided)
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
              dt(1:nsamp)            = data_l2%tod(:,k,j,i)
@@ -269,13 +231,14 @@ contains
                 nu = ind2freq(l+1, samprate, n)
                 dv(l) = dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
              end do
+
              call fft(dt, dv, -1)
              data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp) - 1.d0 
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
           end do
-          !$OMP END DO
+          !!$OMP END DO
           deallocate(dt, dv)
-          !$OMP END PARALLEL
+          !!$OMP END PARALLEL
        end do
     end do
 
@@ -789,6 +752,10 @@ contains
           end do
        end do
     end if
+
+    allocate(data_out%sec(nsamp_out))
+    data_out%mjd_start = minval(data_out%time)  ! Starting MJD
+    data_out%sec       = (data_out%time - data_out%mjd_start) * 24.d0 * 3600.d0
 
   end subroutine decimate_L2_data
 
