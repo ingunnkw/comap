@@ -263,7 +263,10 @@ contains
     ndet  = size(data%tod,4)
     allocate(data%gain(1,nfreq,nsb,ndet), data%time_gain(1))
     data%time_gain(1) = data%mjd_start
-    if (nsamp == 0) return
+    if (nsamp == 0) then
+       data%gain = 1.d0
+       return
+    end if
 
     ! 1) get tsys-values
     call open_hdf_file(tsys_file, file, "r")
@@ -278,8 +281,10 @@ contains
     call read_hdf(file, "tsys", tsys_fullres)
     call close_hdf_file(file)
     ! finding closest time-value
-    mjd_index = max(locate(time, data%mjd_start),1)
-    write(*,*) 'time = ', time(mjd_index), data%mjd_start, mjd_index
+    mjd_index = max(locate(time, data%time(1)),1)
+!    if (mjd_index > 1 .and. mjd_index < size(time)) then
+!       write(*,*) 'time = ', time(mjd_index), data%time(1), time(mjd_index+1)
+!    end if
     !stop
 !!$    mjd_start = data%mjd_start
 !!$    mjd_high = 1.d10
