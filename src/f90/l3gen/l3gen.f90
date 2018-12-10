@@ -270,16 +270,17 @@ contains
     call read_hdf(file, "nfreq", nfreq_fullres)
     call get_size_hdf(file, "MJD", nsamp_gain)
 
-    allocate(tsys_fullres(nsamp_gain(1), nfreq_fullres, nsb, ndet))
+    !allocate(tsys_fullres(nsamp_gain(1), nfreq_fullres, nsb, ndet))
+    allocate(tsys_fullres(ndet, nsb, nfreq_fullres, nsamp_gain(1)))
     allocate(time(nsamp_gain(1)))
 
     call read_hdf(file, "MJD", time)
     call read_hdf(file, "tsys", tsys_fullres)
     call close_hdf_file(file)
-
     ! finding closest time-value
     mjd_index = max(locate(time, data%mjd_start),1)
     write(*,*) 'time = ', time(mjd_index), data%mjd_start, mjd_index
+    !stop
 !!$    mjd_start = data%mjd_start
 !!$    mjd_high = 1.d10
 !!$    mjd_index = 10000000
@@ -289,7 +290,6 @@ contains
 !!$          mjd_index = i
 !!$       end if
 !!$    end do
-
 
     dnu   = nfreq_fullres/nfreq
     do i=1, ndet
@@ -301,7 +301,11 @@ contains
                 tsys = 0.d0
                 data%tod(:,k,j,i) = 0
              else
-                tsys = sum(tsys_fullres(mjd_index,(k-1)*dnu+1:k*dnu,j,i) * &
+                do l=(k-1)*dnu+1,k*dnu
+                   ! Remove NaN's
+                   if (isnan(tsys_fullres(i, j,l,mjd_index))) tsys_fullres(i, j, l,mjd_index) = 0.0
+                end do
+                tsys = sum(tsys_fullres(i, j, (k-1)*dnu+1:k*dnu,mjd_index) * &
                      & 1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i)) / &
                      & sum(1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i))
                 data%gain(1,k,j,i) = tsys
@@ -310,7 +314,6 @@ contains
           end do
        end do
     end do
-
   deallocate(tsys_fullres)
   deallocate(time)
 
