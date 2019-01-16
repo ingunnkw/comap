@@ -17,16 +17,18 @@ program l2gen
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0
-  real(dp)             :: todsize
-  logical(lgt)         :: exist, reprocess, check_existing, gonext, found
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter
+  real(dp)             :: todsize, nb_factor
+  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
+  logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
-  type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated
+  type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
   type(planck_rng)     :: rng_handle
   type(status_file)    :: status
   type(patch_info)     :: pinfo
+  !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
 
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
@@ -38,6 +40,19 @@ program l2gen
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_NU',     par_dp=nu_gain)
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA',  par_dp=alpha_gain)
   call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',     par_int=bp_filter0)
+  call get_parameter(unit, parfile, 'N_PCA_COMPONENTS',          par_int=n_pca_comp)
+  call get_parameter(unit, parfile, 'PCA_ERROR_TOLERANCE',       par_dp=pca_err_tol)
+  call get_parameter(unit, parfile, 'PCA_MAX_ITERATIONS',        par_int=pca_max_iter)
+  call get_parameter(unit, parfile, 'CORRELATION_CUT',           par_dp=corr_cut)
+  call get_parameter(unit, parfile, 'MEAN_CORRELATION_CUT',      par_dp=mean_corr_cut)
+  call get_parameter(unit, parfile, 'VARIANCE_CUT',              par_dp=var_cut)
+  call get_parameter(unit, parfile, 'MEAN_ABS_CORRELATION_CUT',  par_dp=mean_abs_corr_cut)
+  call get_parameter(unit, parfile, 'MEDIAN_CUT',                par_dp=med_cut)
+  call get_parameter(unit, parfile, 'N_NEIGHBOR',                par_int=n_nb)
+  call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=nb_factor)
+  
+  call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
+
 
   check_existing = .true.
   call initialize_scan_mod(parfile)
@@ -120,12 +135,40 @@ program l2gen
         call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
         call update_status(status, 'gain_norm')
      end if
+     
+     !!!!!!!!!!!!!!!!!!!!!
+     ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
+     call copy_lx_struct(data_l2_fullres, data_l2_filter)
+     
+     ! Poly-filter copied data
+     !bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
+     call polyfilter_TOD(data_l2_filter, bp_filter0)
+     !call update_status(status, 'polyfilter')
 
+     ! pca filter copied data
+     call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+     
+     ! flag correlations and variance
+     call flag_correlations(data_l2_filter, scan%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor)
+     !replace with original tod
+     data_l2_fullres%freqmask_full = data_l2_filter%freqmask_full 
+     call free_lx_struct(data_l2_filter)
+     
+     call update_freqmask(data_l2_fullres)
+     call update_status(status, 'made_freqmask')
+     !!!!!!!!!!!!!!!!!!!!!!!
+     
      ! Poly-filter if requested
      bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
      call polyfilter_TOD(data_l2_fullres, bp_filter)
      call update_status(status, 'polyfilter')
 
+     ! pca filter after polyfilter
+     if (trim(pinfo%type) .ne. 'cosmo') n_pca_comp = 0
+     call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol)
+     call update_status(status, 'pca_filter')
+     
+     
      ! Fourier transform frequency direction
      !call convert_GHz_to_k(data_l2_fullres(i))
 
@@ -146,14 +189,391 @@ program l2gen
      ! Clean up data structures
      call free_lx_struct(data_l2_decimated)
      call free_lx_struct(data_l2_fullres)
-
+     
   end do
   call mpi_finalize(ierr)
 
   call free_status(status)
 
 contains
+  
+  subroutine update_freqmask(data_l2)
+    implicit none
+    type(Lx_struct),                            intent(inout) :: data_l2
+    integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nfreq_full, nsb, ndet, dfreq
+    
+    
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%freqmask,1) ! nfreq in lowres data
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    nfreq_full  = size(data_l2%freqmask_full,1)
+    dfreq       = nfreq_full / nfreq
+    if(.not. allocated(data_l2%acceptrate)) allocate(data_l2%acceptrate(nsb,ndet)) 
 
+    ! calculate acceptrate
+    do k = 1, ndet
+       do j = 1, nsb
+          data_l2%acceptrate(j,k) = sum(data_l2%freqmask_full(:,j,k)) / nfreq_full
+          if (data_l2%acceptrate(j,k) < 0.8) then !Mask bad sidebands
+             data_l2%freqmask_full(:,j,k) = 0.d0
+             data_l2%acceptrate(j,k) = 0.d0
+          end if
+       end do
+    end do
+    
+
+    ! update lowres freqmask if all frequencies within a lowres bin are masked
+    do k = 1, ndet
+       do j = 1, nsb
+          do i = 1, nfreq
+             if (all(data_l2%freqmask_full((i-1)*dfreq+1:i*dfreq,j,k) == 0.d0)) data_l2%freqmask(i,j,k) = 0.0
+          end do
+       end do
+    end do
+    
+    
+    
+  end subroutine update_freqmask
+
+  subroutine flag_correlations(data_l2, id, corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor)
+    implicit none
+    type(Lx_struct),          intent(inout) :: data_l2
+    character(len=*),         intent(in)    :: id
+    real(dp),                 intent(in)    :: corr_cut, mean_corr_cut, var_cut, median_cut
+    real(dp),                 intent(in)    :: mean_abs_corr_cut, neighbor_factor
+    integer(i4b),             intent(in)    :: n_neighbor
+    integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nsb, ndet
+    real(dp)     :: corr, mean, var_0, std_median
+    real(dp)     :: mean_meancorr, sigma_meancorr, mean_vars, sigma_vars, mean_maxcorr, sigma_maxcorr
+    real(dp)     :: mean_meanabscorr, sigma_meanabscorr, mean_corrsum, sigma_corrsum
+    real(dp),     allocatable, dimension(:, :, :)   :: means, vars, maxcorr, meancorr, meanabscorr
+    real(dp),     allocatable, dimension(:, :, :)   :: corrsum
+    real(sp),     allocatable, dimension(:, :, :)   :: corrsum_mask
+    real(dp),     allocatable, dimension(:)         :: subt, median, smedian, minimum
+    real(dp),     allocatable, dimension(:,:)       :: corrs
+    real(dp),     allocatable, dimension(:,:)       :: outlier_mask
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%tod,2)
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    
+    !cut = 5.d0 ! N_sigma
+    !neighbor_factor = 3.d0/5
+    !n_neighbor = 2
+    !step = 64
+    !corr_cut = 0.050d0
+    !var_cut = 1.5d0
+    allocate(means(nfreq, nsb, ndet), vars(nfreq, nsb, ndet))
+    allocate(maxcorr(nfreq, nsb, ndet), meancorr(nfreq, nsb, ndet))
+    allocate(meanabscorr(nfreq, nsb, ndet))
+    if(.not. allocated(data_l2%diagnostics)) allocate(data_l2%diagnostics(nfreq,nsb,ndet,5)) 
+    if(.not. allocated(data_l2%cut_params)) allocate(data_l2%cut_params(2,5)) 
+    allocate(corrs(nfreq,nfreq))
+    allocate(subt(nsamp-1), median(nfreq))!, minimum(nfreq / step), smedian(nfreq / step))
+    !allocate(corrsum(nfreq / step, nsb,ndet), corrsum_mask(nfreq / step, nsb,ndet))
+    vars = 0.d0
+    maxcorr = 0.d0
+    meancorr = 0.d0
+    meanabscorr = 0.d0
+    !corrsum = 0.d0
+    !corrsum_mask = 0.d0
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
+             vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
+          end do
+       end do
+    end do
+    !write(*,*) "Done calculating means and variances"
+    
+    
+    !open(55,file='/mn/stornext/d14/comap/comap/protodir/meancorrs.dat')
+    !open(55,file='/mn/stornext/d14/comap/comap/protodir/meanabscorr_10_4_1000_'//trim(id)//'.dat')
+    !open(56,file='/mn/stornext/d14/comap/comap/protodir/meanabscorr_8_4_1000_'//trim(id)//'.dat')
+    !open(10, file='/mn/stornext/d14/comap/comap/protodir/fulltod_'//trim(id)//'.unf', form='unformatted')
+    !write(10) data_l2%tod
+    !close(10)
+    
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          corrs = 0.d0
+          !$OMP PARALLEL PRIVATE(k,l,m,n,corr)
+          !$OMP DO SCHEDULE(guided)    
+          do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             !do l = i, ndet
+             !   if (.not. is_alive(l)) cycle
+             !   do m = j, nsb
+             l = i
+             m = j
+             do n = k + 1, nfreq 
+                if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
+                corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
+                corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
+                corrs(k,n) = corr
+                corrs(n,k) = corr
+            !    write(55,'(1(E17.10))') corr
+                !if (abs(corr) > corr_cut) then
+                !   data_l2%freqmask_full(n,m,l) = 0.d0
+                !   data_l2%freqmask_full(k,j,i) = 0.d0
+                !end if
+             end do
+             !if (maxcorr > corr_cut) then
+             !   data_l2%freqmask_full(k,j,i) = 0.d0
+             !end if
+             !if ((i == 10) .and. (j == 4) .and. (k == 350)) then
+             !   write(*,*) "this value", meancorr(k,j,i), id
+             !   write(*,*) sum(corrs(k,:)), (sum(data_l2%freqmask_full(:,j,i))-1.d0)
+             !end if
+             !if ((i == 8) .and. (j == 4) .and. (k == 1000)) then
+             !   write(56,'(1(E17.10))') meanabscorr(k,j,i)
+             !end if
+             
+             !write(55,'(1(E17.10))') meancorr
+             !   end do
+             !end do
+          end do
+          !$OMP END DO
+          !$OMP END PARALLEL
+          do k = 1, nfreq
+             meancorr(k,j,i)    = sum(corrs(k,:)) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
+             maxcorr(k,j,i)     = maxval(abs(corrs(k,:)))
+             meanabscorr(k,j,i) = sum(abs(corrs(k,:))) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
+          end do
+          !corrsum(j,i) = sum(abs(corrs))
+          ! if ((i == 10) .and. (j == 4)) then
+          !    open(10, file='/mn/stornext/d14/comap/comap/protodir/corrs_10_4'//trim(id)//'.unf', form='unformatted')
+          !    write(10) corrs
+          !    close(10)
+          ! end if
+          ! if ((i == 11) .and. (j == 2)) then
+          !    open(10, file='/mn/stornext/d14/comap/comap/protodir/corrs_11_2'//trim(id)//'.unf', form='unformatted')
+          !    write(10) corrs
+          !    close(10)
+          ! end if
+
+       end do
+       !write(*,*) "Done with correlation flagging in detector", i
+    end do
+    
+    !close(55)
+    !close(56)
+    
+    !open(55,file='/mn/stornext/d14/comap/comap/protodir/filter_data_'//trim(id)//'.dat')
+    
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             subt = (data_l2%tod(2:nsamp,k,j,i) - data_l2%tod(1:nsamp-1,k,j,i)) / sqrt(2.d0)
+             mean = sum(subt) / (nsamp - 1)
+             var_0 = sum(subt ** 2) / (nsamp - 1) - mean ** 2
+             vars(k,j,i) = vars(k,j,i) / var_0
+             !write(55,'(1(E17.10))') vars(k,j,i) / var_0
+             !if (var_cut * var_0 < vars(k,j,i)) then
+             !   data_l2%freqmask_full(k,j,i) = 0.d0
+             !end if
+          end do
+       end do
+    end do
+    call get_mean_and_sigma(maxcorr, data_l2%freqmask_full, mean_maxcorr, sigma_maxcorr, .true.)
+    call get_mean_and_sigma(meancorr, data_l2%freqmask_full, mean_meancorr, sigma_meancorr, .true.)
+    call get_mean_and_sigma(meanabscorr, data_l2%freqmask_full, mean_meanabscorr, sigma_meanabscorr, .true.)
+    call get_mean_and_sigma(vars, data_l2%freqmask_full, mean_vars, sigma_vars, .true.)
+    
+    median = 0.0055d0
+    std_median = 0.0001d0 !minimum = 1.0d0
+    !subt = (data_l2%tod(2:nsamp,k,j,i) - data_l2%tod(1:nsamp-1,k,j,i)) / sqrt(2.d0)
+    !mean = sum(subt) / (nsamp - 1)
+    !var_0 = sum(subt ** 2) / (nsamp - 1) - mean ** 2
+    deallocate(subt)
+    allocate(subt(nfreq-1))
+    !masking large-scale structures in the correlation plot
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             median(k) = median(k) + 0.00005 * sign(1.d0, meanabscorr(k,j,i) - median(k))
+          end do
+          !do l = 1, nfreq / step
+          !   if (all(data_l2%freqmask_full((l-1) * step:l*step,j,i) == 0.d0)) cycle
+          !   corrsum(l,j,i) = sum(meanabscorr((l-1) * step:l*step, j, i)) / sum(data_l2%freqmask_full((l-1) * step:l*step, j, i))
+          !   corrsum_mask(l,j,i) = 1.d0
+          !   median(l) = median(l) + 0.00005 * sign(1.d0, corrsum(l,j,i) - median(l))
+          !   !if (corrsum(l,j,i) < minimum(l)) then 
+          !   !   minimum(l) = corrsum(l,j,i)
+          !   !end if
+          !end do
+          subt = (meanabscorr(2:nfreq,j,i) - meanabscorr(1:nfreq-1,j,i)) / sqrt(2.d0)
+          var_0 = sum(merge(subt ** 2, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
+          var_0 = var_0 / sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
+          std_median = std_median + 0.00002 * sign(1.d0, sqrt(var_0) - std_median)
+       end do
+    end do
+    ! call get_mean_and_sigma(corrsum, corrsum_mask, mean_corrsum, sigma_corrsum, .true.)
+!    write(*,*) id, median(1000), std_median
+    !smedian = median - minimum
+    
+    !call get_mean_and_sigma(corrsum, merge(1.d0,0.d0, corrsum .ne. 0.d0), mean_corrsum, sigma_corrsum, .true.)
+    !mean_corrsum = sum(corrsum) / sum(merge(1.d0,0.d0, corrsum .ne. 0.d0))
+    !sigma_corrsum = sqrt(sum(corrsum ** 2) / sum(merge(1.d0,0.d0, corrsum .ne. 0.d0)) - mean_corrsum ** 2)
+    !allocate(outlier_mask(size(corrsum,1),size(corrsum,2)))
+    !outlier_mask = merge(1.d0,0.d0, corrsum .ne. 0.d0) * merge(1.d0,0.d0,abs(corrsum - mean_corrsum) <= 3.0 * sigma_corrsum)
+    !mean_corrsum = sum(corrsum * outlier_mask) / sum(outlier_mask)
+    !sigma_corrsum = sqrt(sum((corrsum * outlier_mask) ** 2) / sum(outlier_mask) - mean_corrsum ** 2)
+    !deallocate(outlier_mask)
+    !mean_maxcorr   = sum(maxcorr) / sum(data_l2%freqmask_full)
+    !mean_meancorr  = sum(meancorr) / sum(data_l2%freqmask_full)
+    !mean_vars      = sum(vars) / sum(data_l2%freqmask_full)
+    !sigma_maxcorr  = sqrt(sum(maxcorr ** 2) / sum(data_l2%freqmask_full) - mean_maxcorr ** 2)
+    !sigma_meancorr = sqrt(sum(meancorr ** 2) / sum(data_l2%freqmask_full) - mean_meancorr ** 2)
+    !sigma_vars     = sqrt(sum(vars ** 2) / sum(data_l2%freqmask_full) - mean_vars ** 2)
+    !sigma_maxcorr  = sqrt(sum((maxcorr * merge(1,0,abs(maxcorr - mean_maxcorr) <= 3.0 * sigma_maxcorr)) ** 2) / sum(merge(1,0,abs(maxcorr - mean_maxcorr) <= 3.0 * sigma_maxcorr)) - mean_maxcorr ** 2)
+    !open(55,file='/mn/stornext/d14/comap/comap/protodir/filter_data_'//trim(id)//'.dat')    
+    !write(55,'(8(E20.10))') mean_maxcorr, mean_meancorr, mean_meanabscorr, mean_vars, sigma_maxcorr, sigma_meancorr, sigma_meanabscorr,sigma_vars 
+    !close(55)
+    !open(10, file='/mn/stornext/d14/comap/comap/protodir/max_corr_'//trim(id)//'.unf', form='unformatted')
+    !write(10) maxcorr 
+    !close(10)
+    
+    !open(10, file='/mn/stornext/d14/comap/comap/protodir/mean_corr_'//trim(id)//'.unf', form='unformatted')
+    !write(10) meancorr 
+    !close(10)
+    !open(10, file='/mn/stornext/d14/comap/comap/protodir/mean_abs_corr_'//trim(id)//'.unf', form='unformatted')
+    !write(10) meanabscorr 
+    !close(10)
+    !open(10, file='/mn/stornext/d14/comap/comap/protodir/mask_'//trim(id)//'.unf', form='unformatted')
+    !write(10) data_l2%freqmask_full
+    !close(10)
+    !!corr_cut, mean_corr_cut, var_cut
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             ! cut on neighbours
+             if (k < nfreq - n_neighbor) then
+                if (all(var_cut * sigma_vars * neighbor_factor < abs(vars(k:k+n_neighbor,j,i) - mean_vars))) then
+                   data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
+                else if (all(corr_cut * sigma_maxcorr * neighbor_factor < abs(maxcorr(k:k+n_neighbor,j,i) - mean_maxcorr))) then
+                   data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
+                else if (all(mean_corr_cut * sigma_meancorr * neighbor_factor < abs(meancorr(k:k+n_neighbor,j,i) - mean_meancorr))) then
+                   data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
+                else if (all(mean_abs_corr_cut * sigma_meanabscorr * neighbor_factor < abs(meanabscorr(k:k+n_neighbor,j,i) - mean_meanabscorr))) then
+                   data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
+                else if (all(median_cut * std_median * neighbor_factor < meanabscorr(k:k+n_neighbor,j,i) - median(k))) then
+                   data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
+                end if
+             end if
+             
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             ! cut on single outliers
+             if (var_cut * sigma_vars < abs(vars(k,j,i) - mean_vars)) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             else if (corr_cut * sigma_maxcorr < abs(maxcorr(k,j,i) - mean_maxcorr)) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             else if (mean_corr_cut * sigma_meancorr < abs(meancorr(k,j,i) - mean_meancorr)) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             else if (mean_abs_corr_cut * sigma_meanabscorr < abs(meanabscorr(k,j,i) - mean_meanabscorr)) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             else if (median_cut * std_median < meanabscorr(k,j,i) - median(k)) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             end if                       
+          end do
+          !if (mean_corr_cut * sigma_corrsum < abs(corrsum(j,i) - mean_corrsum)) then
+          !   data_l2%freqmask_full(:,j,i) = 0.d0
+          !end if
+       end do
+    end do
+    ! do i = 1, ndet
+    !    if (.not. is_alive(i)) cycle
+    !    do j = 1, nsb
+    !       do k = 1, nfreq
+    !          if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+    !          if (mean_corr_cut * std_median < meanabscorr(k,j,i) - median(k)) then
+    !             !write(*,*) "HERE WE ARE WE HAVE DONE IT", id, i, j, k, median(k), std_median, id
+    !             data_l2%freqmask_full(k,j,i) = 0.d0
+    !          end if
+    !       end do
+    ! !      do l = 1, nfreq / step
+    ! !         if (all(data_l2%freqmask_full((l-1) * step:l*step,j,i) == 0.d0)) cycle
+    ! !         !if ((i == 10) .and. (j == 4) .and. (l == 16)) then
+    ! !         !   write(*,*) "almost", abs(corrsum(l,j,i) - mean_corrsum) / sigma_corrsum, sigma_corrsum
+    ! !         !end if
+    ! !         if (2.0d0 * mean_corr_cut * smedian(l) < corrsum(l,j,i) - median(l)) then
+    ! !            !write(*,*) "HERE WE ARE WE HAVE DONE IT", id, i, j, l, smedian(l), median(l), minimum(l), corrsum(l,j,i)
+    ! !            data_l2%freqmask_full((l-1) * step:l*step,j,i) = 0.d0
+    ! !         end if
+    ! !      end do
+    !    end do
+    ! end do
+    !call get_mean_and_sigma(maxcorr, data_l2%freqmask_full, mean_maxcorr, sigma_maxcorr, .true.)
+    !call get_mean_and_sigma(meancorr, data_l2%freqmask_full, mean_meancorr, sigma_meancorr, .true.)
+    !call get_mean_and_sigma(meanabscorr, data_l2%freqmask_full, mean_meanabscorr, sigma_meanabscorr, .true.)
+    !call get_mean_and_sigma(vars, data_l2%freqmask_full, mean_vars, sigma_vars, .true.)
+    
+    data_l2%diagnostics(:,:,:,1) = means
+    data_l2%diagnostics(:,:,:,2) = vars
+    data_l2%diagnostics(:,:,:,3) = maxcorr
+    data_l2%diagnostics(:,:,:,4) = meancorr
+    data_l2%diagnostics(:,:,:,5) = meanabscorr
+    data_l2%cut_params(1,1) = mean_vars
+    data_l2%cut_params(2,1) = sigma_vars
+    data_l2%cut_params(1,2) = mean_maxcorr
+    data_l2%cut_params(2,2) = sigma_maxcorr
+    data_l2%cut_params(1,3) = mean_meancorr
+    data_l2%cut_params(2,3) = sigma_meancorr
+    data_l2%cut_params(1,4) = mean_meanabscorr
+    data_l2%cut_params(2,4) = sigma_meanabscorr
+    data_l2%cut_params(1,5) = sum(median) / nfreq
+    data_l2%cut_params(2,5) = std_median
+    !do i = 1, ndet
+    !   if (.not. is_alive(i)) cycle
+    !   do j = 1, nsb
+    !      do k = 1, nfreq
+    !         if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+    !         data_l2%diagnostics(k,j,i,1) = 
+    !      end do
+    !   end do
+    !end do
+    !close(55)
+    deallocate(vars)
+    deallocate(means)
+    deallocate(median)
+    deallocate(corrs)
+    deallocate(subt)
+    deallocate(maxcorr)
+    deallocate(meancorr)
+    deallocate(meanabscorr)
+    !deallocate(corrsum)
+    !deallocate(corrsum_mask)
+  end subroutine flag_correlations
+
+  subroutine get_mean_and_sigma(data, mask, mean, sigma, remove_outliers)
+    real(dp), dimension(:,:,:), intent(in)  :: data
+    real(sp), dimension(:,:,:), intent(in)  :: mask
+    real(dp),                   intent(out) :: mean, sigma
+    logical(lgt),               intent(in)  :: remove_outliers
+    real(dp), allocatable, dimension(:,:,:) :: outlier_mask
+    
+    mean = sum(data) / sum(mask)
+    sigma  = sqrt(sum(data ** 2) / sum(mask) - mean ** 2)
+    
+    if (remove_outliers) then
+       allocate(outlier_mask(size(data,1),size(data,2),size(data,3)))
+       outlier_mask = mask * merge(1.d0,0.d0,abs(data - mean) <= 3.0 * sigma)
+       mean = sum(data * outlier_mask) / sum(outlier_mask)
+       sigma = sqrt(sum((data * outlier_mask) ** 2) / sum(outlier_mask) - mean ** 2)
+       deallocate(outlier_mask)
+    end if
+  end subroutine get_mean_and_sigma
+  
   subroutine interpolate_nans(data, id)
     implicit none
     type(Lx_struct),  intent(inout) :: data
@@ -245,44 +665,74 @@ contains
 
   end subroutine normalize_gain
   
-  subroutine pca_filter_TOD(data_l2, var)
+  subroutine pca_filter_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol)
     implicit none
-    type(Lx_struct),                            intent(inout) :: data_l2
-    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, iters
-    real(dp)     :: eigval, tol, err, dotsum
+    type(Lx_struct),           intent(inout) :: data_l2
+    integer(i4b),                 intent(in)    :: n_pca_comp, pca_max_iter
+    real(dp),                  intent(in)    :: pca_err_tol
+    integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
+    real(dp)     :: eigenv, dotsum, amp, err
     real(dp),     allocatable, dimension(:)   :: r, s
+    CHARACTER(LEN=128) :: number
     
+    data_l2%n_pca_comp = n_pca_comp
+    if (n_pca_comp == 0) return
+
     nsamp       = size(data_l2%tod,1)
     nfreq       = size(data_l2%tod,2)
     nsb         = size(data_l2%tod,3)
     ndet        = size(data_l2%tod,4)
-    
+    !write(*,*) "In pca filter"  !, nsamp, nfreq, nsb, ndet
     allocate(r(nsamp), s(nsamp))
-    n = 10  ! max iterations
-    tol = 1.d-5  ! error tolerance
-    err = 1.d0
-    r = data_l2%tod(:,0,0,0)
-    do while ((err > tol) .and. (iters < n + 1))
-       s = 0.d0
-       do i = 1, ndet
-          do j = 1, n_sb
-             do k = 1, nfreq
-                dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
-                s(:) = s(:) + dotsum * data_l2%tod(:,k,j,i)
+            
+    if(.not. allocated(data_l2%pca_ampl)) allocate(data_l2%pca_ampl(nfreq,nsb,ndet,n_pca_comp)) 
+    if(.not. allocated(data_l2%pca_comp)) allocate(data_l2%pca_comp(nsamp,n_pca_comp))
+    if(.not. allocated(data_l2%pca_eigv)) allocate(data_l2%pca_eigv(n_pca_comp))
+    
+    do l = 1, n_pca_comp 
+       err = 1.d0
+       r(:) = data_l2%tod(:,5,2,5)
+    !   write(*,*) "early sum of r", sum(r)
+       iters = 0
+       do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
+          s = 0.d0
+          do i = 1, ndet
+             if (.not. is_alive(i)) cycle
+             do j = 1, nsb
+                do k = 1, nfreq
+                   if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle   
+                   dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
+                   s(:) = s(:) + dotsum * data_l2%tod(:,k,j,i)
+                   !write(*,*) "early sum of tod", sum(data_l2%tod(:,k,j,i))
+                end do
              end do
           end do
+          
+          eigenv = sum(s(:) * r(:))
+          
+          err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
+          r(:) = s(:)/sqrt(sum(s(:) ** 2))
+          iters = iters + 1
        end do
-
-       eigenv = sum(s(:) * r(:))
-
-       err = sqrt(sum((eigenv * r(l) - s(l)) ** 2))
-       r(:) = s(:)/sqrt(sum(s(:) ** 2))
-    end do
-    do i = 1, ndet
-       do j = 1, n_sb
-          do k = 1, nfreq
-             amp = sum(r(:) * data_l2%tod(:,k,j,i))
-             data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - amp * r(:)
+       !write(*,*) "Done with ", iters, " iterations in pca"
+       !write(*,*) "Error is ", err
+       !write(*,*) "Eigenvalue nr", l, "is", eigenv
+       data_l2%pca_eigv(l) = eigenv
+       data_l2%pca_comp(:,l) = r(:)
+       !write(number,'(i1)') l
+       !open(55,file='/mn/stornext/d14/comap/comap/protodir/comp_'//trim(number)//'_tod.dat')
+       !do i=1,nsamp
+       !   write(55,'(5(E20.11))') data_l2%time(i), r(i), data_l2%tod(i,545,1,3), data_l2%tod(i,244,1,14), data_l2%tod(i,320,1,15) 
+       !enddo
+       !close(55)
+       do i = 1, ndet
+          if (.not. is_alive(i)) cycle
+          do j = 1, nsb
+             do k = 1, nfreq
+                if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+                data_l2%pca_ampl(k,j,i,l) = sum(r(:) * data_l2%tod(:,k,j,i))
+                data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - data_l2%pca_ampl(k,j,i,l) * r(:)
+             end do
           end do
        end do
     end do
@@ -691,6 +1141,10 @@ contains
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
     allocate(data_out%var_fullres(size(data_in%nu,1),nsb,ndet))
+    allocate(data_out%pca_ampl(size(data_in%nu,1),nsb,ndet,size(data_in%pca_ampl,4)))
+    allocate(data_out%pca_comp(size(data_in%pca_comp,1),size(data_in%pca_comp,2)))
+    allocate(data_out%pca_eigv(size(data_in%pca_eigv,1)))
+    allocate(data_out%acceptrate(nsb,ndet))
     allocate(data_out%pixels(ndet))
     if (allocated(data_in%mean_tp)) then
        data_out%mean_tp = data_in%mean_tp
@@ -700,7 +1154,11 @@ contains
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
     data_out%pixels        = data_in%pixels
-
+    data_out%pca_ampl      = data_in%pca_ampl
+    data_out%pca_comp      = data_in%pca_comp
+    data_out%pca_eigv      = data_in%pca_eigv
+    data_out%acceptrate    = data_in%acceptrate
+    
     ! Make angles safe for averaging
     do j = 1, ndet
        if (.not. is_alive(j)) cycle

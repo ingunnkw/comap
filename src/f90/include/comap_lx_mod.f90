@@ -24,6 +24,7 @@ module comap_lx_mod
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
      integer(i4b)                                    :: polyorder     ! Polynomial order for frequency filter
+     integer(i4b)                                    :: n_pca_comp    ! Number of leading pca-components to subtract
      integer(i4b)                                    :: decimation_time, decimation_nu
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
@@ -31,7 +32,13 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: mean_tp
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_poly      ! Poly-filter TOD coefficients (time,0:poly,sb,det)
      real(sp),     allocatable, dimension(:,:,:)     :: var_fullres   ! Full-resolution variance (freq,sb,det)
-
+     real(sp),     allocatable, dimension(:,:,:,:)   :: pca_ampl      ! amplitudes of pca-components (frec,sb,det,comp)
+     real(sp),     allocatable, dimension(:,:)       :: pca_comp      ! actual pca component timestreams (time,comp)
+     real(sp),     allocatable, dimension(:)         :: pca_eigv      ! eigenvalues of pca components (comp)
+     real(sp),     allocatable, dimension(:,:)       :: acceptrate    ! fraction of freqs not masked (sb,det)
+     real(sp),     allocatable, dimension(:,:,:,:)   :: diagnostics   ! various diagnostics used to make freqmask
+     real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
+     
      ! Level 3 fields
      integer(i4b)                                    :: coord_sys
      real(dp)                                        :: scanfreq(2), pixsize 
@@ -210,6 +217,22 @@ contains
     call read_hdf(file, "pixels",           data%pixels)
     allocate(data%var_fullres(nfreq_full,nsb,ndet))
     call read_hdf(file, "var_fullres",      data%var_fullres)
+    call read_hdf(file, "n_pca_comp",         data%n_pca_comp)
+    if (data%n_pca_comp > 0) then
+       allocate(data%pca_ampl(nfreq_full,nsb,ndet,data%n_pca_comp)) 
+       allocate(data%pca_comp(nsamp,data%n_pca_comp))
+       allocate(data%pca_eigv(data%n_pca_comp))
+       call read_hdf(file, "pca_ampl",         data%pca_ampl)
+       call read_hdf(file, "pca_comp",         data%pca_comp)
+       call read_hdf(file, "pca_eigv",         data%pca_eigv)
+    end if
+    allocate(data%acceptrate(nsb,ndet))
+    call read_hdf(file, "acceptrate",       data%acceptrate)
+    allocate(data%diagnostics(nfreq_full,nsb,ndet,5))
+    allocate(data%cut_params(2,5))
+    call read_hdf(file, "diagnostics",       data%diagnostics)
+    call read_hdf(file, "cut_params",        data%cut_params)
+    
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -332,6 +355,12 @@ contains
     if(allocated(data%fknee_poly))    deallocate(data%fknee_poly)
     if(allocated(data%pixels))        deallocate(data%pixels)
     if(allocated(data%var_fullres))   deallocate(data%var_fullres)
+    if(allocated(data%pca_ampl))      deallocate(data%pca_ampl)
+    if(allocated(data%pca_comp))      deallocate(data%pca_comp)
+    if(allocated(data%pca_eigv))      deallocate(data%pca_eigv)
+    if(allocated(data%acceptrate))    deallocate(data%acceptrate)
+    if(allocated(data%diagnostics))   deallocate(data%diagnostics)
+    if(allocated(data%cut_params))    deallocate(data%cut_params)
   end subroutine
 
   subroutine write_l2_file(filename, data)
@@ -360,6 +389,15 @@ contains
     end if
     call write_hdf(file, "pixels",            data%pixels)
     call write_hdf(file, "var_fullres",       data%var_fullres)
+    call write_hdf(file, "n_pca_comp",        data%n_pca_comp)
+    if (data%n_pca_comp > 0) then
+       call write_hdf(file, "pca_ampl",          data%pca_ampl)
+       call write_hdf(file, "pca_comp",          data%pca_comp)
+       call write_hdf(file, "pca_eigv",          data%pca_eigv)
+    end if
+    call write_hdf(file, "acceptrate",        data%acceptrate)
+    call write_hdf(file, "diagnostics",       data%diagnostics)
+    call write_hdf(file, "cut_params",        data%cut_params)
     call close_hdf_file(file)
   end subroutine
 
@@ -401,6 +439,16 @@ contains
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
     call write_hdf(file, "var_fullres",       data%var_fullres)
+    call write_hdf(file, "n_pca_comp",        data%n_pca_comp)
+    if (data%n_pca_comp > 0) then
+       call write_hdf(file, "pca_ampl",          data%pca_ampl)
+       call write_hdf(file, "pca_comp",          data%pca_comp)
+       call write_hdf(file, "pca_eigv",          data%pca_eigv)
+    end if
+    call write_hdf(file, "acceptrate",        data%acceptrate)
+    call write_hdf(file, "diagnostics",       data%diagnostics)
+    call write_hdf(file, "cut_params",        data%cut_params)
+    
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",       data%tod_poly)
        call write_hdf(file, "sigma0_poly",    data%sigma0_poly)
@@ -424,7 +472,8 @@ contains
     real(dp)                       :: f
 
     call free_lx_struct(out)
-
+    
+    
 !!$    nf   = size(in(1)%tod,2)
 !!$    nsb  = size(in(1)%tod,3)
 !!$    ndet = size(in(1)%tod,4)
@@ -489,6 +538,171 @@ contains
 
   end subroutine
 
+
+  subroutine copy_lx_struct(lx_in, lx_out)
+    type(lx_struct), intent(in)    :: lx_in
+    type(lx_struct), intent(inout) :: lx_out
+    call free_lx_struct(lx_out)
+    
+    
+    lx_out%mjd_start = lx_in%mjd_start
+    lx_out%samprate = lx_in%samprate
+    lx_out%scanmode = lx_in%scanmode
+    lx_out%polyorder = lx_in%polyorder
+    lx_out%decimation_time = lx_in%decimation_time
+    lx_out%decimation_nu = lx_in%decimation_nu
+    lx_out%coord_sys = lx_in%coord_sys
+    lx_out%scanfreq = lx_in%scanfreq
+    lx_out%pixsize = lx_in%pixsize
+    lx_out%point_lim = lx_in%point_lim
+    lx_out%stats = lx_in%stats
+    lx_out%n_pca_comp = lx_in%n_pca_comp
+
+
+    if(allocated(lx_in%time))        then
+       allocate(lx_out%time(size(lx_in%time,1)))
+       lx_out%time = lx_in%time
+    end if
+    if(allocated(lx_in%time_point))  then  
+       allocate(lx_out%time_point(size(lx_in%time_point,1)))
+       lx_out%time_point = lx_in%time_point 
+    end if
+    if(allocated(lx_in%nu))          then  
+       allocate(lx_out%nu(size(lx_in%nu,1),size(lx_in%nu,2),size(lx_in%nu,3)))
+       lx_out%nu = lx_in%nu
+    end if
+    if(allocated(lx_in%tod))         then  
+       allocate(lx_out%tod(size(lx_in%tod,1),size(lx_in%tod,2),size(lx_in%tod,3),size(lx_in%tod,4)))
+       lx_out%tod = lx_in%tod
+    end if
+    if(allocated(lx_in%point_tel))   then 
+       allocate(lx_out%point_tel(size(lx_in%point_tel,1),size(lx_in%point_tel,2),size(lx_in%point_tel,3)))
+       lx_out%point_tel = lx_in%point_tel
+    end if
+    if(allocated(lx_in%point_cel))   then
+       allocate(lx_out%point_cel(size(lx_in%point_cel,1),size(lx_in%point_cel,2),size(lx_in%point_cel,3)))
+       lx_out%point_cel = lx_in%point_cel
+    end if
+    if(allocated(lx_in%scanmode_l1)) then
+       allocate(lx_out%scanmode_l1(size(lx_in%scanmode_l1,1)))
+       lx_out%scanmode_l1 = lx_in%scanmode_l1
+    end if
+    if(allocated(lx_in%flag))        then
+       allocate(lx_out%flag(size(lx_in%flag,1)))
+       lx_out%flag = lx_in%flag
+    end if
+    if(allocated(lx_in%point))         then
+       allocate(lx_out%point(size(lx_in%point,1),size(lx_in%point,2),size(lx_in%point,3)))
+       lx_out%point = lx_in%point
+    end if
+    if(allocated(lx_in%time_gain))     then
+       allocate(lx_out%time_gain(size(lx_in%time_gain,1)))
+       lx_out%time_gain = lx_in%time_gain
+    end if
+    if(allocated(lx_in%gain))          then
+       allocate(lx_out%gain(size(lx_in%gain,1),size(lx_in%gain,2),size(lx_in%gain,3),size(lx_in%gain,4)))
+       lx_out%gain = lx_in%gain
+    end if
+    if(allocated(lx_in%sigma0))        then
+       allocate(lx_out%sigma0(size(lx_in%sigma0,1),size(lx_in%sigma0,2),size(lx_in%sigma0,3)))
+       lx_out%sigma0 = lx_in%sigma0
+    end if
+    if(allocated(lx_in%alpha))         then
+       allocate(lx_out%alpha(size(lx_in%alpha,1),size(lx_in%alpha,2),size(lx_in%alpha,3)))
+       lx_out%alpha = lx_in%alpha
+    end if
+    if(allocated(lx_in%fknee))         then
+       allocate(lx_out%fknee(size(lx_in%fknee,1),size(lx_in%fknee,2),size(lx_in%fknee,3)))
+       lx_out%fknee = lx_in%fknee
+    end if
+    if(allocated(lx_in%det_stats))     then
+       allocate(lx_out%det_stats(size(lx_in%det_stats,1),size(lx_in%det_stats,2),size(lx_in%det_stats,3),size(lx_in%det_stats,4)))
+       lx_out%det_stats = lx_in%det_stats
+    end if
+    if(allocated(lx_in%filter_par))    then
+       allocate(lx_out%filter_par(size(lx_in%filter_par,1),size(lx_in%filter_par,2),size(lx_in%filter_par,3),size(lx_in%filter_par,4)))
+       lx_out%filter_par = lx_in%filter_par
+    end if
+    if(allocated(lx_in%freqmask))      then
+       allocate(lx_out%freqmask(size(lx_in%freqmask,1),size(lx_in%freqmask,2),size(lx_in%freqmask,3)))
+       lx_out%freqmask = lx_in%freqmask
+    end if
+    if(allocated(lx_in%freqmask_full)) then
+       allocate(lx_out%freqmask_full(size(lx_in%freqmask_full,1),size(lx_in%freqmask_full,2),size(lx_in%freqmask_full,3)))
+       lx_out%freqmask_full = lx_in%freqmask_full
+    end if
+    if(allocated(lx_in%mean_tp))       then
+       allocate(lx_out%mean_tp(size(lx_in%mean_tp,1),size(lx_in%mean_tp,2),size(lx_in%mean_tp,3)))
+       lx_out%mean_tp = lx_in%mean_tp
+    end if
+    if(allocated(lx_in%tod_poly))      then
+       allocate(lx_out%tod_poly(size(lx_in%tod_poly,1),size(lx_in%tod_poly,2),size(lx_in%tod_poly,3),size(lx_in%tod_poly,4)))
+       lx_out%tod_poly = lx_in%tod_poly
+    end if
+    if(allocated(lx_in%sigma0_poly))   then
+       allocate(lx_out%sigma0_poly(size(lx_in%sigma0_poly,1),size(lx_in%sigma0_poly,2),size(lx_in%sigma0_poly,3)))
+       lx_out%sigma0_poly = lx_in%sigma0_poly
+    end if
+    if(allocated(lx_in%alpha_poly))    then
+       allocate(lx_out%alpha_poly(size(lx_in%alpha_poly,1),size(lx_in%alpha_poly,2),size(lx_in%alpha_poly,3)))
+       lx_out%alpha_poly = lx_in%alpha_poly
+    end if
+    if(allocated(lx_in%fknee_poly))    then
+       allocate(lx_out%fknee_poly(size(lx_in%fknee_poly,1),size(lx_in%fknee_poly,2),size(lx_in%fknee_poly,3)))
+       lx_out%fknee = lx_in%fknee
+    end if
+    if(allocated(lx_in%pixels))        then
+       allocate(lx_out%pixels(size(lx_in%pixels,1)))
+       lx_out%pixels = lx_in%pixels
+    end if
+    if(allocated(lx_in%var_fullres))   then
+       allocate(lx_out%var_fullres(size(lx_in%var_fullres,1),size(lx_in%var_fullres,2),size(lx_in%var_fullres,3)))
+       lx_out%var_fullres = lx_in%var_fullres
+    end if
+    
+    if(allocated(lx_in%pca_ampl))   then
+       allocate(lx_out%pca_ampl(size(lx_in%pca_ampl,1),size(lx_in%pca_ampl,2),size(lx_in%pca_ampl,3),size(lx_in%pca_ampl,4)))
+       lx_out%pca_ampl = lx_in%pca_ampl
+    end if
+    if(allocated(lx_in%pca_comp))   then
+       allocate(lx_out%pca_comp(size(lx_in%pca_comp,1),size(lx_in%pca_comp,2)))
+       lx_out%pca_comp = lx_in%pca_comp
+    end if
+    if(allocated(lx_in%pca_eigv))   then
+       allocate(lx_out%pca_eigv(size(lx_in%pca_eigv,1)))
+       lx_out%pca_eigv = lx_in%pca_eigv
+    end if
+    if(allocated(lx_in%acceptrate))   then
+       allocate(lx_out%acceptrate(size(lx_in%acceptrate,1),size(lx_in%acceptrate,2)))
+       lx_out%acceptrate = lx_in%acceptrate
+    end if
+    if(allocated(lx_in%diagnostics))   then
+       allocate(lx_out%diagnostics(size(lx_in%diagnostics,1),size(lx_in%diagnostics,2),size(lx_in%diagnostics,3),size(lx_in%diagnostics,4)))
+       lx_out%diagnostics = lx_in%diagnostics
+    end if
+    if(allocated(lx_in%cut_params))   then
+       allocate(lx_out%cut_params(size(lx_in%cut_params,1),size(lx_in%cut_params,2)))
+       lx_out%cut_params = lx_in%cut_params
+    end if
+    
+    if(allocated(lx_in%filter_par))   then
+       allocate(lx_out%filter_par(size(lx_in%filter_par,1),size(lx_in%filter_par,2),size(lx_in%filter_par,3),size(lx_in%filter_par,4)))
+       lx_out%filter_par = lx_in%filter_par
+    end if
+    if(allocated(lx_in%weather_temp))   then
+       allocate(lx_out%weather_temp(size(lx_in%weather_temp,1),size(lx_in%weather_temp,2),size(lx_in%weather_temp,3)))
+       lx_out%weather_temp = lx_in%weather_temp
+    end if
+    if(allocated(lx_in%rel_gain))   then
+       allocate(lx_out%rel_gain(size(lx_in%rel_gain,1),size(lx_in%rel_gain,2),size(lx_in%rel_gain,3)))
+       lx_out%rel_gain = lx_in%rel_gain
+    end if 
+    if(allocated(lx_in%sec))   then
+       allocate(lx_out%sec(size(lx_in%sec,1)))
+       lx_out%sec = lx_in%sec
+    end if
+  end subroutine copy_lx_struct
+  
 
 end module comap_lx_mod
 
