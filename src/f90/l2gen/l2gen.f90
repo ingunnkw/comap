@@ -21,7 +21,7 @@ program l2gen
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter
   real(dp)             :: todsize, nb_factor, min_acceptrate
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
-  logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
+  logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers, mask_outliers
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
@@ -154,7 +154,7 @@ program l2gen
         data_l2_fullres%freqmask_full = data_l2_filter%freqmask_full 
         call free_lx_struct(data_l2_filter)
 
-        call update_freqmask(data_l2_fullres, min_acceptrate)
+        call update_freqmask(data_l2_fullres, min_acceptrate, scan%id)
         call update_status(status, 'made_freqmask')
      end if
      
@@ -197,9 +197,10 @@ program l2gen
 
 contains
   
-  subroutine update_freqmask(data_l2, min_acceptrate)
+  subroutine update_freqmask(data_l2, min_acceptrate, id)
     implicit none
     type(Lx_struct),                            intent(inout) :: data_l2
+    character(len=*),                           intent(in)    :: id
     real(dp),                                   intent(in)    :: min_acceptrate
     integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nfreq_full, nsb, ndet, dfreq
     
@@ -218,8 +219,9 @@ contains
           data_l2%acceptrate(j,i) = sum(data_l2%freqmask_full(:,j,i)) / nfreq_full
           if (data_l2%acceptrate(j,i) < min_acceptrate) then !Mask bad sidebands
              data_l2%freqmask_full(:,j,i) = 0.d0
+             write(*,*) "Rejecting entire sideband (too much was masked) det, sb, acceptrate, scanid:"
+             write(*,*) i, j, data_l2%acceptrate(j,i), id
              data_l2%acceptrate(j,i) = 0.d0
-             write(*,*) "rejecting entire sideband (too much was masked) det, sb:", i, j
           end if
        end do
     end do
@@ -308,12 +310,13 @@ contains
           !$OMP END DO
           !$OMP END PARALLEL
           do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
              meancorr(k,j,i)    = sum(corrs(k,:)) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
              maxcorr(k,j,i)     = maxval(abs(corrs(k,:)))
              meanabscorr(k,j,i) = sum(abs(corrs(k,:))) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
           end do
        end do
-       !write(*,*) "Done with correlation flagging in detector", i
+       !write(*,*) "Done with correlation masking in detector", i
     end do
     
     do i = 1, ndet
@@ -334,11 +337,11 @@ contains
     call get_mean_and_sigma(vars, data_l2%freqmask_full, mean_vars, sigma_vars, .true.)
     
     median = 0.0055d0
-    std_median = 0.0001d0 !minimum = 1.0d0
+    std_median = 0.0001d0 
     deallocate(subt)
     allocate(subt(nfreq-1))
     
-    !masking large-scale structures in the correlation plot
+    
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        do j = 1, nsb
@@ -348,7 +351,12 @@ contains
           end do
           subt = (meanabscorr(2:nfreq,j,i) - meanabscorr(1:nfreq-1,j,i)) / sqrt(2.d0)
           var_0 = sum(merge(subt ** 2, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
-          var_0 = var_0 / sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
+          if (sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1)))) == 0.d0) then
+             write(*,*) "OVERFLOW AVERTED", i, j, id
+             var_0 = 0.d0
+          else 
+             var_0 = var_0 / sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
+          end if
           std_median = std_median + 0.00002 * sign(1.d0, sqrt(var_0) - std_median)
        end do
     end do
