@@ -20,6 +20,7 @@ module comap_lx_mod
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
      integer(i4b), allocatable, dimension(:)         :: pixels      ! Active pixels/detectors
+     integer(i4b), allocatable, dimension(:,:,:)     :: n_nan       ! number of nan values for each frequency
 
      ! Level 2 fields
      integer(i4b)                                    :: scanmode
@@ -115,6 +116,7 @@ contains
 
     ! Find number of samples at end of file with NaNs
     if (present(freqmask)) then
+       allocate(data%n_nan(nfreq,nsb,ndet))
        ! Update frequency mask with channels that are all NaNs
        do i = 1, ndet
           do j = 1, nsb
@@ -122,13 +124,14 @@ contains
                 if (freqmask(k,j,i) == 0.) cycle
 !                ok = .false.
                 numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
+                data%n_nan(k,j,i) = numbad
 !                do l = 1, nsamp_tot
 !                   if (buffer_4d(l,k,j,i) .eq. buffer_4d(l,k,j,i)) then
 !                      ok = .true.
 !                      exit
 !                   end if
 !                end do
-                if (numbad > 0.1*nfreq) then
+                if (numbad > 0.1*nsamp_tot) then !nfreq) then
                    write(*,fmt='(a,a,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
                    freqmask(k,j,i) = 0.
                 end if
@@ -209,6 +212,9 @@ contains
     call read_hdf(file, "freqmask",         data%freqmask)    
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
     call read_hdf(file, "mean_tp",          data%mean_tp)
+    allocate(data%n_nan(nfreq_full,nsb,ndet))
+    call read_hdf(file, "n_nan",            data%n_nan)    
+    
     call read_hdf(file, "polyorder",        data%polyorder)
     if (data%polyorder >= 0) then
        allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
@@ -349,6 +355,7 @@ contains
     if(allocated(data%freqmask))      deallocate(data%freqmask)
     if(allocated(data%freqmask_full)) deallocate(data%freqmask_full)
     if(allocated(data%mean_tp))       deallocate(data%mean_tp)
+    if(allocated(data%n_nan))         deallocate(data%n_nan)
     if(allocated(data%tod_poly))      deallocate(data%tod_poly)
     if(allocated(data%sigma0_poly))   deallocate(data%sigma0_poly)
     if(allocated(data%alpha_poly))    deallocate(data%alpha_poly)
@@ -382,6 +389,7 @@ contains
     call write_hdf(file, "flag",              data%flag)
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
+    call write_hdf(file, "n_nan",             data%n_nan)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
     if (data%polyorder >= 0) then
@@ -436,6 +444,7 @@ contains
     call write_hdf(file, "pixels",            data%pixels)
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
+    call write_hdf(file, "n_nan",             data%n_nan)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
     call write_hdf(file, "var_fullres",       data%var_fullres)
@@ -630,6 +639,10 @@ contains
     if(allocated(lx_in%freqmask_full)) then
        allocate(lx_out%freqmask_full(size(lx_in%freqmask_full,1),size(lx_in%freqmask_full,2),size(lx_in%freqmask_full,3)))
        lx_out%freqmask_full = lx_in%freqmask_full
+    end if
+    if(allocated(lx_in%n_nan)) then
+       allocate(lx_out%n_nan(size(lx_in%n_nan,1),size(lx_in%n_nan,2),size(lx_in%n_nan,3)))
+       lx_out%n_nan = lx_in%n_nan
     end if
     if(allocated(lx_in%mean_tp))       then
        allocate(lx_out%mean_tp(size(lx_in%mean_tp,1),size(lx_in%mean_tp,2),size(lx_in%mean_tp,3)))
