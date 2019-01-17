@@ -969,7 +969,7 @@ contains
     nsb                      = size(data_in%tod,3)
     ndet                     = size(data_in%tod,4)
     data_out%samprate        = samprate_out
-    dt                       = nint(samprate_out/data_in%samprate)
+    dt                       = nint(data_in%samprate/samprate_out)
     data_out%decimation_time = dt
     call assert(data_out%decimation_time >= 1, 'Cannot ask for higher output sample rate than input')
 
