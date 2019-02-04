@@ -28,7 +28,7 @@ contains
     call get_parameter(0, parfile, 'MAP_NAME', par_string=map%name)
     call get_parameter(0, parfile, 'NUMFREQ', par_int=map%nfreq)
     call get_parameter(0, parfile, 'NUM_SIDEBAND', par_int=map%nsb)
-
+    call get_parameter(0, parfile, 'NUM_DET', par_int=map%ndet)
     
     !fs = 1!200
     !st = tod%nsamp!-200 ! tod%nsamp
@@ -107,11 +107,11 @@ contains
     end do
  
     ! Set up map structures
-    allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%dsum(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%div(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb), &
+    allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
+         & map%dsum(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
+         & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
+         & map%div(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
+         & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
          & map%freq(map%nfreq, map%nsb))
     map%dsum = 0.d0
     map%nhit = 0.d0
@@ -156,7 +156,7 @@ contains
                 do freq = 1, tod(scan)%nfreq
                    if (tod(scan)%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
-                   map%nhit(p,q,freq,sb) = map%nhit(p,q,freq,sb) + 1.d0
+                   map%nhit(p,q,freq,sb,j) = map%nhit(p,q,freq,sb,j) + 1.d0
                    sigma0(freq,sb) = sigma0(freq,sb) + tod(scan)%sigma0(freq,sb,j)
                 end do
              end do
@@ -170,10 +170,11 @@ contains
     sigma0 = sigma0/size(tod)
     do sb = 1, tod(1)%nsb
        do freq = 1, tod(1)%nfreq
-          where(map%nhit(:,:,freq,sb) > 0)
-             map%rms(:,:,freq,sb) = map%rms(:,:,freq,sb) + map%nhit(:,:,freq,sb)/sigma0(freq,sb)**2
+          if (sigma0(freq,sb) == 0) cycle
+          where(map%nhit(:,:,freq,sb,:) > 0)
+             map%rms(:,:,freq,sb,:) = map%rms(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2
           elsewhere
-             map%rms(:,:,freq,sb) = 0.d0
+             map%rms(:,:,freq,sb,:) = 0.d0
           end where
        end do
     end do
@@ -204,7 +205,7 @@ contains
     x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
     y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
 
-    ndet = size(tod%d,4)
+    ndet = map_tot%ndet
     nsb = map_tot%nsb 
     nfreq = map_tot%nfreq
 
@@ -219,13 +220,14 @@ contains
           q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
           do sb = 1, nsb
              do freq = 1, nfreq
-                if (tod%fknee(freq,sb,det) > 0.2d0) cycle
+                if (tod%fknee(freq,sb,det) > 0.5d0) cycle
                 if (tod%freqmask(freq,sb,det) == 0) cycle
+                if (tod%rms(i,freq,sb,det) == 0.d0) cycle
                 !write(*,*) i, det, sb, freq
-                if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
+                !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                 !write(*,*) tod%rms(i,freq,sb,det)
-                map_scan%dsum(p,q,freq,sb) = map_scan%dsum(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
-                map_scan%div(p,q,freq,sb) = map_scan%div(p,q,freq,sb) + 1.d0 / tod%rms(i,freq,sb,det)**2
+                map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
+                map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,det)**2
                 !end if
              end do
           end do
@@ -247,8 +249,8 @@ contains
 
     do p = 1, map%n_x
        do q = 1, map%n_y
-          map%dsum(p,q,1,1) = sum(map%dsum(p,q,:,:))
-          map%div(p,q,1,1)  = sum(map%div(p,q,:,:))
+          map%dsum(p,q,1,1,1) = sum(map%dsum(p,q,:,:,:))
+          map%div(p,q,1,1,1)  = sum(map%div(p,q,:,:,:))
        end do
     end do
 
@@ -537,7 +539,7 @@ contains
     ! Convert to map
     do j = 1, map%n_x
        do k = 1, map%n_y
-          map%m(j,k,freq,sb) = map%m(j,k,freq,sb) + mp((k-1)*map%n_x + j)
+          map%m(j,k,freq,sb,det) = map%m(j,k,freq,sb,det) + mp((k-1)*map%n_x + j)
        end do
     end do
     
@@ -598,7 +600,7 @@ contains
     do j = 1, map%n_x
        do k = 1, map%n_y
           i = (k-1)*map%n_x + j
-          nobs(i) = map%nhit(j,k,freq,sb)
+          nobs(i) = map%nhit(j,k,freq,sb,det)
        end do
     end do
     !write(*,*) nobs(4000), sigma0
