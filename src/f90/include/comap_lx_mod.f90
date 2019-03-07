@@ -15,6 +15,7 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:)         :: time_point
      real(dp),     allocatable, dimension(:,:,:)     :: nu          ! (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod         ! (time, freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:,:)     :: tod_mean    ! (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: point_cel   ! Celestial; (RA/dec/psi, time_point, det)
      real(sp),     allocatable, dimension(:,:,:)     :: point_tel   ! Horizon; (az/el/dk, time_point, det)
      integer(i4b), allocatable, dimension(:)         :: scanmode_l1 ! Scanning status
@@ -171,11 +172,14 @@ contains
 
              allocate(data%time(nsamp))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
+    if (all) allocate(data%tod_mean(nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
 
     data%time = buffer_1d(1:nsamp)
     if (all) data%flag = buffer_int(1:nsamp)
     if (all) data%tod = buffer_4d(1:nsamp,:,:,:)
+    if (all) call read_hdf(file, "tod_mean", data%tod_mean)
+
 
     call close_hdf_file(file)
     deallocate(buffer_1d)
