@@ -197,7 +197,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%pixels(ndet))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%pixels(ndet), data%tod_mean(1024, nsb, ndet))
     allocate(data%flag(nsamp))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
@@ -209,6 +209,7 @@ contains
     call read_hdf(file, "nu",               data%nu)
     call read_hdf(file, "tod",              data%tod)
     call read_hdf(file, "point_tel",        data%point_tel)
+    call read_hdf(file, "tod_mean",         data%tod_mean )
     call read_hdf(file, "point_cel",        data%point_cel)
     call read_hdf(file, "flag",             data%flag)
     nfreq_full = nfreq*data%decimation_nu
@@ -343,6 +344,7 @@ contains
     if(allocated(data%time_point))  deallocate(data%time_point)
     if(allocated(data%nu))          deallocate(data%nu)
     if(allocated(data%tod))         deallocate(data%tod)
+    if(allocated(data%tod_mean))    deallocate(data%tod_mean)
     if(allocated(data%point_tel))   deallocate(data%point_tel)
     if(allocated(data%point_cel))   deallocate(data%point_cel)
     if(allocated(data%scanmode_l1)) deallocate(data%scanmode_l1)
@@ -410,6 +412,7 @@ contains
     call write_hdf(file, "acceptrate",        data%acceptrate)
     call write_hdf(file, "diagnostics",       data%diagnostics)
     call write_hdf(file, "cut_params",        data%cut_params)
+    call write_hdf(file, "tod_mean",          data%tod_mean)
     call close_hdf_file(file)
   end subroutine
 
