@@ -293,8 +293,13 @@ contains
     else
        mjd_index2   = mjd_index1 - 1
     end if
+    
 
-    tsys_intp = (tsys_fullres(:,:,:,mjd_index1) + tsys_fullres(:,:,:,mjd_index2))/2.d0
+    if (mjd_index2 > nsamp_gain(1)) then
+       tsys_intp = (tsys_fullres(:,:,:,mjd_index1))
+    else
+       tsys_intp = (tsys_fullres(:,:,:,mjd_index1) + tsys_fullres(:,:,:,mjd_index2))/2.d0
+    end if
     dnu   = nfreq_fullres/nfreq
 
     do i=1, ndet
