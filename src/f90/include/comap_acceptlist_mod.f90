@@ -246,7 +246,9 @@ contains
     logical(lgt)           :: res
     integer(i4b)           :: snum
 
-    snum = lookup_scan(sid)
+    res = .true.
+
+    !snum = lookup_scan(sid)
 
     if (present(freq)) then
        !res  = alist%status(freq,det,snum) == REJECTED_NONE
