@@ -155,6 +155,7 @@ contains
 
     allocate(data%time(nsamp))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
+    if (all) allocate(data%tod_mean(nfreq,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
 
     call read_hdf(file, "spectrometer/MJD",           buffer_1d)
@@ -163,7 +164,6 @@ contains
     data%mjd_start    = minval(data%time)
     data%samprate     = 1.d0 / (3600.d0*24.d0*(data%time(2)-data%time(1)))
     data%flag         = 0
-
     call close_hdf_file(file)
     deallocate(buffer_1d)
     if (all) deallocate(buffer_4d,buffer_int)
@@ -180,7 +180,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%pixels(ndet))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%pixels(ndet), data%tod_mean(1024, nsb, ndet))
     allocate(data%flag(nsamp))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
@@ -192,6 +192,7 @@ contains
     call read_hdf(file, "nu",               data%nu)
     call read_hdf(file, "tod",              data%tod)
     call read_hdf(file, "point_tel",        data%point_tel)
+    call read_hdf(file, "tod_mean",         data%tod_mean )
     call read_hdf(file, "point_cel",        data%point_cel)
     call read_hdf(file, "flag",             data%flag)
     nfreq_full = nfreq*data%decimation_nu
@@ -327,6 +328,7 @@ contains
     if(allocated(data%time))        deallocate(data%time)
     if(allocated(data%nu))          deallocate(data%nu)
     if(allocated(data%tod))         deallocate(data%tod)
+    if(allocated(data%tod_mean))    deallocate(data%tod_mean)
     if(allocated(data%point_tel))   deallocate(data%point_tel)
     if(allocated(data%point_cel))   deallocate(data%point_cel)
     if(allocated(data%flag))        deallocate(data%flag)
@@ -391,6 +393,7 @@ contains
     call write_hdf(file, "sigma0",            data%sigma0)
     call write_hdf(file, "alpha",             data%alpha)
     call write_hdf(file, "fknee",             data%fknee)
+    call write_hdf(file, "tod_mean",          data%tod_mean)
     call close_hdf_file(file)
   end subroutine
 

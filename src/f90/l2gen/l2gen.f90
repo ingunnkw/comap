@@ -967,8 +967,8 @@ contains
     do j = 1, ndet
        do m = 1, nsb
           do n = 1, nfreq
-             data_l2%tod(:,n,m,j) = data_l1%tod(ind(1):ind(2),n,m,j)
-             data_l2%tod_mean(n,m,j)    = mean(data_l1%tod(ind(1):ind(2),n,m,j))
+             data_l2%tod(:,n,m,j)    = data_l1%tod(ind(1):ind(2),n,m,j)
+             data_l2%tod_mean(n,m,j) = mean(data_l1%tod(ind(1):ind(2),n,m,j))
           end do
        end do
     end do
@@ -984,12 +984,13 @@ contains
     type(Lx_struct),                   intent(in)  :: data_in
     type(Lx_struct),                   intent(out) :: data_out
 
-    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
+    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb, numfreq_in
     real(dp)     :: w, weight
     real(dp), allocatable, dimension(:,:,:) :: sigmasq
 
     nsb                      = size(data_in%tod,3)
     ndet                     = size(data_in%tod,4)
+    numfreq_in               = size(data_in%tod,2)
     data_out%samprate        = samprate_out
     dt                       = nint(data_in%samprate/samprate_out)
     data_out%decimation_time = dt
@@ -1004,6 +1005,7 @@ contains
     allocate(data_out%time(nsamp_out))
     allocate(data_out%nu(numfreq_out,nsb,ndet))
     allocate(data_out%tod(nsamp_out, numfreq_out, nsb, ndet))
+    allocate(data_out%tod_mean(numfreq_in, nsb, ndet))
     allocate(data_out%point_tel(3,nsamp_out,ndet))
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
@@ -1053,6 +1055,7 @@ contains
        if (nsamp_out == 0) cycle
        if (.not. is_alive(k)) cycle
        do j = 1, nsb
+          data_out%tod_mean(:,j,k) = data_in%tod_mean(:,j,k)
           do i = 1, size(data_in%nu,1)
              if (data_out%freqmask_full(i,j,k) == 0) then
                 data_out%var_fullres(i,j,k) = 2.8d-5
