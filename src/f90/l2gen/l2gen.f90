@@ -14,7 +14,7 @@ program l2gen
   use comap_patch_mod
   implicit none
 
-  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
+  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb
@@ -32,6 +32,7 @@ program l2gen
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
 
   call getarg(1, parfile)
+  call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
   call get_parameter(unit, parfile, 'NUMFREQ',                   par_int=numfreq)
   call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES',       par_lgt=reprocess)
@@ -101,7 +102,7 @@ program l2gen
         write(*,*) 'Too few samples in ', scan%id
         cycle
      end if
-     call correct_missing_time_steps(data_l1%time)
+     !call correct_missing_time_steps(data_l1%time)
      call wall_time(t2)
      todsize = real(size(data_l1%tod,1),dp)*real(size(data_l1%tod(1,:,:,:)),dp)*4.d0/1024.d0**2 ! in MB
      write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
@@ -115,7 +116,7 @@ program l2gen
      call update_status(status, 'freq_mask2')
 
      ! Compute absolute calibration
-     call compute_Tsys(data_l1)
+     call compute_Tsys(tsysfile, data_l1)
 
      ! Get patch info
      found = get_patch_info(scan%object, pinfo) 
@@ -909,6 +910,7 @@ contains
     real(dp),                                   intent(in)    :: mjd(2)
     type(Lx_struct),                            intent(in)    :: data_l1
     type(Lx_struct),                            intent(inout) :: data_l2
+
     
     integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer, ndet0, err
     integer(i4b) :: ind(2), ind_point(2)
@@ -1104,6 +1106,7 @@ contains
                    do m = (i-1)*dt+1, i*dt
                       data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) 
                    end do
+
                 end do
                 if (weight > 0.d0) then
                    data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) / weight
@@ -1278,6 +1281,7 @@ contains
           end if
        end if
     end do
+
 99  close(unit)
 
     do k = 1, ndet
@@ -1383,21 +1387,79 @@ contains
   end subroutine remove_elevation_gain
 
 
-  subroutine compute_Tsys(data_l1)
+  subroutine compute_Tsys(tsys_file, data)
     implicit none
-    type(lx_struct), intent(inout)  :: data_l1
+    character(len=*),            intent(in)       :: tsys_file
+    type(Lx_struct),             intent(inout)    :: data
+    type(hdf_file)                                :: file
+    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
+    real(dp), dimension(:,:,:), allocatable       :: tsys_1, tsys_2, mean_tod
+    integer(i4b)                                  :: nfreq, nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu
+    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count
+    integer(i4b), dimension(:), allocatable       :: scanID
+    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec
+    real(dp), dimension(:), allocatable           :: time
 
-    integer(i4b) :: ndet, nfreq, nsb
+    allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))                                                                            
+    nsamp = size(data%tod,1)
+    nfreq = size(data%tod,2)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
 
-    nfreq = size(data_l1%tod,2)
-    nsb   = size(data_l1%tod,3)
-    ndet  = size(data_l1%tod,4)
+    ! 1) get tsys-values                                                                                                                        
+    call open_hdf_file(tsys_file, file, "r")
+    call read_hdf(file, "nfreq", nfreq_fullres)
+    call get_size_hdf(file, "MJD", nsamp_gain)
 
-    allocate(data_l1%Tsys(2,nfreq,nsb,ndet))
+    allocate(tsys_fullres(ndet, nsb, nfreq_fullres, nsamp_gain(1)))
+    allocate(tsys_1(nfreq_fullres, nsb, ndet))
+    allocate(tsys_2(nfreq_fullres, nsb, ndet))
+    allocate(mean_tod(nfreq_fullres, nsb, ndet))
+    allocate(time(nsamp_gain(1)))
+    call read_hdf(file, "MJD", time)
+    call read_hdf(file, "tsys_pr_P", tsys_fullres)
+    call close_hdf_file(file)
 
-    ! Compute Tsys for the beginning and end of each L1 file; set arbitrarily to 1 for now
-    data_l1%Tsys = 1.d0
+    ! finding closest time-value                                                                                                                
+    mjd_index1 = max(locate(time, data%time(1)),1)
+
+    if (mjd_index1 < data%time(1)) then
+        mjd_index2 = mjd_index1 + 1
+    else
+       mjd_index2   = mjd_index1 - 1
+    end if
+
+
+    tsys_1 = tsys_fullres(mjd_index1,:,:,:)
+    tsys_2 = tsys_fullres(mjd_index1,:,:,:)
     
+    do i=1, ndet
+       write(*,*) "det ", i
+       if (.not. is_alive(i)) cycle
+       do j=1, nsb
+          do k=1, nfreq
+             mean_tod = 0.d0
+             mean_count = 0.d0
+             do l=1, nsamp_gain(1)
+                if ( .not. isnan(data%tod(l,k,j,i))) then
+                   ! Calculating the nanmean in time of each tod
+                   mean_tod = mean_tod + data%tod(l,k,j,i)
+                   mean_count = mean_count + 1
+                end if
+             end do
+             !mean(x[!isnan(x)])
+             mean_tod = mean_tod / mean_count
+             data%Tsys(1,k,j,i) = tsys_1(k,j,i)*mean_tod(k,j,i)*data%freqmask_full(k,j,i)
+             data%Tsys(2,k,j,i) = tsys_2(k,j,i)*mean_tod(k,j,i)*data%freqmask_full(k,j,i)
+          end do
+       end do
+    end do
+  deallocate(tsys_fullres)
+  deallocate(tsys_1)
+  deallocate(tsys_2)
+  deallocate(mean_tod)
+  deallocate(time)
+
   end subroutine compute_Tsys
 
   subroutine calibrate_tod(data_l1, data_l2_fullres)
@@ -1405,7 +1467,6 @@ contains
     type(lx_struct), intent(in)    :: data_l1
     type(lx_struct), intent(inout) :: data_l2_fullres
 
-    real(dp)     :: Tsys
     integer(i4b) :: i, j, k, ndet, nfreq, nsb
 
     nfreq = size(data_l1%tod,2)
@@ -1413,18 +1474,13 @@ contains
     ndet  = size(data_l1%tod,4)
 
     ! Interpolate Tsys to current time for each detector
-    allocate(data_l2_fullres%Tsys(1,nfreq,nsb,ndet))
     do i = 1, ndet
        do j = 1, nsb
           do k = 1, nfreq
-             Tsys = 1.d0  ! Replace with interpolation, based on L1 Tsys start/stop and total power
-
-             data_l2_fullres%Tsys(1,k,j,i) = Tsys
-             data_l2_fullres%tod(:,k,j,i)  = Tsys * data_l2_fullres%tod(:,k,j,i)
+             data_l2_fullres%tod(:,k,j,i)  = (data_l1%Tsys(1,k,j,i) + data_l1%Tsys(2,k,j,i))/2.d0 * data_l1%tod(:,k,j,i)
           end do
        end do
     end do
-
   end subroutine calibrate_tod
 
   subroutine fit_noise(data_l2)
