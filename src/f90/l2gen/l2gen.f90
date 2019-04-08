@@ -97,6 +97,7 @@ program l2gen
      ! Read in Level 1 file
      call wall_time(t1)
      call read_l1_file(scan%l1file, data_l1, scan%id, freqmask=data_l1%freqmask_full, init=.false.)
+     data_l1%tod(:,:,:,20) = 0.d0
      call update_status(status, 'read_l1')
      if (size(data_l1%tod,1) <100) then
         write(*,*) 'Too few samples in ', scan%id
@@ -662,7 +663,7 @@ contains
     real(dp),                  intent(in)    :: pca_err_tol
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
     real(dp)     :: eigenv, dotsum, amp, err
-    real(sp),     allocatable, dimension(:)   :: r, s
+    real(dp),     allocatable, dimension(:)   :: r, s
     CHARACTER(LEN=128) :: number
     
     data_l2%n_pca_comp = n_pca_comp
@@ -701,7 +702,6 @@ contains
           end do
           
           eigenv = sum(s(:) * r(:))
-          
           err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
           r(:) = s(:)/sqrt(sum(s(:) ** 2))
           iters = iters + 1
@@ -1551,8 +1551,8 @@ contains
           !$OMP DO SCHEDULE(guided)
           do k=1, nfreq_fullres
              mean_tod           = mean(data%tod(:,k,j,i))
-             data%Tsys(1,k,j,i) = tsys_fullres(i,j,k,mjd_index1)*mean_tod * data%freqmask_full(k,j,i)
-             data%Tsys(2,k,j,i) = tsys_fullres(i,j,k,mjd_index2)*mean_tod * data%freqmask_full(k,j,i)
+             data%Tsys(1,k,j,i) = 40.d0 !tsys_fullres(i,j,k,mjd_index1)*mean_tod * data%freqmask_full(k,j,i)
+             data%Tsys(2,k,j,i) = 40.d0 !tsys_fullres(i,j,k,mjd_index2)*mean_tod * data%freqmask_full(k,j,i)
           end do
           !$OMP END DO
           !$OMP END PARALLEL
