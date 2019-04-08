@@ -748,7 +748,7 @@ contains
        return
     end if
 
-    allocate(T(nfreq,0:p), A(0:p,0:p), x(0:p))
+    allocate(T(nfreq,0:p), A(0:p,0:p))
     allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
 
     ! Precompute polynomial basis
@@ -774,6 +774,7 @@ contains
 
           ! Solve for polynomial coefficients
           !$OMP PARALLEL PRIVATE(k,m,x,l,stat)
+          allocate(x(0:p))
           !$OMP DO SCHEDULE(guided)
           do k = 1, nsamp
              do m = 0, p
@@ -795,10 +796,11 @@ contains
              end do
           end do
           !$OMP END DO
+          deallocate(x)
           !$OMP END PARALLEL
        end do
     end do
-    deallocate(T, A, x)
+    deallocate(T, A)
     
 !    open(22, file="tod_after_poly_2_3.unf", form="unformatted") ! Adjusted open statement
 !    write(22) data_l2%tod(:,:,3,1)
