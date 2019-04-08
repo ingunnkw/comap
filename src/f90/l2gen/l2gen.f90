@@ -1499,19 +1499,21 @@ contains
     character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
     type(hdf_file)                                :: file
+    real(dp)                                      :: mean_tod
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
-    real(dp), dimension(:,:,:), allocatable       :: tsys_1, tsys_2, mean_tod
-    integer(i4b)                                  :: nfreq, nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu
+    integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu
     integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count
     integer(i4b), dimension(:), allocatable       :: scanID
     real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec
     real(dp), dimension(:), allocatable           :: time
 
-    allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))                                                                            
-    nsamp = size(data%tod,1)
-    nfreq = size(data%tod,2)
-    nsb   = size(data%tod,3)
-    ndet  = size(data%tod,4)
+    nsamp         = size(data%tod,1)
+    nfreq_fullres = size(data%tod,2)
+    nsb           = size(data%tod,3)
+    ndet          = 19 ! size(data%tod,4)  ! Must be fixed somehow
+
+    allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))                                                     
+    data%Tsys = 0.d0
 
     ! 1) get tsys-values                                                                                                                        
     call open_hdf_file(tsys_file, file, "r")
@@ -1519,9 +1521,8 @@ contains
     call get_size_hdf(file, "MJD", nsamp_gain)
 
     allocate(tsys_fullres(ndet, nsb, nfreq_fullres, nsamp_gain(1)))
-    allocate(tsys_1(nfreq_fullres, nsb, ndet))
-    allocate(tsys_2(nfreq_fullres, nsb, ndet))
-    allocate(mean_tod(nfreq_fullres, nsb, ndet))
+    !allocate(tsys_1(nfreq_fullres, nsb, ndet))
+    !allocate(tsys_2(nfreq_fullres, nsb, ndet))
     allocate(time(nsamp_gain(1)))
     call read_hdf(file, "MJD", time)
     call read_hdf(file, "tsys_pr_P", tsys_fullres)
@@ -1529,42 +1530,35 @@ contains
 
     ! finding closest time-value                                                                                                                
     mjd_index1 = max(locate(time, data%time(1)),1)
+    mjd_index2 = mjd_index1 ! Must be fixed
+    !write(*,*) mjd_index1, size(tsys_fullres,1)
 
-    if (mjd_index1 < data%time(1)) then
-        mjd_index2 = mjd_index1 + 1
-    else
-       mjd_index2   = mjd_index1 - 1
-    end if
+    !if (mjd_index1 < data%time(1)) then
+    !    mjd_index2 = mjd_index1 + 1
+    !else
+    !   mjd_index2   = mjd_index1 - 1
+    !end if
 
 
-    tsys_1 = tsys_fullres(mjd_index1,:,:,:)
-    tsys_2 = tsys_fullres(mjd_index1,:,:,:)
+    !tsys_1 = tsys_fullres(mjd_index1,:,:,:)
+    !tsys_2 = tsys_fullres(mjd_index1,:,:,:)
     
     do i=1, ndet
        write(*,*) "det ", i
        if (.not. is_alive(i)) cycle
        do j=1, nsb
-          do k=1, nfreq
-             mean_tod = 0.d0
-             mean_count = 0.d0
-             do l=1, nsamp_gain(1)
-                if ( .not. isnan(data%tod(l,k,j,i))) then
-                   ! Calculating the nanmean in time of each tod
-                   mean_tod = mean_tod + data%tod(l,k,j,i)
-                   mean_count = mean_count + 1
-                end if
-             end do
-             !mean(x[!isnan(x)])
-             mean_tod = mean_tod / mean_count
-             data%Tsys(1,k,j,i) = tsys_1(k,j,i)*mean_tod(k,j,i)*data%freqmask_full(k,j,i)
-             data%Tsys(2,k,j,i) = tsys_2(k,j,i)*mean_tod(k,j,i)*data%freqmask_full(k,j,i)
+          !$OMP PARALLEL PRIVATE(k,l,mean_tod)
+          !$OMP DO SCHEDULE(guided)
+          do k=1, nfreq_fullres
+             mean_tod           = mean(data%tod(:,k,j,i))
+             data%Tsys(1,k,j,i) = tsys_fullres(i,j,k,mjd_index1)*mean_tod * data%freqmask_full(k,j,i)
+             data%Tsys(2,k,j,i) = tsys_fullres(i,j,k,mjd_index2)*mean_tod * data%freqmask_full(k,j,i)
           end do
+          !$OMP END DO
+          !$OMP END PARALLEL
        end do
     end do
   deallocate(tsys_fullres)
-  deallocate(tsys_1)
-  deallocate(tsys_2)
-  deallocate(mean_tod)
   deallocate(time)
 
   end subroutine compute_Tsys
@@ -1578,7 +1572,7 @@ contains
 
     nfreq = size(data_l1%tod,2)
     nsb   = size(data_l1%tod,3)
-    ndet  = size(data_l1%tod,4)
+    ndet  = 19 !size(data_l1%tod,4)
 
     ! Interpolate Tsys to current time for each detector
     do i = 1, ndet
