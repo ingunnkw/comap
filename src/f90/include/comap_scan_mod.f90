@@ -131,6 +131,16 @@ contains
              if (present(object)) then
                 if (trim(object) /= trim(name)) cycle
              end if
+             if (feature == 16) then
+                scan%scanmode = 'circ'
+             else if (feature == 32) then
+                scan%scanmode = 'ces'
+             else if (feature == 512) then
+                scan%scanmode = 'raster'
+             else
+                scan%scanmode = 'none'
+             end if
+             
              cnum = cnum+1
              scan%sid         = sid
              scan%subsid      = k

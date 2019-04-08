@@ -17,11 +17,11 @@ program l2gen
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter
   real(dp)             :: todsize, nb_factor, min_acceptrate
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
-  logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers, mask_outliers
+  logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
@@ -43,7 +43,7 @@ program l2gen
   call get_parameter(unit, parfile, 'N_PCA_COMPONENTS',          par_int=n_pca_comp)
   call get_parameter(unit, parfile, 'PCA_ERROR_TOLERANCE',       par_dp=pca_err_tol)
   call get_parameter(unit, parfile, 'PCA_MAX_ITERATIONS',        par_int=pca_max_iter)
-  call get_parameter(unit, parfile, 'MASK_OUTLIERS',             par_lgt=mask_outliers)
+  call get_parameter(unit, parfile, 'MASK_OUTLIERS',             par_int=mask_outliers)
   call get_parameter(unit, parfile, 'CORRELATION_CUT',           par_dp=corr_cut)
   call get_parameter(unit, parfile, 'MEAN_CORRELATION_CUT',      par_dp=mean_corr_cut)
   call get_parameter(unit, parfile, 'VARIANCE_CUT',              par_dp=var_cut)
@@ -131,13 +131,27 @@ program l2gen
         stop
      end if
 
+     ! Remove elevation gain
+!     if ((scan%scanmode == 'circ') .or. (scan%scanmode == 'raster')) then 
+!        write(*,*) 'Removing elevation gain'
+!        call remove_elevation_gain(data_l2_fullres)
+!     end if
+
+
      ! Normalize gain
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
         call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
         call update_status(status, 'gain_norm')
      end if
-     
-     if (mask_outliers) then
+
+     ! Remove elevation gain
+     if ((scan%scanmode == 'circ') .or. (scan%scanmode == 'raster')) then 
+        write(*,*) 'Removing elevation gain'
+        call remove_elevation_gain(data_l2_fullres)
+     end if
+
+     data_l2_fullres%mask_outliers = mask_outliers
+     if (mask_outliers == 1) then
         ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
         call copy_lx_struct(data_l2_fullres, data_l2_filter)
 
@@ -151,8 +165,7 @@ program l2gen
         ! flag correlations and variance
         call flag_correlations(data_l2_filter, scan%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor)
         ! replace freqmask in original tod
-        data_l2_fullres%freqmask_full = data_l2_filter%freqmask_full 
-        call free_lx_struct(data_l2_filter)
+        call transfer_diagnostics(data_l2_filter, data_l2_fullres)
 
         call update_freqmask(data_l2_fullres, min_acceptrate, scan%id)
         call update_status(status, 'made_freqmask')
@@ -164,10 +177,21 @@ program l2gen
      call update_status(status, 'polyfilter')
 
      ! pca filter after polyfilter
-     if (trim(pinfo%type) .ne. 'cosmo') n_pca_comp = 0
-     call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol)
-     call update_status(status, 'pca_filter')
-     
+     if (trim(pinfo%type) == 'cosmo') then
+        call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol)
+        call update_status(status, 'pca_filter')
+     end if
+
+     if (trim(pinfo%type) == 'gal') then
+        call copy_lx_struct(data_l2_fullres, data_l2_filter)
+
+        call polyfilter_TOD(data_l2_filter, bp_filter0)
+
+        ! pca filter copied data
+        call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+        
+        call remove_pca_components(data_l2_filter, data_l2_fullres)
+     end if
      
      ! Fourier transform frequency direction
      !call convert_GHz_to_k(data_l2_fullres(i))
@@ -196,6 +220,29 @@ program l2gen
   call free_status(status)
 
 contains
+
+  subroutine transfer_diagnostics(data_l2_in, data_l2_out)
+    implicit none
+    type(Lx_struct),                            intent(in) :: data_l2_in
+    type(Lx_struct),                            intent(inout) :: data_l2_out
+    integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nsb, ndet
+    
+    nsamp       = size(data_l2_in%tod,1)
+    nfreq       = size(data_l2_in%freqmask_full,1) ! nfreq in lowres data
+    nsb         = size(data_l2_in%tod,3)
+    ndet        = size(data_l2_in%tod,4)
+    
+    if (.not. allocated(data_l2_out%freqmask_full)) allocate(data_l2_out%freqmask_full(ndet,nsb,nfreq))
+    data_l2_out%freqmask_full = data_l2_in%freqmask_full
+    if (.not. allocated(data_l2_out%diagnostics)) allocate(data_l2_out%diagnostics(ndet,nsb,nfreq,size(data_l2_in%diagnostics,4)))
+    data_l2_out%diagnostics = data_l2_in%diagnostics
+    if (.not. allocated(data_l2_out%cut_params)) allocate(data_l2_out%cut_params(size(data_l2_in%cut_params,1),size(data_l2_in%cut_params,2)))
+    data_l2_out%cut_params = data_l2_in%cut_params
+    
+    call free_lx_struct(data_l2_in)
+
+  end subroutine transfer_diagnostics
+  
   
   subroutine update_freqmask(data_l2, min_acceptrate, id)
     implicit none
@@ -226,7 +273,6 @@ contains
        end do
     end do
     
-
     ! update lowres freqmask if all frequencies within a lowres bin are masked
     do k = 1, ndet
        do j = 1, nsb
@@ -235,9 +281,7 @@ contains
           end do
        end do
     end do
-    
-    
-    
+        
   end subroutine update_freqmask
 
   subroutine flag_correlations(data_l2, id, corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor)
@@ -269,7 +313,8 @@ contains
     if(.not. allocated(data_l2%cut_params)) allocate(data_l2%cut_params(2,5)) 
     allocate(corrs(nfreq,nfreq))
     allocate(subt(nsamp-1), median(nfreq))
-    
+
+    means = 0.d0
     vars = 0.d0
     maxcorr = 0.d0
     meancorr = 0.d0
@@ -309,6 +354,16 @@ contains
           end do
           !$OMP END DO
           !$OMP END PARALLEL
+          !if (i == 6 .and. j == 4) then
+          !   open(22, file="corr_6_4_"//trim(id)//".unf", form="unformatted") ! Adjusted open statement
+          !   write(22) corrs
+          !   close(22)
+          !end if
+          !if (i == 14 .and. j == 4) then
+          !   open(22, file="corr_14_4_"//trim(id)//".unf", form="unformatted") ! Adjusted open statement
+          !   write(22) corrs
+          !   close(22)
+          !end if
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
              meancorr(k,j,i)    = sum(corrs(k,:)) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
@@ -340,8 +395,7 @@ contains
     std_median = 0.0001d0 
     deallocate(subt)
     allocate(subt(nfreq-1))
-    
-    
+  
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        do j = 1, nsb
@@ -529,8 +583,46 @@ contains
        end do
     end do
 
-
   end subroutine normalize_gain
+  
+  subroutine remove_pca_components(data_l2_in, data_l2_out)
+    implicit none
+    type(Lx_struct),            intent(in)    :: data_l2_in
+    type(Lx_struct),            intent(inout) :: data_l2_out
+    integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
+    
+    nsamp       = size(data_l2_in%tod,1)
+    nfreq       = size(data_l2_in%tod,2)
+    nsb         = size(data_l2_in%tod,3)
+    ndet        = size(data_l2_in%tod,4)
+    
+    data_l2_out%n_pca_comp = data_l2_in%n_pca_comp
+
+    if (data_l2_out%n_pca_comp == 0) return
+
+    if (.not. allocated(data_l2_out%pca_comp)) allocate(data_l2_out%pca_comp(nsamp,data_l2_out%n_pca_comp))
+    data_l2_out%pca_comp = data_l2_in%pca_comp
+    if (.not. allocated(data_l2_out%pca_ampl)) allocate(data_l2_out%pca_ampl(nfreq,nsb,ndet,size(data_l2_in%pca_ampl,4)))
+    data_l2_out%pca_ampl = data_l2_in%pca_ampl
+    if (.not. allocated(data_l2_out%pca_eigv)) allocate(data_l2_out%pca_eigv(size(data_l2_in%pca_eigv,1)))
+    data_l2_out%pca_eigv = data_l2_in%pca_eigv
+    
+    call free_lx_struct(data_l2_in)
+    
+    do l = 1, data_l2_out%n_pca_comp
+       write(*,*) 'removing component'
+       do i = 1, ndet
+          if (.not. is_alive(i)) cycle
+          do j = 1, nsb
+             do k = 1, nfreq
+                if (data_l2_out%freqmask_full(k,j,i) == 0.d0) cycle
+                data_l2_out%tod(:,k,j,i) = data_l2_out%tod(:,k,j,i) - data_l2_out%pca_ampl(k,j,i,l) * data_l2_out%pca_comp(:,l)
+             end do
+          end do
+       end do
+    end do
+    
+  end subroutine remove_pca_components
   
   subroutine pca_filter_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol)
     implicit none
@@ -555,10 +647,13 @@ contains
     if(.not. allocated(data_l2%pca_ampl)) allocate(data_l2%pca_ampl(nfreq,nsb,ndet,n_pca_comp)) 
     if(.not. allocated(data_l2%pca_comp)) allocate(data_l2%pca_comp(nsamp,n_pca_comp))
     if(.not. allocated(data_l2%pca_eigv)) allocate(data_l2%pca_eigv(n_pca_comp))
-    
+    data_l2%pca_ampl = 0.d0
     do l = 1, n_pca_comp 
        err = 1.d0
-       r(:) = data_l2%tod(:,5,2,5)
+       r(:) = data_l2%tod(:,5,2,5)  ! completely arbitrary, should be made more robust!
+       if (sum(r) == 0.d0) then
+          write(*,*) "PCA initialized with zero vector"
+       end if
        iters = 0
        do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
           s = 0.d0
@@ -672,6 +767,13 @@ contains
        end do
     end do
     deallocate(T, A, x)
+    
+    open(22, file="tod_after_poly_2_3.unf", form="unformatted") ! Adjusted open statement
+    write(22) data_l2%tod(:,:,3,1)
+    close(22)
+    open(22, file="tod_after_poly_15_2.unf", form="unformatted") ! Adjusted open statement
+    write(22) data_l2%tod(:,:,1,14)
+    close(22)
 
   end subroutine polyfilter_TOD
 
@@ -998,10 +1100,15 @@ contains
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
     allocate(data_out%var_fullres(size(data_in%nu,1),nsb,ndet))
     allocate(data_out%n_nan(size(data_in%nu,1),nsb,ndet))
-    
-    allocate(data_out%acceptrate(nsb,ndet))
-    allocate(data_out%diagnostics(size(data_in%nu,1),nsb,ndet,size(data_in%diagnostics,4)))
-    allocate(data_out%cut_params(size(data_in%cut_params,1),size(data_in%cut_params,2)))
+    data_out%mask_outliers = data_in%mask_outliers
+    if (data_in%mask_outliers == 1) then
+       allocate(data_out%acceptrate(nsb,ndet))
+       allocate(data_out%diagnostics(size(data_in%nu,1),nsb,ndet,size(data_in%diagnostics,4)))
+       allocate(data_out%cut_params(size(data_in%cut_params,1),size(data_in%cut_params,2)))
+       data_out%acceptrate    = data_in%acceptrate
+       data_out%diagnostics   = data_in%diagnostics
+       data_out%cut_params    = data_in%cut_params
+    end if
     allocate(data_out%pixels(ndet))
     if (allocated(data_in%mean_tp)) then
        data_out%mean_tp = data_in%mean_tp
@@ -1011,7 +1118,6 @@ contains
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
     data_out%pixels        = data_in%pixels
-    data_out%acceptrate    = data_in%acceptrate
     
     data_out%n_pca_comp    = data_in%n_pca_comp
     if (data_in%n_pca_comp > 0) then
@@ -1320,14 +1426,18 @@ contains
     implicit none
     type(lx_struct) :: data
     integer(i4b)    :: n, ndet, nsb, nfreq, i, j, k, l, m, tmin, tmax, parfile_time
-    real(dp)        :: g, a, sigma0, chisq, tsys, tau, dnu, const
+    real(dp)        :: a, sigma0, chisq, tsys, tau, dnu, const, g
     real(dp), dimension(:), allocatable :: el, dat
 
 !    m=a*data%samprate/data%scanfreq(2)      ! Number of tod-samples per gain estimate
-    m   = (size(data%time))
+    ! new linear function fit roughly every 5 min
+    !write(*,*) "lasttime: ", data%time(size(data%time))
+    !write(*,*) "firsttime: ", data%time(1)
+    n = max(1, floor((data%time(size(data%time)) - data%time(1)) * 24 * 60 / 5.d0))  
+    m = (size(data%time)) / n
     write(*,*) 'Number of samples per gain estimate    =', m
 !    n   = (size(data%time)+m-1)/m           ! Number of gain samples
-    n   = (size(data%time))/m               ! Number of gain samples
+!    n   = (size(data%time))/m               ! Number of gain samples
     
     write(*,*) 'Number of gain estimates for this scan =', n
     write(*,*) 'n*m                                    =', n*m
@@ -1341,29 +1451,43 @@ contains
     allocate(el(m), dat(m))
     !data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
     !open(13,file='gain.dat')
-    !open(14,file='chisq.dat')
+    !open(14,file='data1.dat')
+    !open(15,file='el.dat')
+    !open(16,file='data2.dat')
+    !write(14,*) data%tod(:,30,1,1)
     do k = 1, ndet
+       if (.not. is_alive(k)) cycle
        do l = 1, nsb
           do j = 1, nfreq
-          if (data%freqmask_full(j,l,k) == 0.d0) cycle
-          do i = 1, n
-             tmin = (i-1)*m+1
-             tmax = i*m
-             el  = data%point_tel(2,tmin:tmax,k)
-             if (any(el == 0.d0)) write(*,*) k, l, j, i
-             dat = data%tod(tmin:tmax,j,l,k)
-             !write(*,*) tmin, tmax, 'min max'
-             call estimate_gain(el,dat,g)
-             data%tod(tmin:tmax,j,l,k) = data%tod(tmin:tmax,j,l,k) - g*1/(sin(el*pi/180.))
-!             write(13,*) g
-!             write(13,*) (g-5.6d10)/5.6d10*100
-!             write(14,*) chisq
-          end do
+             if (data%freqmask_full(j,l,k) == 0.d0) cycle
+             do i = 1, n
+                tmin = (i-1)*m+1
+                tmax = i*m
+                if (i == n) then
+                   tmax = size(data%time)
+                end if
+                el  = data%point_tel(2,tmin:tmax,k)
+                if (any(el == 0.d0)) write(*,*) k, l, j, i
+                dat = data%tod(tmin:tmax,j,l,k)
+                !write(*,*) tmin, tmax, 'min max'
+                call estimate_gain(el,dat,g)
+                !if ((k == 1) .and. (l == 1) .and. (j == 30) .and. (i == 2)) then
+                !   write(13,*) g
+!               !    write(*,*) 'Yo'
+                !   !             write(13,*) (g-5.6d10)/5.6d10*100
+!               !    write(14,*) dat
+                !   write(15,*) el
+                !end if
+                data%tod(tmin:tmax,j,l,k) = data%tod(tmin:tmax,j,l,k) - g * 1 / sin(el*pi/180.) + sum(g * 1 / sin(el*pi/180.)) / size(el)
+             end do
           end do
        end do
     end do
+    !write(16,*) data%tod(:,30,1,1)
     !close(13)
     !close(14)
+    !close(15)
+    !close(16)
     deallocate(el, dat)
   end subroutine remove_elevation_gain
 

@@ -27,6 +27,7 @@ module comap_lx_mod
      integer(i4b)                                    :: polyorder     ! Polynomial order for frequency filter
      integer(i4b)                                    :: n_pca_comp    ! Number of leading pca-components to subtract
      integer(i4b)                                    :: decimation_time, decimation_nu
+     integer(i4b)                                    :: mask_outliers
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: point         ! Sky coordinates; (phi/theta/psi,time,det)
@@ -121,6 +122,7 @@ contains
        do i = 1, ndet
           do j = 1, nsb
              do k = 1, nfreq
+                !write(*,*) "hei", freqmask(k,j,i), k, j, i
                 if (freqmask(k,j,i) == 0.) cycle
 !                ok = .false.
                 numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
@@ -232,13 +234,15 @@ contains
        call read_hdf(file, "pca_comp",         data%pca_comp)
        call read_hdf(file, "pca_eigv",         data%pca_eigv)
     end if
-    allocate(data%acceptrate(nsb,ndet))
-    call read_hdf(file, "acceptrate",       data%acceptrate)
-    allocate(data%diagnostics(nfreq_full,nsb,ndet,5))
-    allocate(data%cut_params(2,5))
-    call read_hdf(file, "diagnostics",       data%diagnostics)
-    call read_hdf(file, "cut_params",        data%cut_params)
-    
+    call read_hdf(file, "mask_outliers",    data%mask_outliers)
+    if (data%mask_outliers == 1) then
+       allocate(data%diagnostics(nfreq_full,nsb,ndet,5))
+       allocate(data%cut_params(2,5))
+       allocate(data%acceptrate(nsb,ndet))
+       call read_hdf(file, "acceptrate",       data%acceptrate)
+       call read_hdf(file, "diagnostics",       data%diagnostics)
+       call read_hdf(file, "cut_params",        data%cut_params)
+    end if
     call close_hdf_file(file)
   end subroutine read_l2_file
 
@@ -403,9 +407,12 @@ contains
        call write_hdf(file, "pca_comp",          data%pca_comp)
        call write_hdf(file, "pca_eigv",          data%pca_eigv)
     end if
-    call write_hdf(file, "acceptrate",        data%acceptrate)
-    call write_hdf(file, "diagnostics",       data%diagnostics)
-    call write_hdf(file, "cut_params",        data%cut_params)
+    call write_hdf(file, "mask_outliers",     data%mask_outliers)
+    if (data%mask_outliers == 1) then
+       call write_hdf(file, "acceptrate",        data%acceptrate)
+       call write_hdf(file, "diagnostics",       data%diagnostics)
+       call write_hdf(file, "cut_params",        data%cut_params)
+    end if
     call close_hdf_file(file)
   end subroutine
 
@@ -454,9 +461,12 @@ contains
        call write_hdf(file, "pca_comp",          data%pca_comp)
        call write_hdf(file, "pca_eigv",          data%pca_eigv)
     end if
-    call write_hdf(file, "acceptrate",        data%acceptrate)
-    call write_hdf(file, "diagnostics",       data%diagnostics)
-    call write_hdf(file, "cut_params",        data%cut_params)
+    call write_hdf(file, "mask_outliers",     data%mask_outliers)
+    if (data%mask_outliers == 1) then
+       call write_hdf(file, "acceptrate",        data%acceptrate)
+       call write_hdf(file, "diagnostics",       data%diagnostics)
+       call write_hdf(file, "cut_params",        data%cut_params)
+    end if
     
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",       data%tod_poly)
@@ -566,7 +576,7 @@ contains
     lx_out%point_lim = lx_in%point_lim
     lx_out%stats = lx_in%stats
     lx_out%n_pca_comp = lx_in%n_pca_comp
-
+    lx_out%mask_outliers = lx_in%mask_outliers
 
     if(allocated(lx_in%time))        then
        allocate(lx_out%time(size(lx_in%time,1)))

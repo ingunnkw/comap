@@ -138,10 +138,10 @@ program l3gen
      if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
         call apply_gain_cal(tsys_loc,data)
         call calc_scanfreq(data);                ; call dmem("scanfreq")
-        !call apply_az_filter(data)               ; call dmem("az_filter")
+        !!call apply_az_filter(data)               ; call dmem("az_filter")
         call calc_fourier(data, ffts, powspecs)  ; call dmem("fourier")
         call fit_noise(data, powspecs, snum)     ; call dmem("noise")
-        !call calc_gain(data)                     ; call dmem("gain")
+        !!call calc_gain(data)                     ; call dmem("gain")
         if (allocated(ffts)) deallocate(ffts)
         if (allocated(powspecs)) deallocate(powspecs)
      end if
@@ -278,7 +278,7 @@ contains
     allocate(time(nsamp_gain(1)))
 
     call read_hdf(file, "MJD", time)
-    call read_hdf(file, "tsys", tsys_fullres)
+    call read_hdf(file, "tsys_pr_P", tsys_fullres)
     call close_hdf_file(file)
     ! finding closest time-value
     mjd_index = max(locate(time, data%time(1)),1)
@@ -314,6 +314,7 @@ contains
                      & 1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i)) / &
                      & sum(1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i))
                 data%gain(1,k,j,i) = tsys
+                !write(*,*) "tsys !!!!!!!!!!!!!!!!!!!!", tsys
                 data%tod(:,k,j,i) = data%tod(:,k,j,i)*tsys
              end if
           end do
@@ -578,6 +579,7 @@ contains
           do j = 1, nfreq      
 !          do j = 56, 56
              if (data%gain(1,j,k,i) == 0) then
+                !write(*,*) "zero Tsys 1. place"
                 if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,a)') scan%id, i, k, j, ' -- zero Tsys'
                 cycle
              end if

@@ -17,18 +17,22 @@ contains
 
   subroutine estimate_gain(el,dat,g,sigma0,chisq)
     implicit none
-    real(dp), dimension(:)                :: el, dat
+    real(dp), dimension(:),   intent(in)  :: el, dat
     real(dp),                 optional    :: sigma0, chisq
     real(dp),                 intent(out) :: g
     real(dp), dimension(:,:), allocatable :: templ, data, mat, hm
     real(dp), dimension(:),   allocatable :: amp
     integer(i4b)                          :: n, npt, nt, i, j 
 
-    npt = 2 ! Number of polytemplates
+    npt = 1 ! Number of polytemplates
     nt = 1 + npt ! Number of templates
     n = size(el) ! Number of samples
     allocate(templ(n,nt), data(n,1), amp(nt), mat(nt,nt), hm(nt,1))
+!    allocate(g(n))
     templ(:,1) = 1/(sin(el*pi/180.))
+    !do i = 1, n
+    !   templ(i,2) = (real(i,dp)-(real(n,dp)/2.)) * 1 / (sin(el(i)*pi/180.)) 
+    !end do
     do j = 1, npt
 !       write(*,*) j, 'inside polytemp loop'
        do i = 1, n
@@ -39,6 +43,11 @@ contains
     mat = matmul(transpose(templ),templ)
     hm =  matmul(transpose(templ), data)
     call  solve_linear_system_dp(mat, amp, hm(:,1))
+    !g = amp(1) * templ(:,1) + amp(2) * templ(:,2)
+    !do i = 1, n
+    !   g(i) = (amp(1) + amp(2) * (real(i,dp)-(real(n,dp)/2.))) * 1 / (sin(el(i)*pi/180.)) 
+    !end do
+    
     g = amp(1)
 !    write(*,*) g, '=gain'
 !    do j = 2, npt
