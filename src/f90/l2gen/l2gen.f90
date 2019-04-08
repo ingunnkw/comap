@@ -521,9 +521,9 @@ contains
     n = 0
     !$OMP DO SCHEDULE(guided)
     do k = 1, nfreq
-       do l = 2, nsamp-1
-          do i = 1, ndet
-             do j = 1, nsb
+       do i = 1, ndet
+          do j = 1, nsb
+             do l = 2, nsamp-1
                 if (data%tod(l,k,j,i) .ne. data%tod(l,k,j,i)) then
                    ! Only interpolate over single missing NaNs, not multiple in a row; these must be dealt with
                    ! in other ways
