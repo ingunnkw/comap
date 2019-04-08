@@ -7,21 +7,21 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, n_k, ntheta ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet,  n_k, ntheta ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
      character(len=512) :: name
      real(dp), allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
      real(dp), allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
-     real(dp), allocatable, dimension(:,:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq, nsb)
+     real(dp), allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq, nsb, ndet)
   end type map_type
 
 
 contains
 
   ! Writes an h5 file with maps/rms/nhit
-  subroutine output_map_h5(prefix,map, det, sb)
+  subroutine output_map_h5(prefix, map, det, sb)
     implicit none
     character(len=*), intent(in)    :: prefix
     type(map_type),   intent(inout) :: map
@@ -37,9 +37,9 @@ contains
     call write_hdf(file, "x",   map%x)
     call write_hdf(file, "y",   map%y)
     if (present(det)) then
-       call write_hdf(file, "map", map%m(:,:,sb:sb,det:det))
-       call write_hdf(file, "rms", map%rms(:,:,sb:sb,det:det))
-       call write_hdf(file, "nhit", map%nhit(:,:,sb:sb,det:det))
+       call write_hdf(file, "map", map%m(:,:,:,sb:sb,det:det))
+       call write_hdf(file, "rms", map%rms(:,:,:,sb:sb,det:det))
+       call write_hdf(file, "nhit", map%nhit(:,:,:,sb:sb,det:det))
     else
        call write_hdf(file, "map", map%m)
        call write_hdf(file, "rms", map%rms)
@@ -65,17 +65,17 @@ contains
     type(map_type),   intent(out) :: map
 
     type(hdf_file) :: file
-    integer(i4b)   :: nx, ny, nfreq, nsb, ext(7)
+    integer(i4b)   :: nx, ny, nfreq, nsb, ndet, ext(7)
 
     call free_map_type(map)
 
     call open_hdf_file(trim(filename), file, "r")
 
     call get_size_hdf(file, "map", ext)
-    nx = ext(1); ny = ext(2); nfreq = ext(3); nsb = ext(4)
+    nx = ext(1); ny = ext(2); nfreq = ext(3); nsb = ext(4); ndet = ext(5)
 
     allocate(map%x(nx), map%y(ny))
-    allocate(map%m(nx,ny,nfreq, nsb), map%rms(nx,ny,nfreq, nsb), map%nhit(nx,ny,nfreq, nsb))
+    allocate(map%m(nx,ny,nfreq,nsb,ndet), map%rms(nx,ny,nfreq,nsb,ndet), map%nhit(nx,ny,nfreq, nsb,ndet))
     allocate(map%freq(nfreq,nsb))
 
     call read_hdf(file, "n_x", map%n_x)
@@ -94,76 +94,76 @@ contains
   end subroutine read_map_h5
 
 
-  ! Creates a .dat file with the maps/rms/nhit for each frequency
-  subroutine output_maps(prefix, map)
-    implicit none
-    character(len=*), intent(in)    :: prefix
-    type(map_type),   intent(inout) :: map
+!   ! Creates a .dat file with the maps/rms/nhit for each frequency
+!   subroutine output_maps(prefix, map)
+!     implicit none
+!     character(len=*), intent(in)    :: prefix
+!     type(map_type),   intent(inout) :: map
 
-    integer(i4b)       :: i, j, k, unit
-    character(len=4)   :: itext
-    character(len=512) :: filename
+!     integer(i4b)       :: i, j, k, unit
+!     character(len=4)   :: itext
+!     character(len=512) :: filename
 
-    unit = getlun()
-    do i = 6, 6
-    !do i = 1, map%nfreq
-       call int2string(i,itext)
-       filename = trim(prefix)//'_freq'//itext//'_map.dat'
-       open(unit, file=trim(filename), recl=100000)
-       write(unit,*) '# n_x = ', map%n_x
-       write(unit,*) '# n_y = ', map%n_y
-       write(unit,*) '# x   = ', real(map%x,sp)
-       write(unit,*) '# y   = ', real(map%y,sp)
-       do j = 1, map%n_x
-          do k = 1, map%n_y
-             write(unit,fmt='(e16.8)',advance='no') map%m(j,k,i,:)
-          end do
-          write(unit,*)
-       end do
-       close(unit)
-    end do
+!     unit = getlun()
+!     do i = 6, 6
+!     !do i = 1, map%nfreq
+!        call int2string(i,itext)
+!        filename = trim(prefix)//'_freq'//itext//'_map.dat'
+!        open(unit, file=trim(filename), recl=100000)
+!        write(unit,*) '# n_x = ', map%n_x
+!        write(unit,*) '# n_y = ', map%n_y
+!        write(unit,*) '# x   = ', real(map%x,sp)
+!        write(unit,*) '# y   = ', real(map%y,sp)
+!        do j = 1, map%n_x
+!           do k = 1, map%n_y
+!              write(unit,fmt='(e16.8)',advance='no') map%m(j,k,i,:)
+!           end do
+!           write(unit,*)
+!        end do
+!        close(unit)
+!     end do
 
-    unit = getlun()
-    do i = 6, 6
-!    do i = 1, map%nfreq
-       call int2string(i,itext)
-       filename = trim(prefix)//'_freq'//itext//'_rms.dat'
-       open(unit, file=trim(filename), recl=100000)
-       write(unit,*) '# n_x = ', map%n_x
-       write(unit,*) '# n_y = ', map%n_y
-       write(unit,*) '# x   = ', real(map%x,sp)
-       write(unit,*) '# y   = ', real(map%y,sp)
-       do j = 1, map%n_x
-          do k = 1, map%n_y
-             write(unit,fmt='(e16.8)',advance='no') map%rms(j,k,i,:)
-          end do
-          write(unit,*)
-       end do
-       close(unit)
-    end do
+!     unit = getlun()
+!     do i = 6, 6
+! !    do i = 1, map%nfreq
+!        call int2string(i,itext)
+!        filename = trim(prefix)//'_freq'//itext//'_rms.dat'
+!        open(unit, file=trim(filename), recl=100000)
+!        write(unit,*) '# n_x = ', map%n_x
+!        write(unit,*) '# n_y = ', map%n_y
+!        write(unit,*) '# x   = ', real(map%x,sp)
+!        write(unit,*) '# y   = ', real(map%y,sp)
+!        do j = 1, map%n_x
+!           do k = 1, map%n_y
+!              write(unit,fmt='(e16.8)',advance='no') map%rms(j,k,i,:)
+!           end do
+!           write(unit,*)
+!        end do
+!        close(unit)
+!     end do
 
-    unit = getlun()
-    do i = 6, 6
-!    do i = 1, map%nfreq
-       call int2string(i,itext)
-       filename = trim(prefix)//'_freq'//itext//'_nhit.dat'
-       open(unit, file=trim(filename), recl=100000)
-       write(unit,*) '# n_x = ', map%n_x
-       write(unit,*) '# n_y = ', map%n_y
-       write(unit,*) '# x   = ', real(map%x,sp)
-       write(unit,*) '# y   = ', real(map%y,sp)
-       do j = 1, map%n_x
-          do k = 1, map%n_y
-             write(unit,fmt='(e16.8)',advance='no') map%nhit(j,k,i,:)
-          end do
-          write(unit,*)
-       end do
-       close(unit)
-    end do
+!     unit = getlun()
+!     do i = 6, 6
+! !    do i = 1, map%nfreq
+!        call int2string(i,itext)
+!        filename = trim(prefix)//'_freq'//itext//'_nhit.dat'
+!        open(unit, file=trim(filename), recl=100000)
+!        write(unit,*) '# n_x = ', map%n_x
+!        write(unit,*) '# n_y = ', map%n_y
+!        write(unit,*) '# x   = ', real(map%x,sp)
+!        write(unit,*) '# y   = ', real(map%y,sp)
+!        do j = 1, map%n_x
+!           do k = 1, map%n_y
+!              write(unit,fmt='(e16.8)',advance='no') map%nhit(j,k,i,:)
+!           end do
+!           write(unit,*)
+!        end do
+!        close(unit)
+!     end do
 
-    call free_map_type(map)
+!     call free_map_type(map)
 
-  end subroutine output_maps
+!   end subroutine output_maps
 
   subroutine nullify_map_type(map)
     implicit none
@@ -173,6 +173,7 @@ contains
     map%rms  = 0.d0
     map%dsum = 0.d0
     map%div  = 0.d0
+    map%nhit = 0.d0
 
 
   end subroutine nullify_map_type

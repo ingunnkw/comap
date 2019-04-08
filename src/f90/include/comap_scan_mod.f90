@@ -7,15 +7,21 @@ module comap_scan_mod
   ! Information about a comap_scan_info. Only the information that can be
   ! extracted directly from the level2-runlist. Category and object
   ! are indices into name arrays.
-  type comap_scan_info
-    integer(i4b)       :: sid, subsid
+  type comap_subscan
+    integer(i4b)       :: id
     real(dp)           :: mjd(2), az, el, dk, lat, lon, time_of_day
-    character(len=9)   :: id
-    character(len=512) :: l1file, l2file, l3file, object, scanmode
+    character(len=512) :: l2file, l3file, scanmode
+  end type comap_subscan
+
+  type comap_scan_info
+    integer(i4b)         :: id, nsub
+    real(dp)             :: mjd(2)
+    character(len=512)   :: l1file, object
+    type(comap_subscan), allocatable, dimension(:) :: ss
   end type comap_scan_info
 
   type comap_runlist
-     integer(i4b)                                     :: n
+     integer(i4b)                                     :: n, nsub
      type(comap_scan_info), dimension(:), allocatable :: scans
   end type comap_runlist
 
@@ -51,18 +57,24 @@ contains
     res = scan_db%n
   end function
 
-  function lookup_scan(sid) result(res)
+  function get_num_subscans() result(res)
     implicit none
-    character(len=9) :: sid
-    integer(i4b) :: res, i
-    res = 0
-    do i = 1, scan_db%n
-       if (scan_db%scans(i)%id == sid) then
-          res = i
-          exit
-       end if
-    end do
+    integer(i4b) :: res
+    res = scan_db%nsub
   end function
+
+!!$  function lookup_scan(sid) result(res)
+!!$    implicit none
+!!$    character(len=9) :: sid
+!!$    integer(i4b) :: res, i
+!!$    res = 0
+!!$    do i = 1, scan_db%n
+!!$       if (scan_db%scans(i)%id == sid) then
+!!$          res = i
+!!$          exit
+!!$       end if
+!!$    end do
+!!$  end function
 
   subroutine get_scan_info(ind, scan)
     implicit none
@@ -117,6 +129,7 @@ contains
     call free_runlist(runlist)
     allocate(runlist%scans(n))
     cnum = 0
+    runlist%nsub = 0
     unit = getlun()
     open(unit,file=file,action="read",status="old")
     read(unit,*) nobj
@@ -124,36 +137,38 @@ contains
        read(unit,*) name, nscan
        do j = 1, nscan
           read(unit,'(a)') line
-          read(line,*) sid, mjd_file, nsub, feature
-          l1file = trim(l1dir) // "/" // trim(get_token(line, " ", 6))
-          do k = 1, nsub
-             read(unit,*) scan%id, scan%mjd, scan%az, scan%el, scan%dk, a, b, c, d
+          read(line,*) scan%id, scan%mjd, scan%nsub, feature
+          scan%l1file = trim(l1dir) // "/" // trim(get_token(line, " ", 6))
+          scan%object = name
+          allocate(scan%ss(scan%nsub))
+          cnum         = cnum+1
+          runlist%nsub = runlist%nsub + scan%nsub
+          do k = 1, scan%nsub
+             read(unit,*) scan%ss(k)%id, scan%ss(k)%mjd, &
+                  & scan%ss(k)%az, scan%ss(k)%el, scan%ss(k)%dk, a, b, c, d
+             call int2string(scan%ss(k)%id, subsid)
              if (present(object)) then
                 if (trim(object) /= trim(name)) cycle
              end if
+
              if (feature == 16) then
-                scan%scanmode = 'circ'
+                scan%ss(k)%scanmode = 'circ'
              else if (feature == 32) then
-                scan%scanmode = 'ces'
+                scan%ss(k)%scanmode = 'ces'
              else if (feature == 512) then
-                scan%scanmode = 'raster'
+                scan%ss(k)%scanmode = 'raster'
              else
-                scan%scanmode = 'none'
+                scan%ss(k)%scanmode = 'none'
              end if
-             
-             cnum = cnum+1
-             scan%sid         = sid
-             scan%subsid      = k
-             scan%l1file      = l1file
-             scan%object      = name
-             scan%time_of_day = mjd2chile_time(0.5d0*(scan%mjd(1)+scan%mjd(2)))
-             scan%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-                  & trim(scan%id) // ".h5"
-             scan%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
-                  & trim(scan%id) // ".h5"
-             call copy_scan_info(scan, runlist%scans(cnum))
-             call free_scan_info(scan)
+             scan%ss(k)%id          = k
+             scan%ss(k)%time_of_day = mjd2chile_time(0.5d0*(scan%ss(k)%mjd(1)+scan%ss(k)%mjd(2)))
+             scan%ss(k)%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
+                  & trim(subsid) // ".h5"
+             scan%ss(k)%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
+                  & trim(subsid) // ".h5"
           end do
+          call copy_scan_info(scan, runlist%scans(cnum))
+          call free_scan_info(scan)
        end do
     end do
     close(unit)
@@ -179,7 +194,7 @@ contains
           if (present(object)) then
              if (trim(object) /= trim(name)) cycle
           end if
-          n = n + nfile
+          n = n + 1
           do k = 1, nfile
              read(unit,'(a)') line
           end do
@@ -191,19 +206,40 @@ contains
   subroutine free_scan_info(a)
     implicit none
     type(comap_scan_info) :: a
+    if (allocated(a%ss)) deallocate(a%ss)
   end subroutine
 
   subroutine copy_scan_info(a, b)
     implicit none
     type(comap_scan_info) :: a, b
+    integer(i4b) :: i
+
     call free_scan_info(b)
-    b = a
+    b%id = a%id
+    b%nsub = a%nsub
+    b%mjd  = a%mjd
+    b%l1file = a%l1file
+    b%object = a%object
+    b%scanmode = a%scanmode
+    allocate(b%ss(b%nsub))
+    do i = 1, b%nsub
+       b%ss(i)%id          = a%ss(i)%id
+       b%ss(i)%mjd         = a%ss(i)%mjd
+       b%ss(i)%az          = a%ss(i)%az
+       b%ss(i)%el          = a%ss(i)%el
+       b%ss(i)%dk          = a%ss(i)%dk
+       b%ss(i)%lat         = a%ss(i)%lat
+       b%ss(i)%lon         = a%ss(i)%lon
+       b%ss(i)%time_of_day = a%ss(i)%time_of_day
+       b%ss(i)%l2file      = a%ss(i)%l2file
+       b%ss(i)%l3file      = a%ss(i)%l3file
+    end do
   end subroutine
 
   subroutine free_runlist(runlist)
     implicit none
     type(comap_runlist) :: runlist
-    integer(i4b) :: i
+    integer(i4b) :: i, j
     if(allocated(runlist%scans)) then
        do i = 1, size(runlist%scans)
           call free_scan_info(runlist%scans(i))

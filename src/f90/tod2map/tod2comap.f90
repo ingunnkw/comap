@@ -95,14 +95,15 @@ program tod2comap
   call initialize_mapmaker(map_tot,  tod, parfile, pinfo)
   call initialize_mapmaker(buffer,   tod, parfile, pinfo)
 
+  call nullify_map_type(map_tot)
   do i = 1+myid, nscan, nproc
      !prefix = pre//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
 
      !if (binning_split) then
 
+        call nullify_map_type(map_scan)
         call time2pix(tod(i:i), map_scan)
         call time2pix(tod(i:i), map_tot)
-        call nullify_map_type(map_scan)
         write(*,*) myid, "making maps, scan", i
         call binning(map_tot, map_scan, tod(i), alist, i)
         call finalize_scan_binning(map_scan)

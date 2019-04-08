@@ -14,7 +14,7 @@ program l2gen
   use comap_patch_mod
   implicit none
 
-  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name
+  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers
@@ -22,15 +22,17 @@ program l2gen
   real(dp)             :: todsize, nb_factor, min_acceptrate
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
+  logical(lgt)         :: process
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
-  type(Lx_struct)                            :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
+  type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
   type(planck_rng)     :: rng_handle
   type(status_file)    :: status
   type(patch_info)     :: pinfo
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
 
   call getarg(1, parfile)
+  call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
   call get_parameter(unit, parfile, 'NUMFREQ',                   par_int=numfreq)
   call get_parameter(unit, parfile, 'REPROCESS_ALL_FILES',       par_lgt=reprocess)
@@ -53,15 +55,17 @@ program l2gen
   call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=nb_factor)
   call get_parameter(unit, parfile, 'MIN_ACCEPTRATE',            par_dp=min_acceptrate)
   call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
-  
+  call get_parameter(unit, parfile, 'LEVEL2_DIR',                par_string=l2dir)
+    
 
   check_existing = .true.
+  call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
   call initialize_detector_mod(parfile)
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
-  call init_status(status, 'l2gen_mon.txt'); 
+  call init_status(status, trim(l2dir)//'/l2gen_mon.txt'); 
   call update_status(status, 'init')
   call initialize_comap_patch_mod(parfile)
   !call dset(id=myid,level=debug)
@@ -70,58 +74,49 @@ program l2gen
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   nscan    = get_num_scans()
-  npercore = nscan / nproc
-  if (nscan > npercore*nproc) npercore = npercore+1
-  id_old  = ''
-  do snum = myid*npercore+1, (myid+1)*npercore
-!  do snum = myid, nscan, nprocs
-     if (snum > nscan) exit
+  do snum = myid+1, nscan, nproc
      call get_scan_info(snum, scan)
-     inquire(file=scan%l2file,exist=exist)
-     if(exist .and. .not. reprocess) then
-        gonext = .true.
-        if(gonext) then
-           write(*,fmt="(i3,a,2i5,a)") myid, " skipping already finished scan:", snum, scan%sid
-           cycle
-        end if
-     else if (exist .and. reprocess) then
-        call rm(scan%l2file)
+     process = .false.
+     do k = 1, scan%nsub
+        inquire(file=scan%ss(k)%l2file,exist=exist)
+        if (reprocess .and. exist) call rm(scan%ss(k)%l2file)           
+        if (reprocess .or. .not. exist) process = .true.
+     end do
+     if (.not. process) then
+        write(*,fmt="(i3,a,2i5,i8)") myid, " skipping already finished scan:", snum, scan%id
+        cycle
      end if
-     write(*,fmt="(i3,a,a,a)") myid, " processing scan ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa((myid+1)*npercore)) // ")"
+
+     write(*,fmt="(i3,a,i10,a)") myid, " processing scan ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
      call update_status(status, 'scan_start')
 
      ! Initialize frequency mask
-     call free_lx_struct(data_l2_fullres)
-     call initialize_fullres_frequency_mask(freqmaskfile, data_l2_fullres)
+     call initialize_fullres_frequency_mask(freqmaskfile, data_l1)
      call update_status(status, 'freq_mask1')
 
      ! Read in Level 1 file
-     if (scan%id(1:6) /= id_old(1:6)) then
-        call wall_time(t1)
-        call free_lx_struct(data_l1)
-        call read_l1_file(scan%l1file, data_l1, scan%id(1:6), freqmask=data_l2_fullres%freqmask_full); call update_status(status, 'read_l1')
-        if (size(data_l1%tod,1) <100) then
-           write(*,*) 'Too few samples in ', scan%id(1:6)
-           cycle
-        end if
-        call correct_missing_time_steps(data_l1%time_point)
-        id_old = scan%id
-        call wall_time(t2)
-        todsize = real(size(data_l1%tod,1),dp)*real(size(data_l1%tod(1,:,:,:)),dp)*4.d0/1024.d0**2 ! in MB
-        write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
+     call wall_time(t1)
+     call read_l1_file(scan%l1file, data_l1, scan%id, freqmask=data_l1%freqmask_full, init=.false.)
+     call update_status(status, 'read_l1')
+     if (size(data_l1%tod,1) <100) then
+        write(*,*) 'Too few samples in ', scan%id
+        cycle
      end if
+     !call correct_missing_time_steps(data_l1%time)
+     call wall_time(t2)
+     todsize = real(size(data_l1%tod,1),dp)*real(size(data_l1%tod(1,:,:,:)),dp)*4.d0/1024.d0**2 ! in MB
+     write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
 
      ! Interpolate over single NaNs
      call interpolate_nans(data_l1, scan%id)
      call update_status(status, 'nan_interp')
 
      ! Finalize frequency mask
-     call postprocess_frequency_mask(numfreq, data_l1, data_l2_fullres, scan%id)
+     call postprocess_frequency_mask(numfreq, data_l1, scan%id)
      call update_status(status, 'freq_mask2')
 
-     ! Reformat L1 data into L2 format, and truncate
-     call merge_l1_into_l2_files(scan%mjd, data_l1, data_l2_fullres)
-     call update_status(status, 'merge')
+     ! Compute absolute calibration
+     call compute_Tsys(tsysfile, data_l1)
 
      ! Get patch info
      found = get_patch_info(scan%object, pinfo) 
@@ -131,89 +126,102 @@ program l2gen
         stop
      end if
 
-     ! Remove elevation gain
-!     if ((scan%scanmode == 'circ') .or. (scan%scanmode == 'raster')) then 
-!        write(*,*) 'Removing elevation gain'
-!        call remove_elevation_gain(data_l2_fullres)
-!     end if
+     do k = 1, scan%nsub
 
+        ! Reformat L1 data into L2 format, and truncate
+        call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
+        call update_status(status, 'excise')
 
-     ! Normalize gain
-     if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
-        call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
-        call update_status(status, 'gain_norm')
-     end if
-
-     ! Remove elevation gain
-     if ((scan%scanmode == 'circ') .or. (scan%scanmode == 'raster')) then 
-        write(*,*) 'Removing elevation gain'
-        call remove_elevation_gain(data_l2_fullres)
-     end if
-
-     data_l2_fullres%mask_outliers = mask_outliers
-     if (mask_outliers == 1) then
-        ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
-        call copy_lx_struct(data_l2_fullres, data_l2_filter)
-
-        ! Poly-filter copied data
-        call polyfilter_TOD(data_l2_filter, bp_filter0)
-
-
-        ! pca filter copied data
-        call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
-
-        ! flag correlations and variance
-        call flag_correlations(data_l2_filter, scan%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor)
-        ! replace freqmask in original tod
-        call transfer_diagnostics(data_l2_filter, data_l2_fullres)
-
-        call update_freqmask(data_l2_fullres, min_acceptrate, scan%id)
-        call update_status(status, 'made_freqmask')
-     end if
+        ! Normalize gain
+        if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
+           call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
+           call update_status(status, 'gain_norm')
+        end if
      
-     ! Poly-filter if requested
-     bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
-     call polyfilter_TOD(data_l2_fullres, bp_filter)
-     call update_status(status, 'polyfilter')
-
-     ! pca filter after polyfilter
-     if (trim(pinfo%type) == 'cosmo') then
-        call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol)
-        call update_status(status, 'pca_filter')
-     end if
-
-     if (trim(pinfo%type) == 'gal') then
-        call copy_lx_struct(data_l2_fullres, data_l2_filter)
-
-        call polyfilter_TOD(data_l2_filter, bp_filter0)
-
-        ! pca filter copied data
-        call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+        ! Apply absolute calibration
+        call calibrate_tod(data_l1, data_l2_fullres)
         
-        call remove_pca_components(data_l2_filter, data_l2_fullres)
-     end if
+        ! Remove elevation gain
+        if ((scan%scanmode == 'circ') .or. (scan%scanmode == 'raster')) then 
+           write(*,*) 'Removing elevation gain'
+           call remove_elevation_gain(data_l2_fullres)
+        end if
+
+
+        if (mask_outliers) then
+           ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
+           call copy_lx_struct(data_l2_fullres, data_l2_filter)
+           
+           ! Poly-filter copied data
+           call polyfilter_TOD(data_l2_filter, bp_filter0)
+           call update_status(status, 'polyfilter0')
+           
+           ! pca filter copied data
+           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+           call update_status(status, 'pca_filter0')
+           
+           ! flag correlations and variance
+           call flag_correlations(data_l2_filter, scan%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor)
+           call update_status(status, 'flag_corr')
+
+           ! replace freqmask in original tod
+           call transfer_diagnostics(data_l2_filter, data_l2_fullres)
+
+           call update_freqmask(data_l2_fullres, min_acceptrate, scan%id)
+           call update_status(status, 'made_freqmask')
+
+           call free_lx_struct(data_l2_filter)
+        end if
+
+
+        ! Poly-filter if requested
+        bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
+        call polyfilter_TOD(data_l2_fullres, bp_filter)
+        call update_status(status, 'polyfilter')
+        
+        ! pca filter after polyfilter
+        if (trim(pinfo%type) == 'cosmo') then
+           call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol)
+           call update_status(status, 'pca_filter')
+        end if
+
+        if (trim(pinfo%type) == 'gal') then
+           call copy_lx_struct(data_l2_fullres, data_l2_filter)
+           
+           call polyfilter_TOD(data_l2_filter, bp_filter0)
+           
+           ! pca filter copied data
+           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+        
+           call remove_pca_components(data_l2_filter, data_l2_fullres)
+        end if
+
+        ! Fourier transform frequency direction
+        !call convert_GHz_to_k(data_l2_fullres(i))
+        
+        ! If necessary, decimate L2 file in both time and frequency
+        call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+        call update_status(status, 'decimate')
+        !write(*,*) 'c'
+
+        ! Fit noise
+        call fit_noise(data_l2_decimated)
+
+        ! Replace TOD with simulated data
+        if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
+
+        ! Write L2 file to disk
+        write(*,*) 'Writing ', scan%id, ' to disk', trim(scan%ss(k)%l2file)
+        call mkdirs(trim(scan%ss(k)%l2file), .true.)
+        call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
+        call update_status(status, 'write_l2')
+
+        ! Clean up data structures
+        call free_lx_struct(data_l2_decimated)
+        call free_lx_struct(data_l2_fullres)
      
-     ! Fourier transform frequency direction
-     !call convert_GHz_to_k(data_l2_fullres(i))
+     end do        
 
-     ! If necessary, decimate L2 file in both time and frequency
-     call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
-     call update_status(status, 'decimate')
-     !write(*,*) 'c'
-
-     ! Replace TOD with simulated data
-     if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
-
-     ! Write L2 file to disk
-     write(*,*) 'Writing ', scan%id, ' to disk'
-     call mkdirs(trim(scan%l2file), .true.)
-     call write_l2_file(scan%l2file, data_l2_decimated)
-     call update_status(status, 'write_l2')
-
-     ! Clean up data structures
-     call free_lx_struct(data_l2_decimated)
-     call free_lx_struct(data_l2_fullres)
-     
   end do
   call mpi_finalize(ierr)
 
@@ -247,7 +255,7 @@ contains
   subroutine update_freqmask(data_l2, min_acceptrate, id)
     implicit none
     type(Lx_struct),                            intent(inout) :: data_l2
-    character(len=*),                           intent(in)    :: id
+    integer(i4b),                               intent(in)    :: id
     real(dp),                                   intent(in)    :: min_acceptrate
     integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nfreq_full, nsb, ndet, dfreq
     
@@ -287,7 +295,7 @@ contains
   subroutine flag_correlations(data_l2, id, corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor)
     implicit none
     type(Lx_struct),          intent(inout) :: data_l2
-    character(len=*),         intent(in)    :: id
+    integer(i4b),             intent(in)    :: id
     real(dp),                 intent(in)    :: corr_cut, mean_corr_cut, var_cut, median_cut
     real(dp),                 intent(in)    :: mean_abs_corr_cut, neighbor_factor
     integer(i4b),             intent(in)    :: n_neighbor
@@ -498,20 +506,23 @@ contains
   subroutine interpolate_nans(data, id)
     implicit none
     type(Lx_struct),  intent(inout) :: data
-    character(len=*), intent(in)    :: id
+    integer(i4b),     intent(in)    :: id
 
-    integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, n
+    integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, n, ntot
 
     nsamp       = size(data%tod,1)
     nfreq       = size(data%tod,2)
     nsb         = size(data%tod,3)
     ndet        = size(data%tod,4)
 
+    ntot = 0
+    !$OMP PARALLEL PRIVATE(k,l,i,j,n)
     n = 0
-    do i = 1, ndet
-       do j = 1, nsb
-          do k = 1, nfreq
-             do l = 2, nsamp-1
+    !$OMP DO SCHEDULE(guided)
+    do k = 1, nfreq
+       do l = 2, nsamp-1
+          do i = 1, ndet
+             do j = 1, nsb
                 if (data%tod(l,k,j,i) .ne. data%tod(l,k,j,i)) then
                    ! Only interpolate over single missing NaNs, not multiple in a row; these must be dealt with
                    ! in other ways
@@ -525,7 +536,11 @@ contains
           end do
        end do
     end do
-    if (n > 0) write(*,*) '  Interpolated over NaN samples in ', id, ', n = ', n
+    !$OMP END DO
+    !$OMP ATOMIC
+    ntot = ntot + n
+    !$OMP END PARALLEL
+    if (ntot > 0) write(*,*) '  Interpolated over NaN samples in ', id, ', n_tot = ', ntot
 
   end subroutine interpolate_nans
 
@@ -533,12 +548,13 @@ contains
     implicit none
     type(Lx_struct),                            intent(inout) :: data_l2
     real(dp),                                   intent(in)    :: nu_gain, alpha_gain
-    character(len=*),                           intent(in)    :: id
+    integer(i4b),                               intent(in)    :: id
 
-    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet
+    integer(i4b) :: i, j, k, l, nomp, nsamp, nfreq, nsb, ndet, err
+    integer*8    :: plan_fwd, plan_back
     real(dp)     :: samprate, nu
-    real(dp),     allocatable, dimension(:) :: dt
-    complex(dpc), allocatable, dimension(:) :: dv
+    real(sp),     allocatable, dimension(:) :: dt
+    complex(spc), allocatable, dimension(:) :: dv
 
     nsamp       = size(data_l2%tod,1)
     nfreq       = size(data_l2%tod,2)
@@ -553,35 +569,50 @@ contains
        return
     end if
 
+    ! Set up OpenMP environment and FFTW plans
+    nomp = 1
+    call sfftw_init_threads(err)
+    call sfftw_plan_with_nthreads(nomp)
+
+    allocate(dt(2*nsamp), dv(0:n-1))
+    call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
+    call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
+    deallocate(dt, dv)
 
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        !write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
-          !!$OMP PARALLEL PRIVATE(k,l,dt,dv,nu)
+          !$OMP PARALLEL PRIVATE(k,l,dt,dv,nu)
           allocate(dt(2*nsamp), dv(0:n-1))
-          !!$OMP DO SCHEDULE(guided)
+          !$OMP DO SCHEDULE(guided)
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
              dt(1:nsamp)            = data_l2%tod(:,k,j,i)
              dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
-             call fft(dt, dv, 1)
+             !call fft(dt, dv, 1)
+             call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
              ! Apply lowpass filter
              do l = 0, n-1
                 nu = ind2freq(l+1, samprate, n)
                 dv(l) = dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
              end do
 
-             call fft(dt, dv, -1)
+             !call fft(dt, dv, -1)
+             call sfftw_execute_dft_c2r(plan_back, dv, dt)
+             dt                       = dt / (2*nsamp)
              data_l2%tod(:,k,j,i)     = data_l2%tod(:,k,j,i) / dt(1:nsamp) - 1.d0 
              data_l2%mean_tp(k,j,i)   = mean(dt(1:nsamp))
           end do
-          !!$OMP END DO
+          !$OMP END DO
           deallocate(dt, dv)
-          !!$OMP END PARALLEL
+          !$OMP END PARALLEL
        end do
     end do
+
+    call sfftw_destroy_plan(plan_fwd)
+    call sfftw_destroy_plan(plan_back)
 
   end subroutine normalize_gain
   
@@ -631,7 +662,7 @@ contains
     real(dp),                  intent(in)    :: pca_err_tol
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
     real(dp)     :: eigenv, dotsum, amp, err
-    real(dp),     allocatable, dimension(:)   :: r, s
+    real(sp),     allocatable, dimension(:)   :: r, s
     CHARACTER(LEN=128) :: number
     
     data_l2%n_pca_comp = n_pca_comp
@@ -663,6 +694,7 @@ contains
                 do k = 1, nfreq
                    if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle   
                    dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
+                   !dotsum = sdot(nfreq,data_l2%tod(:,k,j,i), 1, r(:), 1)
                    s(:) = s(:) + dotsum * data_l2%tod(:,k,j,i)
                 end do
              end do
@@ -768,12 +800,12 @@ contains
     end do
     deallocate(T, A, x)
     
-    open(22, file="tod_after_poly_2_3.unf", form="unformatted") ! Adjusted open statement
-    write(22) data_l2%tod(:,:,3,1)
-    close(22)
-    open(22, file="tod_after_poly_15_2.unf", form="unformatted") ! Adjusted open statement
-    write(22) data_l2%tod(:,:,1,14)
-    close(22)
+!    open(22, file="tod_after_poly_2_3.unf", form="unformatted") ! Adjusted open statement
+!    write(22) data_l2%tod(:,:,3,1)
+!    close(22)
+!    open(22, file="tod_after_poly_15_2.unf", form="unformatted") ! Adjusted open statement
+!    write(22) data_l2%tod(:,:,1,14)
+!    close(22)
 
   end subroutine polyfilter_TOD
 
@@ -958,25 +990,24 @@ contains
   end subroutine compute_time_offset
 
 
-  subroutine merge_l1_into_l2_files(mjd, data_l1, data_l2)
+  subroutine excise_subscan(mjd, data_l1, data_l2)
     implicit none
     real(dp),                                   intent(in)    :: mjd(2)
     type(Lx_struct),                            intent(in)    :: data_l1
     type(Lx_struct),                            intent(inout) :: data_l2
+
     
     integer(i4b) :: i, j, k, l, m, n, nsamp, nsamp_tot, num_l1_files, nfreq, nsb, ndet, nsamp_point, buffer, ndet0, err
     integer(i4b) :: ind(2), ind_point(2)
     real(dp)     :: samprate, mjd_min, mjd_max
     type(Lx_struct)   :: data_l2_fullres
     type(spline_type), allocatable, dimension(:) :: point_tel_spline, point_cel_spline
-
+    
     ! Find basic information
     nsamp       = size(data_l1%tod,1)
-    nsamp_point = size(data_l1%time_point)
     nfreq       = size(data_l1%tod,2)
     nsb         = size(data_l1%tod,3)
     ndet        = size(data_l1%tod,4)
-    samprate    = data_l1%samprate
     mjd_min     = max(mjd(1), minval(data_l1%time))
     mjd_max     = min(mjd(2), maxval(data_l1%time))
     
@@ -994,18 +1025,6 @@ contains
        ind(2) = ind(2) - 1
     end do
     
-    ! Find start position for pointing
-    ind_point(1) = 1
-    do while (data_l1%time_point(ind_point(1)) < mjd_min .and. ind_point(1) <= nsamp_point)
-       ind_point(1) = ind_point(1) + 1
-    end do
-    
-    ! Find end position for pointing
-    ind_point(2) = nsamp_point
-    do while (data_l1%time_point(ind_point(2)) > mjd_max .and. ind_point(2) >= 1)
-       ind_point(2) = ind_point(2) - 1
-    end do
-    
     nsamp_tot = ind(2)-ind(1)+1
 
     ! Allocate full-resolution L2 structure
@@ -1015,55 +1034,35 @@ contains
     allocate(data_l2%point_tel(3,nsamp_tot,ndet))
     allocate(data_l2%point_cel(3,nsamp_tot,ndet))
     allocate(data_l2%pixels(ndet))
+    allocate(data_l2%tod_mean(nfreq, nsb, ndet))
+    allocate(data_l2%freqmask(nfreq,nsb,ndet))
+    allocate(data_l2%freqmask_full(size(data_l1%nu,1,1),nsb,ndet))
     !allocate(data_l2%flag(nsamp_tot))
 
     ! Merge L1 data
     data_l2%decimation_time = 1
     data_l2%decimation_nu   = 1
-    data_l2%samprate        = samprate
-    data_l2%scanmode        = data_l1%scanmode_l1(1)
+    data_l2%samprate        = data_l1%samprate
     data_l2%nu              = data_l1%nu
     data_l2%pixels          = data_l1%pixels
-    j                       = 1
-
-    allocate(point_tel_spline(3), point_cel_spline(3))
-
-    ! Spline pointing
-    nsamp = ind(2)-ind(1)+1
-    data_l2%time(j:j+nsamp-1)        = data_l1%time(ind(1):ind(2))
-!    data_l2%flag(j:j+nsamp-1)        = data_l1%flag(ind(1):ind(2))
-    do i = 1, ndet
-       if (.not. is_alive(i)) then
-          data_l2%point_tel(:,:,i) = 0.d0
-          data_l2%point_cel(:,:,i) = 0.d0
-          data_l2%tod(:,:,:,i)     = 0.d0
-          cycle
-       end if
-       do l = 1, 3
-          call spline(point_tel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
-               & real(data_l1%point_tel(l,ind_point(1):ind_point(2),i),dp))
-          call spline(point_cel_spline(l), data_l1%time_point(ind_point(1):ind_point(2)), &
-               & real(data_l1%point_cel(l,ind_point(1):ind_point(2),i),dp))
-       end do
-
-       do l = 1, 3
-          do k = j, j+nsamp-1
-             data_l2%point_tel(l,k,i) = splint(point_tel_spline(l), data_l2%time(k))
-             data_l2%point_cel(l,k,i) = splint(point_cel_spline(l), data_l2%time(k))
-          end do
-       end do
-    end do
+    data_l2%point_tel       = data_l1%point_tel(:,ind(1):ind(2),:)
+    data_l2%point_cel       = data_l1%point_cel(:,ind(1):ind(2),:)
+    data_l2%time            = data_l1%time(ind(1):ind(2))
+    data_l2%freqmask        = data_l1%freqmask
+    data_l2%freqmask_full   = data_l1%freqmask_full
 
     do j = 1, ndet
        do m = 1, nsb
           do n = 1, nfreq
-             data_l2%tod(1:nsamp,n,m,j) = data_l1%tod(ind(1):ind(2),n,m,j)
+             data_l2%tod(:,n,m,j)    = data_l1%tod(ind(1):ind(2),n,m,j)
+             data_l2%tod_mean(n,m,j) = mean(data_l1%tod(ind(1):ind(2),n,m,j))
           end do
        end do
     end do
-    deallocate(point_cel_spline, point_tel_spline)
 
-  end subroutine merge_l1_into_l2_files
+  end subroutine excise_subscan
+
+
 
   subroutine decimate_L2_data(samprate_out, numfreq_out, data_in, data_out)
     implicit none
@@ -1072,12 +1071,13 @@ contains
     type(Lx_struct),                   intent(in)  :: data_in
     type(Lx_struct),                   intent(out) :: data_out
 
-    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb
+    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb, numfreq_in
     real(dp)     :: w, weight
     real(dp), allocatable, dimension(:,:,:) :: sigmasq
 
     nsb                      = size(data_in%tod,3)
     ndet                     = size(data_in%tod,4)
+    numfreq_in               = size(data_in%tod,2)
     data_out%samprate        = samprate_out
     dt                       = nint(data_in%samprate/samprate_out)
     data_out%decimation_time = dt
@@ -1088,10 +1088,11 @@ contains
     call assert(data_out%decimation_nu >= 1, 'Cannot ask for more frequencies than in input files')
 
     nsamp_out = int(size(data_in%time)/data_out%decimation_time)
-
+ 
     allocate(data_out%time(nsamp_out))
     allocate(data_out%nu(numfreq_out,nsb,ndet))
     allocate(data_out%tod(nsamp_out, numfreq_out, nsb, ndet))
+    allocate(data_out%tod_mean(numfreq_in, nsb, ndet))
     allocate(data_out%point_tel(3,nsamp_out,ndet))
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
@@ -1145,6 +1146,7 @@ contains
        if (nsamp_out == 0) cycle
        if (.not. is_alive(k)) cycle
        do j = 1, nsb
+          data_out%tod_mean(:,j,k) = data_in%tod_mean(:,j,k)
           do i = 1, size(data_in%nu,1)
              if (data_out%freqmask_full(i,j,k) == 0) then
                 data_out%var_fullres(i,j,k) = 2.8d-5
@@ -1193,6 +1195,7 @@ contains
                    do m = (i-1)*dt+1, i*dt
                       data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) + w * data_in%tod(m,n,j,l) 
                    end do
+
                 end do
                 if (weight > 0.d0) then
                    data_out%tod(i,k,j,l) = data_out%tod(i,k,j,l) / weight
@@ -1367,6 +1370,7 @@ contains
           end if
        end if
     end do
+
 99  close(unit)
 
     do k = 1, ndet
@@ -1375,11 +1379,9 @@ contains
 
   end subroutine initialize_fullres_frequency_mask
 
-  subroutine postprocess_frequency_mask(nfreq, data_l1, data, sid)
+  subroutine postprocess_frequency_mask(nfreq, data, sid)
     implicit none
-    character(len=*),                                intent(in)    :: sid
-    integer(i4b),                                    intent(in)    :: nfreq
-    type(Lx_struct),                                 intent(in)    :: data_l1
+    integer(i4b),                                    intent(in)    :: sid, nfreq
     type(Lx_struct),                                 intent(inout) :: data
     
 
@@ -1396,8 +1398,8 @@ contains
        do j = 1, nsb
           do i = 1, nfreq_full
              if (data%freqmask_full(i,j,k) == 0.d0) cycle
-             if (any(data_l1%tod(:,i,j,k) .ne. data_l1%tod(:,i,j,k))) then
-                write(*,fmt='(a,a,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
+             if (any(data%tod(:,i,j,k) .ne. data%tod(:,i,j,k))) then
+                write(*,fmt='(a,i8,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
                 data%freqmask_full(i,j,k) = 0.d0
              end if
           end do
@@ -1490,5 +1492,130 @@ contains
     !close(16)
     deallocate(el, dat)
   end subroutine remove_elevation_gain
+
+
+  subroutine compute_Tsys(tsys_file, data)
+    implicit none
+    character(len=*),            intent(in)       :: tsys_file
+    type(Lx_struct),             intent(inout)    :: data
+    type(hdf_file)                                :: file
+    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
+    real(dp), dimension(:,:,:), allocatable       :: tsys_1, tsys_2, mean_tod
+    integer(i4b)                                  :: nfreq, nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu
+    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count
+    integer(i4b), dimension(:), allocatable       :: scanID
+    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec
+    real(dp), dimension(:), allocatable           :: time
+
+    allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))                                                                            
+    nsamp = size(data%tod,1)
+    nfreq = size(data%tod,2)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
+
+    ! 1) get tsys-values                                                                                                                        
+    call open_hdf_file(tsys_file, file, "r")
+    call read_hdf(file, "nfreq", nfreq_fullres)
+    call get_size_hdf(file, "MJD", nsamp_gain)
+
+    allocate(tsys_fullres(ndet, nsb, nfreq_fullres, nsamp_gain(1)))
+    allocate(tsys_1(nfreq_fullres, nsb, ndet))
+    allocate(tsys_2(nfreq_fullres, nsb, ndet))
+    allocate(mean_tod(nfreq_fullres, nsb, ndet))
+    allocate(time(nsamp_gain(1)))
+    call read_hdf(file, "MJD", time)
+    call read_hdf(file, "tsys_pr_P", tsys_fullres)
+    call close_hdf_file(file)
+
+    ! finding closest time-value                                                                                                                
+    mjd_index1 = max(locate(time, data%time(1)),1)
+
+    if (mjd_index1 < data%time(1)) then
+        mjd_index2 = mjd_index1 + 1
+    else
+       mjd_index2   = mjd_index1 - 1
+    end if
+
+
+    tsys_1 = tsys_fullres(mjd_index1,:,:,:)
+    tsys_2 = tsys_fullres(mjd_index1,:,:,:)
+    
+    do i=1, ndet
+       write(*,*) "det ", i
+       if (.not. is_alive(i)) cycle
+       do j=1, nsb
+          do k=1, nfreq
+             mean_tod = 0.d0
+             mean_count = 0.d0
+             do l=1, nsamp_gain(1)
+                if ( .not. isnan(data%tod(l,k,j,i))) then
+                   ! Calculating the nanmean in time of each tod
+                   mean_tod = mean_tod + data%tod(l,k,j,i)
+                   mean_count = mean_count + 1
+                end if
+             end do
+             !mean(x[!isnan(x)])
+             mean_tod = mean_tod / mean_count
+             data%Tsys(1,k,j,i) = tsys_1(k,j,i)*mean_tod(k,j,i)*data%freqmask_full(k,j,i)
+             data%Tsys(2,k,j,i) = tsys_2(k,j,i)*mean_tod(k,j,i)*data%freqmask_full(k,j,i)
+          end do
+       end do
+    end do
+  deallocate(tsys_fullres)
+  deallocate(tsys_1)
+  deallocate(tsys_2)
+  deallocate(mean_tod)
+  deallocate(time)
+
+  end subroutine compute_Tsys
+
+  subroutine calibrate_tod(data_l1, data_l2_fullres)
+    implicit none
+    type(lx_struct), intent(in)    :: data_l1
+    type(lx_struct), intent(inout) :: data_l2_fullres
+
+    integer(i4b) :: i, j, k, ndet, nfreq, nsb
+
+    nfreq = size(data_l1%tod,2)
+    nsb   = size(data_l1%tod,3)
+    ndet  = size(data_l1%tod,4)
+
+    ! Interpolate Tsys to current time for each detector
+    do i = 1, ndet
+       do j = 1, nsb
+          do k = 1, nfreq
+             data_l2_fullres%tod(:,k,j,i)  = (data_l1%Tsys(1,k,j,i) + data_l1%Tsys(2,k,j,i))/2.d0 * data_l1%tod(:,k,j,i)
+          end do
+       end do
+    end do
+  end subroutine calibrate_tod
+
+  subroutine fit_noise(data_l2)
+    implicit none
+
+    type(lx_struct), intent(inout) :: data_l2
+
+    integer(i4b) :: i, j, k, ndet, nfreq, nsb
+
+    nfreq = size(data_l2%tod,2)
+    nsb   = size(data_l2%tod,3)
+    ndet  = size(data_l2%tod,4)    
+
+    ! Approximate noise as white for now
+    allocate(data_l2%sigma0(nfreq,nsb,ndet))
+    allocate(data_l2%alpha(nfreq,nsb,ndet))
+    allocate(data_l2%fknee(nfreq,nsb,ndet))
+    do i = 1, ndet
+       do j = 1, nsb
+          do k = 1, nfreq
+             data_l2%sigma0(k,j,i) = sqrt(variance(data_l2%tod(:,k,j,i)))
+             data_l2%alpha(k,j,i)  = -2.d0
+             data_l2%fknee(k,j,i)  = 1.d-6   ! Set to a very low value
+          end do
+       end do
+    end do
+
+  end subroutine fit_noise
+
 
 end program

@@ -152,7 +152,7 @@ program l3gen
      !call calc_az_filter_par(data)            ; call dmem("az_par")
      !call calc_bandpass_filter_par(data, powspecs)     ; call dmem("bandpass")
 
-     ! Output L3 data
+     ! Output L3 data 
      call mkdirs(tmpfile, .true.)
      call write_L3_file(tmpfile, data)        ; call dmem("write l3")
 
@@ -252,9 +252,11 @@ contains
     type(Lx_struct),             intent(inout)    :: data
     type(hdf_file)                                :: file
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
-    integer(i4b)                                  :: nfreq, nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index, nsamp, dnu
+    real(dp), dimension(:,:,:), allocatable       :: tsys_intp
+    integer(i4b)                                  :: nfreq, nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu
     integer(i4b)                                  :: nsamp_gain(7), num_bin, n
-    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys
+    integer(i4b), dimension(:), allocatable       :: scanID
+    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec
     real(dp), dimension(:), allocatable           :: time
 
     nsamp = size(data%tod,1)
@@ -275,28 +277,31 @@ contains
 
     !allocate(tsys_fullres(nsamp_gain(1), nfreq_fullres, nsb, ndet))
     allocate(tsys_fullres(ndet, nsb, nfreq_fullres, nsamp_gain(1)))
+    allocate(tsys_intp(ndet, nsb, nfreq_fullres))
     allocate(time(nsamp_gain(1)))
-
+    allocate(scanID(nsamp_gain(1)))
+    call read_hdf(file, "ScanID", scanID)
     call read_hdf(file, "MJD", time)
     call read_hdf(file, "tsys_pr_P", tsys_fullres)
     call close_hdf_file(file)
-    ! finding closest time-value
-    mjd_index = max(locate(time, data%time(1)),1)
-!    if (mjd_index > 1 .and. mjd_index < size(time)) then
-!       write(*,*) 'time = ', time(mjd_index), data%time(1), time(mjd_index+1)
-!    end if
-    !stop
-!!$    mjd_start = data%mjd_start
-!!$    mjd_high = 1.d10
-!!$    mjd_index = 10000000
-!!$    do i = 1, nsamp(1)
-!!$       if (abs(mjd_start-time(i)) < mjd_high) then
-!!$          mjd_high = abs(mjd_start-time(i))
-!!$          mjd_index = i
-!!$       end if
-!!$    end do
 
+    ! finding closest time-value
+    mjd_index1 = max(locate(time, data%time(1)),1)
+
+    if (mjd_index1 < data%time(1)) then
+        mjd_index2 = mjd_index1 + 1
+    else
+       mjd_index2   = mjd_index1 - 1
+    end if
+    
+
+    if (mjd_index2 > nsamp_gain(1)) then
+       tsys_intp = (tsys_fullres(:,:,:,mjd_index1))
+    else
+       tsys_intp = (tsys_fullres(:,:,:,mjd_index1) + tsys_fullres(:,:,:,mjd_index2))/2.d0
+    end if
     dnu   = nfreq_fullres/nfreq
+
     do i=1, ndet
        if (.not. is_alive(i)) cycle
        do j=1, nsb
@@ -305,24 +310,43 @@ contains
                 ! No live frequencies; return zero
                 tsys = 0.d0
                 data%tod(:,k,j,i) = 0
+                
              else
                 do l=(k-1)*dnu+1,k*dnu
                    ! Remove NaN's
-                   if (isnan(tsys_fullres(i, j,l,mjd_index))) tsys_fullres(i, j, l,mjd_index) = 0.0
+                   if (isnan(tsys_intp(i, j, l))) tsys_intp(i, j, l) = 0.0
+                   if (1./tsys_intp(i, j, l) == 0.0) then
+                      tsys_intp(i, j, l) = 0.0
+                   end if
                 end do
-                tsys = sum(tsys_fullres(i, j, (k-1)*dnu+1:k*dnu,mjd_index) * &
+                tsys = sum(tsys_intp(i, j, (k-1)*dnu+1:k*dnu) * &
                      & 1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i)) / &
                      & sum(1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i))
-                data%gain(1,k,j,i) = tsys
-                !write(*,*) "tsys !!!!!!!!!!!!!!!!!!!!", tsys
-                data%tod(:,k,j,i) = data%tod(:,k,j,i)*tsys
-             end if
-          end do
+
+                tod_mean_dec = sum(data%tod_mean((k-1)*dnu:k*dnu,j,i) * &
+                     & 1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i)) / &
+                     & sum(1.d0/data%var_fullres((k-1)*dnu+1:k*dnu,j,i)*data%freqmask_full((k-1)*dnu+1:k*dnu,j,i))
+
+                if (isnan(tod_mean_dec)) then
+                   data%gain(1,k,j,i) = 0
+                   data%tod(:,k,j,i) = 0
+                   write(*,*) "YEP!"
+                else if (isnan(tsys)) then
+                   data%gain(1,k,j,i) = 0
+                   data%tod(:,k,j,i) = 0
+                   write(*,*) "YAAAS"
+                   stop
+                end if
+                data%gain(1,k,j,i) = tsys*tod_mean_dec
+                if (isnan(data%gain(1,k,j,i))) data%gain(1,k,j,i) = 0
+                data%tod(:,k,j,i) = data%tod(:,k,j,i)*tsys*tod_mean_dec
+             end if         
+          end do      
        end do
     end do
   deallocate(tsys_fullres)
+  deallocate(tsys_intp)
   deallocate(time)
-
   end subroutine apply_gain_cal
 
 
@@ -578,6 +602,7 @@ contains
 !       do k = 1, 1
           do j = 1, nfreq      
 !          do j = 56, 56
+             if (isnan(data%gain(1,j,k,i))) data%gain(1,j,k,i) = 0
              if (data%gain(1,j,k,i) == 0) then
                 !write(*,*) "zero Tsys 1. place"
                 if (j == nfreq/2) write(*,fmt='(a,i4,i3,i6,a)') scan%id, i, k, j, ' -- zero Tsys'
