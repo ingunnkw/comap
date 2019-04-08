@@ -220,7 +220,6 @@ contains
     b%mjd  = a%mjd
     b%l1file = a%l1file
     b%object = a%object
-    b%scanmode = a%scanmode
     allocate(b%ss(b%nsub))
     do i = 1, b%nsub
        b%ss(i)%id          = a%ss(i)%id
@@ -233,6 +232,8 @@ contains
        b%ss(i)%time_of_day = a%ss(i)%time_of_day
        b%ss(i)%l2file      = a%ss(i)%l2file
        b%ss(i)%l3file      = a%ss(i)%l3file
+       b%ss(i)%scanmode    = a%ss(i)%scanmode
+
     end do
   end subroutine
 

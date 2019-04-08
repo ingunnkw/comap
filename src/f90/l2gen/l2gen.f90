@@ -142,7 +142,7 @@ program l2gen
         call calibrate_tod(data_l1, data_l2_fullres)
         
         ! Remove elevation gain
-        if ((scan%scanmode == 'circ') .or. (scan%scanmode == 'raster')) then 
+        if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
            write(*,*) 'Removing elevation gain'
            call remove_elevation_gain(data_l2_fullres)
         end if
