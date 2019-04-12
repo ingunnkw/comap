@@ -15,7 +15,7 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:)         :: sec         ! (time) in seconds since start
      real(dp),     allocatable, dimension(:,:,:)     :: nu          ! (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod         ! (time, freq, sideband, detector)
-     real(sp),     allocatable, dimension(:,:,:)     :: tod_mean ! (freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:,:)     :: tod_mean    ! (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: point_cel   ! Celestial; (RA/dec/psi, time, det)
      real(sp),     allocatable, dimension(:,:,:)     :: point_tel   ! Horizon; (az/el/dk, time, det)
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
@@ -376,6 +376,11 @@ contains
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point_tel",         data%point_tel)
     !call write_hdf(file, "flag",              data%flag)
+    !write(*,*) "right before", data%Tsys(1, 1, 1, 1)
+    call write_hdf(file, "Tsys",              data%Tsys)
+    if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
+    if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
+    if (allocated(data%fknee))     call write_hdf(file, "fknee",             data%fknee)   
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     call write_hdf(file, "n_nan",             data%n_nan)
@@ -388,15 +393,15 @@ contains
     call write_hdf(file, "var_fullres",       data%var_fullres)
     call write_hdf(file, "n_pca_comp",        data%n_pca_comp)
     if (data%n_pca_comp > 0) then
-       call write_hdf(file, "pca_ampl",          data%pca_ampl)
-       call write_hdf(file, "pca_comp",          data%pca_comp)
-       call write_hdf(file, "pca_eigv",          data%pca_eigv)
+       call write_hdf(file, "pca_ampl",       data%pca_ampl)
+       call write_hdf(file, "pca_comp",       data%pca_comp)
+       call write_hdf(file, "pca_eigv",       data%pca_eigv)
     end if
     call write_hdf(file, "mask_outliers",     data%mask_outliers)
     if (data%mask_outliers == 1) then
-       call write_hdf(file, "acceptrate",        data%acceptrate)
-       call write_hdf(file, "diagnostics",       data%diagnostics)
-       call write_hdf(file, "cut_params",        data%cut_params)
+       call write_hdf(file, "acceptrate",     data%acceptrate)
+       call write_hdf(file, "diagnostics",    data%diagnostics)
+       call write_hdf(file, "cut_params",     data%cut_params)
     end if
     call close_hdf_file(file)
   end subroutine
@@ -546,7 +551,7 @@ contains
     type(lx_struct), intent(inout) :: lx_out
     call free_lx_struct(lx_out)
     
-    
+!    write(*,*) "start"
     lx_out%mjd_start = lx_in%mjd_start
     lx_out%samprate = lx_in%samprate
     lx_out%polyorder = lx_in%polyorder
@@ -563,10 +568,12 @@ contains
        allocate(lx_out%nu(size(lx_in%nu,1),size(lx_in%nu,2),size(lx_in%nu,3)))
        lx_out%nu = lx_in%nu
     end if
+!    write(*,*) "Before tod"
     if(allocated(lx_in%tod))         then  
        allocate(lx_out%tod(size(lx_in%tod,1),size(lx_in%tod,2),size(lx_in%tod,3),size(lx_in%tod,4)))
        lx_out%tod = lx_in%tod
     end if
+!    write(*,*) "after tod"
     if(allocated(lx_in%point_tel))   then 
        allocate(lx_out%point_tel(size(lx_in%point_tel,1),size(lx_in%point_tel,2),size(lx_in%point_tel,3)))
        lx_out%point_tel = lx_in%point_tel
@@ -575,6 +582,7 @@ contains
        allocate(lx_out%point_cel(size(lx_in%point_cel,1),size(lx_in%point_cel,2),size(lx_in%point_cel,3)))
        lx_out%point_cel = lx_in%point_cel
     end if
+!    write(*,*) "after point_tel/cel"
     if(allocated(lx_in%flag))        then
        allocate(lx_out%flag(size(lx_in%flag,1)))
        lx_out%flag = lx_in%flag
@@ -587,6 +595,7 @@ contains
        allocate(lx_out%gain(size(lx_in%gain,1),size(lx_in%gain,2),size(lx_in%gain,3)))
        lx_out%gain = lx_in%gain
     end if
+!    write(*,*) "after gain"
     if(allocated(lx_in%sigma0))        then
        allocate(lx_out%sigma0(size(lx_in%sigma0,1),size(lx_in%sigma0,2),size(lx_in%sigma0,3)))
        lx_out%sigma0 = lx_in%sigma0
@@ -656,6 +665,7 @@ contains
        allocate(lx_out%sec(size(lx_in%sec,1)))
        lx_out%sec = lx_in%sec
     end if
+ !   write(*,*) "end"
   end subroutine copy_lx_struct
   
 

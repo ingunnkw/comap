@@ -19,7 +19,7 @@ program l2gen
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter
-  real(dp)             :: todsize, nb_factor, min_acceptrate
+  real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   logical(lgt)         :: process
@@ -52,10 +52,13 @@ program l2gen
   call get_parameter(unit, parfile, 'MEAN_ABS_CORRELATION_CUT',  par_dp=mean_abs_corr_cut)
   call get_parameter(unit, parfile, 'MEDIAN_CUT',                par_dp=med_cut)
   call get_parameter(unit, parfile, 'N_NEIGHBOR',                par_int=n_nb)
+  call get_parameter(unit, parfile, 'VARIANCE_MAX',              par_dp=var_max)
+  call get_parameter(unit, parfile, 'CORRELATION_MAX',           par_dp=corr_max)
   call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=nb_factor)
   call get_parameter(unit, parfile, 'MIN_ACCEPTRATE',            par_dp=min_acceptrate)
   call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
   call get_parameter(unit, parfile, 'LEVEL2_DIR',                par_string=l2dir)
+  call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
     
 
   check_existing = .true.
@@ -138,37 +141,36 @@ program l2gen
            call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
            call update_status(status, 'gain_norm')
         end if
-     
-        ! Apply absolute calibration
-        call calibrate_tod(data_l1, data_l2_fullres)
-        
+             
         ! Remove elevation gain
         if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
            write(*,*) 'Removing elevation gain'
            call remove_elevation_gain(data_l2_fullres)
+           call update_status(status, 'remove_elevation')
         end if
 
-
+        data_l2_fullres%mask_outliers = mask_outliers
         if (mask_outliers) then
            ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
            call copy_lx_struct(data_l2_fullres, data_l2_filter)
+           call update_status(status, 'copy_data')
            
            ! Poly-filter copied data
            call polyfilter_TOD(data_l2_filter, bp_filter0)
            call update_status(status, 'polyfilter0')
            
            ! pca filter copied data
-           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
            call update_status(status, 'pca_filter0')
            
            ! flag correlations and variance
-           call flag_correlations(data_l2_filter, scan%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor)
+           call flag_correlations(data_l2_filter, scan%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
            call update_status(status, 'flag_corr')
 
            ! replace freqmask in original tod
            call transfer_diagnostics(data_l2_filter, data_l2_fullres)
 
-           call update_freqmask(data_l2_fullres, min_acceptrate, scan%id)
+           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id)
            call update_status(status, 'made_freqmask')
 
            call free_lx_struct(data_l2_filter)
@@ -182,7 +184,7 @@ program l2gen
         
         ! pca filter after polyfilter
         if (trim(pinfo%type) == 'cosmo') then
-           call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol)
+           call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
            call update_status(status, 'pca_filter')
         end if
 
@@ -192,14 +194,17 @@ program l2gen
            call polyfilter_TOD(data_l2_filter, bp_filter0)
            
            ! pca filter copied data
-           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol)
+           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
         
-           call remove_pca_components(data_l2_filter, data_l2_fullres)
+           call remove_pca_components(data_l2_filter, data_l2_fullres, pca_sig_rem)
         end if
 
         ! Fourier transform frequency direction
-        !call convert_GHz_to_k(data_l2_fullres(i))
-        
+        !call convert_GHz_to_k(data_l2_fullres(i))               
+
+        ! Apply absolute calibration
+        call calibrate_tod(data_l1, data_l2_fullres)
+
         ! If necessary, decimate L2 file in both time and frequency
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
         call update_status(status, 'decimate')
@@ -212,7 +217,7 @@ program l2gen
         if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
         ! Write L2 file to disk
-        write(*,*) 'Writing ', scan%id, ' to disk', trim(scan%ss(k)%l2file)
+        write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
         call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
         call update_status(status, 'write_l2')
@@ -293,15 +298,15 @@ contains
         
   end subroutine update_freqmask
 
-  subroutine flag_correlations(data_l2, id, corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor)
+  subroutine flag_correlations(data_l2, id, corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
     implicit none
     type(Lx_struct),          intent(inout) :: data_l2
     integer(i4b),             intent(in)    :: id
     real(dp),                 intent(in)    :: corr_cut, mean_corr_cut, var_cut, median_cut
-    real(dp),                 intent(in)    :: mean_abs_corr_cut, neighbor_factor
+    real(dp),                 intent(in)    :: mean_abs_corr_cut, neighbor_factor, var_max, corr_max
     integer(i4b),             intent(in)    :: n_neighbor
     integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nsb, ndet
-    real(dp)     :: corr, mean, var_0, std_median
+    real(dp)     :: corr, mean, var_0, std_median, dnu, radiometer
     real(dp)     :: mean_meancorr, sigma_meancorr, mean_vars, sigma_vars, mean_maxcorr, sigma_maxcorr
     real(dp)     :: mean_meanabscorr, sigma_meanabscorr, mean_corrsum, sigma_corrsum
     real(dp),     allocatable, dimension(:, :, :)   :: means, vars, maxcorr, meancorr, meanabscorr
@@ -383,6 +388,30 @@ contains
        !write(*,*) "Done with correlation masking in detector", i
     end do
     
+    ! Thresholds for removing PCA-components
+!    var_max = 1.15d0
+!    corr_max = 0.1d0
+    dnu = (data_l2%nu(2, 1, 1) - data_l2%nu(3, 1, 1)) * 1d9
+    radiometer = 1.0d0 / sqrt(dnu * 1.d0 / data_l2%samprate)
+    !write(*,*) radiometer, dnu, data_l2%samprate
+    ! Hard cuts
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             if (vars(k,j,i) > (radiometer * var_max) ** 2) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+!                write(*,*) "hei1", vars(k,j,i)
+             else if (maxcorr(k,j,i) > corr_max) then
+!                write(*,*) "hei 2 ------", maxcorr(k,j,i)
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             end if
+          end do
+       end do
+    end do
+    
+    ! convert to relative variance
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        do j = 1, nsb
@@ -617,17 +646,25 @@ contains
 
   end subroutine normalize_gain
   
-  subroutine remove_pca_components(data_l2_in, data_l2_out)
+  subroutine remove_pca_components(data_l2_in, data_l2_out, pca_sig_rem)
     implicit none
     type(Lx_struct),            intent(in)    :: data_l2_in
     type(Lx_struct),            intent(inout) :: data_l2_out
+    real(dp),                  intent(in)    :: pca_sig_rem
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
+    real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
     
     nsamp       = size(data_l2_in%tod,1)
     nfreq       = size(data_l2_in%tod,2)
     nsb         = size(data_l2_in%tod,3)
     ndet        = size(data_l2_in%tod,4)
-    
+
+    ! Thresholds for removing PCA-components
+    std_tol = pca_sig_rem / sqrt(real(nsamp))
+    dnu = (data_l2_in%nu(2, 1, 1) - data_l2_in%nu(3, 1, 1)) * 1d9
+    radiometer = 1 / sqrt(dnu * 1.0 / data_l2_in%samprate)
+    amp_lim = std_tol * radiometer
+
     data_l2_out%n_pca_comp = data_l2_in%n_pca_comp
 
     if (data_l2_out%n_pca_comp == 0) return
@@ -642,7 +679,9 @@ contains
     call free_lx_struct(data_l2_in)
     
     do l = 1, data_l2_out%n_pca_comp
-       write(*,*) 'removing component'
+       !write(*,*) 'removing component'
+       comp_std = sqrt(sum(data_l2_out%pca_comp(:,l) ** 2) / nsamp - (sum(data_l2_out%pca_comp(:,l)) / nsamp) ** 2)
+       
        do i = 1, ndet
           if (.not. is_alive(i)) cycle
           do j = 1, nsb
@@ -656,14 +695,15 @@ contains
     
   end subroutine remove_pca_components
   
-  subroutine pca_filter_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol)
+  subroutine pca_filter_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
     implicit none
     type(Lx_struct),           intent(inout) :: data_l2
-    integer(i4b),                 intent(in)    :: n_pca_comp, pca_max_iter
-    real(dp),                  intent(in)    :: pca_err_tol
+    integer(i4b),              intent(in)    :: n_pca_comp, pca_max_iter
+    real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
-    real(dp)     :: eigenv, dotsum, amp, err
-    real(dp),     allocatable, dimension(:)   :: r, s
+    real(dp)     :: eigenv, dotsum, amp, err 
+    real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
+    real(dp),     allocatable, dimension(:)   :: r, s, mys
     CHARACTER(LEN=128) :: number
     
     data_l2%n_pca_comp = n_pca_comp
@@ -674,6 +714,12 @@ contains
     nsb         = size(data_l2%tod,3)
     ndet        = size(data_l2%tod,4)
 
+    ! Thresholds for removing PCA-components
+    std_tol = pca_sig_rem / sqrt(real(nsamp))
+    dnu = (data_l2%nu(2, 1, 1) - data_l2%nu(3, 1, 1)) * 1d9
+    radiometer = 1 / sqrt(dnu * 1.0 / data_l2%samprate)
+    amp_lim = std_tol * radiometer
+!    write(*,*) dnu
     allocate(r(nsamp), s(nsamp))
             
     if(.not. allocated(data_l2%pca_ampl)) allocate(data_l2%pca_ampl(nfreq,nsb,ndet,n_pca_comp)) 
@@ -682,25 +728,34 @@ contains
     data_l2%pca_ampl = 0.d0
     do l = 1, n_pca_comp 
        err = 1.d0
-       r(:) = data_l2%tod(:,5,2,5)  ! completely arbitrary, should be made more robust!
+       r(:) = sum(sum(sum(data_l2%tod, 2), 2), 2) !sum of all freqs
        if (sum(r) == 0.d0) then
           write(*,*) "PCA initialized with zero vector"
        end if
        iters = 0
        do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
           s = 0.d0
-          do i = 1, ndet
-             if (.not. is_alive(i)) cycle
-             do j = 1, nsb
-                do k = 1, nfreq
+          !$OMP PARALLEL PRIVATE(k,i,j,dotsum,mys)
+          allocate(mys(nsamp))
+          mys = 0.d0
+          !$OMP DO SCHEDULE(guided)
+          do k = 1, nfreq
+             do i = 1, ndet
+                if (.not. is_alive(i)) cycle
+                do j = 1, nsb
                    if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle   
                    dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
                    !dotsum = sdot(nfreq,data_l2%tod(:,k,j,i), 1, r(:), 1)
-                   s(:) = s(:) + dotsum * data_l2%tod(:,k,j,i)
+                   mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
                 end do
              end do
           end do
-          
+          !$OMP END DO
+          !$OMP CRITICAL
+          s(:) = s(:) + mys(:)
+          !$OMP END CRITICAL
+          deallocate(mys)
+          !$OMP END PARALLEL
           eigenv = sum(s(:) * r(:))
           err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
           r(:) = s(:)/sqrt(sum(s(:) ** 2))
@@ -708,16 +763,28 @@ contains
        end do
        data_l2%pca_eigv(l) = eigenv
        data_l2%pca_comp(:,l) = r(:)
-       do i = 1, ndet
-          if (.not. is_alive(i)) cycle
-          do j = 1, nsb
-             do k = 1, nfreq
+       !means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
+       !vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
+
+       comp_std = sqrt(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2)
+       !$OMP PARALLEL PRIVATE(k,i,j,dotsum,mys)
+       !$OMP DO SCHEDULE(guided)
+       do k = 1, nfreq
+          do i = 1, ndet
+             if (.not. is_alive(i)) cycle
+             do j = 1, nsb
                 if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
                 data_l2%pca_ampl(k,j,i,l) = sum(r(:) * data_l2%tod(:,k,j,i))
-                data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - data_l2%pca_ampl(k,j,i,l) * r(:)
+                !write(*,*) data_l2%pca_ampl(k,j,i,l), amp_lim / comp_std, l
+                if (abs(data_l2%pca_ampl(k,j,i,l)) > amp_lim / comp_std) then
+                   data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - data_l2%pca_ampl(k,j,i,l) * r(:)
+                end if
              end do
           end do
        end do
+       !$OMP END DO
+       !$OMP END PARALLEL
+       if (.not. (any(sum(abs(data_l2%pca_ampl(:, :, :, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
     end do
     deallocate(r, s)
 
@@ -1040,6 +1107,7 @@ contains
     allocate(data_l2%freqmask(nfreq,nsb,ndet))
     allocate(data_l2%freqmask_full(size(data_l1%nu,1,1),nsb,ndet))
     !allocate(data_l2%flag(nsamp_tot))
+    allocate(data_l2%Tsys(2,nfreq,nsb,ndet))
 
     ! Merge L1 data
     data_l2%decimation_time = 1
@@ -1052,7 +1120,8 @@ contains
     data_l2%time            = data_l1%time(ind(1):ind(2))
     data_l2%freqmask        = data_l1%freqmask
     data_l2%freqmask_full   = data_l1%freqmask_full
-
+    data_l2%Tsys            = data_l1%Tsys
+    
     do j = 1, ndet
        do m = 1, nsb
           do n = 1, nfreq
@@ -1099,6 +1168,7 @@ contains
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
+    allocate(data_out%Tsys(2,numfreq_in,nsb,ndet))
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%mean_tp(size(data_in%nu,1),nsb,ndet))
     allocate(data_out%var_fullres(size(data_in%nu,1),nsb,ndet))
@@ -1121,6 +1191,7 @@ contains
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
     data_out%pixels        = data_in%pixels
+    data_out%Tsys          = data_in%Tsys
     
     data_out%n_pca_comp    = data_in%n_pca_comp
     if (data_in%n_pca_comp > 0) then
@@ -1452,17 +1523,21 @@ contains
     write(*,*) nfreq, '= nfreq', nsb, '= nsb', ndet, '= ndet'
     write(*,*) '---------------------------------------------------------'
     !allocate(data%time_gain(n), data%gain(n,nfreq,nsb,ndet))
-    allocate(el(m), dat(m))
     !data%time_gain = data%time(::m) ! OBS may reallocate length of time_gain!!!
-    !open(13,file='gain.dat')
-    !open(14,file='data1.dat')
-    !open(15,file='el.dat')
-    !open(16,file='data2.dat')
+!    open(13,file='gain.dat')
+!    open(14,file='data1.dat')
+!    open(15,file='el.dat')
+!    open(16,file='data2.dat')
     !write(14,*) data%tod(:,30,1,1)
-    do k = 1, ndet
-       if (.not. is_alive(k)) cycle
-       do l = 1, nsb
-          do j = 1, nfreq
+
+    !$OMP PARALLEL PRIVATE(j,k,l,i,el,dat,g,tmin,tmax)
+    !allocate(dt(2*nsamp), dv(0:n-1))
+    allocate(el(m), dat(m))
+    !$OMP DO SCHEDULE(guided)    
+    do j = 1, nfreq
+       do k = 1, ndet
+          if (.not. is_alive(k)) cycle
+          do l = 1, nsb
              if (data%freqmask_full(j,l,k) == 0.d0) cycle
              do i = 1, n
                 tmin = (i-1)*m+1
@@ -1475,24 +1550,27 @@ contains
                 dat = data%tod(tmin:tmax,j,l,k)
                 !write(*,*) tmin, tmax, 'min max'
                 call estimate_gain(el,dat,g)
-                !if ((k == 1) .and. (l == 1) .and. (j == 30) .and. (i == 2)) then
-                !   write(13,*) g
-!               !    write(*,*) 'Yo'
-                !   !             write(13,*) (g-5.6d10)/5.6d10*100
-!               !    write(14,*) dat
-                !   write(15,*) el
-                !end if
+!                if ((k == 1) .and. (l == 1) .and. (j == 30) .and. (i == 2)) then
+!                   write(13,*) g
+!                   write(*,*) 'Yo'
+!                   !             write(13,*) (g-5.6d10)/5.6d10*100
+!                   write(14,*) dat
+!                   write(15,*) el
+!                end if
                 data%tod(tmin:tmax,j,l,k) = data%tod(tmin:tmax,j,l,k) - g * 1 / sin(el*pi/180.) + sum(g * 1 / sin(el*pi/180.)) / size(el)
              end do
           end do
        end do
     end do
-    !write(16,*) data%tod(:,30,1,1)
-    !close(13)
-    !close(14)
-    !close(15)
-    !close(16)
-    deallocate(el, dat)
+    !$OMP END DO
+!    write(16,*) data%tod(:,30,1,1)
+!    close(13)
+!    close(14)
+!    close(15)
+!    close(16)
+    deallocate(el,dat)
+    
+    !$OMP END PARALLEL
   end subroutine remove_elevation_gain
 
 
@@ -1512,7 +1590,7 @@ contains
     nsamp         = size(data%tod,1)
     nfreq_fullres = size(data%tod,2)
     nsb           = size(data%tod,3)
-    ndet          = 19 ! size(data%tod,4)  ! Must be fixed somehow
+    ndet          = size(data%tod,4)  ! Must be fixed somehow
 
     allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))                                                     
     data%Tsys = 0.d0
@@ -1546,23 +1624,23 @@ contains
     !tsys_2 = tsys_fullres(mjd_index1,:,:,:)
     
     do i=1, ndet
-       write(*,*) "det ", i
+!       write(*,*) "det ", i
        if (.not. is_alive(i)) cycle
        do j=1, nsb
           !$OMP PARALLEL PRIVATE(k,l,mean_tod)
           !$OMP DO SCHEDULE(guided)
           do k=1, nfreq_fullres
              mean_tod           = mean(data%tod(:,k,j,i))
-             data%Tsys(1,k,j,i) = 40.d0 !tsys_fullres(i,j,k,mjd_index1)*mean_tod * data%freqmask_full(k,j,i)
-             data%Tsys(2,k,j,i) = 40.d0 !tsys_fullres(i,j,k,mjd_index2)*mean_tod * data%freqmask_full(k,j,i)
+             data%Tsys(1,k,j,i) = tsys_fullres(i,j,k,mjd_index1)*mean_tod * data%freqmask_full(k,j,i)
+             data%Tsys(2,k,j,i) = tsys_fullres(i,j,k,mjd_index2)*mean_tod * data%freqmask_full(k,j,i)
           end do
           !$OMP END DO
           !$OMP END PARALLEL
        end do
     end do
-  deallocate(tsys_fullres)
-  deallocate(time)
-
+    deallocate(tsys_fullres)
+    deallocate(time)
+    
   end subroutine compute_Tsys
 
   subroutine calibrate_tod(data_l1, data_l2_fullres)
@@ -1580,7 +1658,7 @@ contains
     do i = 1, ndet
        do j = 1, nsb
           do k = 1, nfreq
-             data_l2_fullres%tod(:,k,j,i)  = (data_l1%Tsys(1,k,j,i) + data_l1%Tsys(2,k,j,i))/2.d0 * data_l1%tod(:,k,j,i)
+             data_l2_fullres%tod(:,k,j,i)  = (data_l1%Tsys(1,k,j,i) + data_l1%Tsys(2,k,j,i))/2.d0 * data_l2_fullres%tod(:,k,j,i)
           end do
        end do
     end do

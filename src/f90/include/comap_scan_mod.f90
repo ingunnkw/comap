@@ -160,7 +160,7 @@ contains
              else
                 scan%ss(k)%scanmode = 'none'
              end if
-             scan%ss(k)%id          = k
+             !scan%ss(k)%id          = k
              scan%ss(k)%time_of_day = mjd2chile_time(0.5d0*(scan%ss(k)%mjd(1)+scan%ss(k)%mjd(2)))
              scan%ss(k)%l2file = trim(l2dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
                   & trim(subsid) // ".h5"
