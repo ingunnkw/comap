@@ -29,6 +29,7 @@ module comap_lx_mod
      integer(i4b)                                    :: decimation_time, decimation_nu
      integer(i4b)                                    :: mask_outliers
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
+     integer(i4b), allocatable, dimension(:,:,:)     :: freqmask_reason ! the (first) reason for masking a specific frequency
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: point         ! Sky coordinates; (phi/theta/psi,time,det)
      real(sp),     allocatable, dimension(:,:,:)     :: mean_tp
@@ -42,7 +43,8 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
-     
+     real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (start/stop or middle, freq, sb,detector)
+
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
 !!$     real(dp)                                        :: scanfreq(2), pixsize 
@@ -75,7 +77,8 @@ contains
     real(sp),     allocatable, dimension(:,:,:,:) :: buffer_4d
     all = .true.; if (present(only_point)) all = .not. only_point
     init_ = .true.; if (present(init)) init_ = init
-    if (init_) call free_lx_struct(data)
+    if (init_) call free_lx_struct(data) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "spectrometer/tod", ext4)
     nsamp_tot = ext4(1); nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
@@ -201,7 +204,10 @@ contains
     allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet))
     call read_hdf(file, "freqmask",         data%freqmask)    
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
+    call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
     call read_hdf(file, "mean_tp",          data%mean_tp)
+    call read_hdf(file, "Tsys",             data%tsys)
+    call read_hdf(file, "Tsys_lowres",      data%tsys_lowres)
     allocate(data%n_nan(nfreq_full,nsb,ndet))
     call read_hdf(file, "n_nan",            data%n_nan)    
     
@@ -343,9 +349,11 @@ contains
     if(allocated(data%sigma0))        deallocate(data%sigma0)
     if(allocated(data%alpha))         deallocate(data%alpha)
     if(allocated(data%Tsys))          deallocate(data%Tsys)
+    if(allocated(data%Tsys_lowres))   deallocate(data%Tsys_lowres)
     if(allocated(data%fknee))         deallocate(data%fknee)
     if(allocated(data%freqmask))      deallocate(data%freqmask)
     if(allocated(data%freqmask_full)) deallocate(data%freqmask_full)
+    if(allocated(data%freqmask_reason)) deallocate(data%freqmask_reason)
     if(allocated(data%mean_tp))       deallocate(data%mean_tp)
     if(allocated(data%n_nan))         deallocate(data%n_nan)
     if(allocated(data%tod_poly))      deallocate(data%tod_poly)
@@ -378,11 +386,13 @@ contains
     !call write_hdf(file, "flag",              data%flag)
     !write(*,*) "right before", data%Tsys(1, 1, 1, 1)
     call write_hdf(file, "Tsys",              data%Tsys)
+    call write_hdf(file, "Tsys_lowres",       data%Tsys_lowres)
     if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
     if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
     if (allocated(data%fknee))     call write_hdf(file, "fknee",             data%fknee)   
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
+    call write_hdf(file, "freqmask_reason",   data%freqmask_reason)
     call write_hdf(file, "n_nan",             data%n_nan)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
@@ -612,9 +622,21 @@ contains
        allocate(lx_out%freqmask(size(lx_in%freqmask,1),size(lx_in%freqmask,2),size(lx_in%freqmask,3)))
        lx_out%freqmask = lx_in%freqmask
     end if
+    if(allocated(lx_in%Tsys_lowres))      then
+       allocate(lx_out%Tsys_lowres(size(lx_in%Tsys_lowres,1),size(lx_in%Tsys_lowres,2),size(lx_in%Tsys_lowres,3)))
+       lx_out%Tsys_lowres = lx_in%Tsys_lowres
+    end if
+    if(allocated(lx_in%Tsys))      then
+       allocate(lx_out%Tsys(size(lx_in%Tsys,1),size(lx_in%Tsys,2),size(lx_in%Tsys,3),size(lx_in%Tsys,4)))
+       lx_out%Tsys = lx_in%Tsys
+    end if
     if(allocated(lx_in%freqmask_full)) then
        allocate(lx_out%freqmask_full(size(lx_in%freqmask_full,1),size(lx_in%freqmask_full,2),size(lx_in%freqmask_full,3)))
        lx_out%freqmask_full = lx_in%freqmask_full
+    end if
+    if(allocated(lx_in%freqmask_reason)) then
+       allocate(lx_out%freqmask_reason(size(lx_in%freqmask_reason,1),size(lx_in%freqmask_reason,2),size(lx_in%freqmask_reason,3)))
+       lx_out%freqmask_reason = lx_in%freqmask_reason
     end if
     if(allocated(lx_in%n_nan)) then
        allocate(lx_out%n_nan(size(lx_in%n_nan,1),size(lx_in%n_nan,2),size(lx_in%n_nan,3)))
