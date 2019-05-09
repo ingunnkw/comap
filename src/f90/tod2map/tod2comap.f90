@@ -25,12 +25,14 @@ program tod2comap
   type(tod_type), allocatable, dimension(:) :: tod
   type(map_type)        :: map_tot, map_scan, buffer
   type(comap_scan_info) :: scan
-  type(acceptlist)      :: alist
+  !type(acceptlist)      :: alist
   type(patch_info)      :: pinfo
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
-  character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name, object
-  integer(i4b)          :: nscan, i, j, k, det, sb, freq
+  character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system
+  character(len=8)      :: scanid
+  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq
+
   integer(i4b)          :: myid, nproc, ierr, root
   logical               :: binning_split, found
   real(dp), allocatable, dimension(:,:) :: offsets
@@ -49,14 +51,14 @@ program tod2comap
   call getarg(1, parfile)
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
   call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
-  call get_parameter(0, parfile, 'ACCEPTLIST', par_string=acceptfile)
+  !call get_parameter(0, parfile, 'ACCEPTLIST', par_string=acceptfile)
   binning_split = .true.
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
   !call get_parameter()
   call initialize_scan_mod(parfile, object)
   call initialize_comap_patch_mod(parfile)
   call initialize_detector_mod(parfile)
-  call initialize_accept_list(trim(acceptfile), alist)
+  !call initialize_accept_list(trim(acceptfile), alist)
   found = get_patch_info(object, pinfo)
   if (.not. found) then
      write(*,*) "Error: patch not found"
@@ -77,17 +79,21 @@ program tod2comap
 
   ! This loop currently requiers that all scans are of the same patch
   do i = 1+myid, nscan, nproc 
-     write(*,*) myid, i, 'of', nscan
+     !write(*,*) myid, i, 'of', nscan
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
 
-     ! Get TOD / read level 3 file
-     filename = scan%l3file
-     !filename = '/mn/stornext/d5/comap/protodir/level3_split/Ka/'//trim(scan%object)//'/'//trim(scan%object)//'_00'//trim(itoa(scan%sid))//'_01.h5'
-     !if (i == 1) write(*,*) trim(filename)
-     call get_tod(trim(filename), tod(i), parfile)
+     ! Get TOD / read level 2 file
+     nsub = scan%nsub
+     do j = 1, nsub
+        write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
+        filename = scan%ss(j)%l2file
+        call get_tod(trim(filename), tod(i), parfile)
+     end do
 
   end do
+
+  !stop
 
 
   if (myid==0) write(*,*) "Initialising mapmaker"
@@ -98,34 +104,45 @@ program tod2comap
   call nullify_map_type(map_tot)
   do i = 1+myid, nscan, nproc
      !prefix = pre//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
+     call get_scan_info(i,scan)
 
-     !if (binning_split) then
+     nsub = scan%nsub
+     do j = 1, nsub
+        call int2string(scan%ss(i)%id, scanid)
+        write(*,*) scanid
 
-        call nullify_map_type(map_scan)
-        call time2pix(tod(i:i), map_scan)
-        call time2pix(tod(i:i), map_tot)
+        !call nullify_map_type(map_scan) ! eller her????
+        call time2pix(tod(i:i), map_scan, parfile)
+        call time2pix(tod(i:i), map_tot, parfile)
+        call nullify_map_type(map_scan) ! her????
         write(*,*) myid, "making maps, scan", i
-        call binning(map_tot, map_scan, tod(i), alist, i)
+        call binning(map_tot, map_scan, tod(i), i, parfile)
         call finalize_scan_binning(map_scan)
-        prefix = trim(pre)//trim(scan%object)//'_'//scan%id
+        prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
         call output_map_h5(trim(prefix), map_scan)
         !call free_map_type(map_scan)
-     !end if
-
+     end do
 
 
   end do
 
-  call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
-  call mpi_reduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
-
+  !call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit, buffer%nhit, size(map_tot%nhit), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
+  !write(*,*) 'hit', myid, buffer%nhit(5,5,1,1,1)
+  !write(*,*) 'sum', myid, buffer%dsum(5,5,1,1,1)
 
   if (myid == 0) then
-     map_tot%div = buffer%div
+     map_tot%div  = buffer%div
      map_tot%dsum = buffer%dsum
+     map_tot%nhit = buffer%nhit
+     map_tot%rms  = buffer%rms
      write(*,*) 'sum', sum(abs(map_tot%dsum)), sum(abs(map_tot%div))
      write(*,*) "Finalising"
      call finalize_binning(map_tot)
+     write(*,*) maxval(map_tot%m)
      prefix = trim(pre)//trim(scan%object)
      call output_map_h5(trim(prefix), map_tot)
      call free_map_type(map_tot)

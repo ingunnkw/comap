@@ -197,25 +197,26 @@ contains
     call read_hdf(file, "nu",               data%nu)
     call read_hdf(file, "tod",              data%tod)
     call read_hdf(file, "point_tel",        data%point_tel)
-    call read_hdf(file, "tod_mean",         data%tod_mean )
+    !call read_hdf(file, "tod_mean",         data%tod_mean )
     call read_hdf(file, "point_cel",        data%point_cel)
-    call read_hdf(file, "flag",             data%flag)
+    !call read_hdf(file, "flag",             data%flag)
     nfreq_full = nfreq*data%decimation_nu
     allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet))
     call read_hdf(file, "freqmask",         data%freqmask)    
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
     call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
     call read_hdf(file, "mean_tp",          data%mean_tp)
+    allocate(data%tsys(2,nfreq_full,nsb,ndet), data%tsys_lowres(nfreq,nsb,ndet))
     call read_hdf(file, "Tsys",             data%tsys)
     call read_hdf(file, "Tsys_lowres",      data%tsys_lowres)
     allocate(data%n_nan(nfreq_full,nsb,ndet))
     call read_hdf(file, "n_nan",            data%n_nan)    
-    
+
     call read_hdf(file, "polyorder",        data%polyorder)
-    if (data%polyorder >= 0) then
-       allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
-       call read_hdf(file, "tod_poly",         data%tod_poly)
-    end if
+    !if (data%polyorder >= 0) then
+    !   allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
+    !   call read_hdf(file, "tod_poly",         data%tod_poly)
+    !end if
     call read_hdf(file, "pixels",           data%pixels)
     allocate(data%var_fullres(nfreq_full,nsb,ndet))
     call read_hdf(file, "var_fullres",      data%var_fullres)
@@ -228,6 +229,7 @@ contains
        call read_hdf(file, "pca_comp",         data%pca_comp)
        call read_hdf(file, "pca_eigv",         data%pca_eigv)
     end if
+
     call read_hdf(file, "mask_outliers",    data%mask_outliers)
     if (data%mask_outliers == 1) then
        allocate(data%diagnostics(nfreq_full,nsb,ndet,5))
@@ -237,10 +239,12 @@ contains
        call read_hdf(file, "diagnostics",       data%diagnostics)
        call read_hdf(file, "cut_params",        data%cut_params)
     end if
+    allocate(data%sigma0(nfreq,nsb,ndet), data%alpha(nfreq,nsb,ndet), data%fknee(nfreq,nsb,ndet))
     call read_hdf(file, "sigma0", data%sigma0)
     call read_hdf(file, "alpha",  data%alpha)
     call read_hdf(file, "fknee",  data%fknee)    
     call close_hdf_file(file)
+    !write(*,*) nfreq,nsb,ndet
   end subroutine read_l2_file
 
 
