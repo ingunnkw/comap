@@ -21,6 +21,7 @@ contains
 
     integer(i4b) :: i, j, k, l, p, q, fs, st, ierr
     real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec
+    character(len=15)   :: coord_system
     real(8), parameter :: PI = 4*atan(1.d0)
 
     ! Set up map grid
@@ -29,6 +30,7 @@ contains
     call get_parameter(0, parfile, 'NUMFREQ', par_int=map%nfreq)
     call get_parameter(0, parfile, 'NUM_SIDEBAND', par_int=map%nsb)
     call get_parameter(0, parfile, 'NUM_DET', par_int=map%ndet)
+    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
     
     !fs = 1!200
     !st = tod%nsamp!-200 ! tod%nsamp
@@ -37,12 +39,14 @@ contains
     map%dthetay = pinfo%resolution ! degrees (arcmin/60), resolution
     map%mean_el = 0.d0!mean(tod(:)%mean_el)
     map%mean_az = 0.d0!mean(tod(:)%mean_az)
+    mean_dec = 0.d0
     if (pinfo%fixed) then 
        mean_dec = pinfo%pos(2)
     else 
-       mean_dec = 0.d0
        do i = 1, size(tod)
-          if (allocated(tod(i)%point)) mean_dec = mean_dec + mean(tod(i)%point(2,:,1))
+          write(*,*) tod(i)%point(2,1,1)
+          if (trim(coord_system) .eq. 'celestial') mean_dec = mean_dec + mean(tod(i)%point(2,:,1))
+          if(trim(coord_system) .eq. 'horizontal') mean_dec = mean_dec + tod(i)%mean_el
        end do
        call mpi_allreduce(MPI_IN_PLACE, mean_dec, 1, mpi_double_precision, mpi_sum, mpi_comm_world, ierr)
        mean_dec = mean_dec/size(tod)
@@ -61,17 +65,31 @@ contains
     else
        do i = 1, size(tod)
           if (.not. allocated(tod(i)%point)) cycle
-          do j = 1, tod(i)%ndet
-             if (all(tod(i)%point(1:2,:,j) == 0.d0)) cycle
-             temp = minval(tod(i)%point(1,:,j)) - pad
-             if (temp .le. x_min) x_min = temp
-             temp = maxval(tod(i)%point(1,:,j)) + pad
-             if (temp .ge. x_max) x_max = temp
-             temp = minval(tod(i)%point(2,:,j)) - pad
-             if (temp .le. y_min) y_min = temp
-             temp = maxval(tod(i)%point(2,:,j)) + pad
-             if (temp .ge. y_max) y_max = temp
-          end do
+          if (trim(coord_system) .eq. 'horizontal') then
+             do j = 1, tod(i)%ndet
+                if (all(tod(i)%point_tel(1:2,:,j) == 0.d0)) cycle
+                temp = minval(tod(i)%point_tel(1,:,j)) - pad
+                if (temp .le. x_min) x_min = temp
+                temp = maxval(tod(i)%point_tel(1,:,j)) + pad
+                if (temp .ge. x_max) x_max = temp
+                temp = minval(tod(i)%point_tel(2,:,j)) - pad
+                if (temp .le. y_min) y_min = temp
+                temp = maxval(tod(i)%point_tel(2,:,j)) + pad
+                if (temp .ge. y_max) y_max = temp
+             end do
+          else
+             do j = 1, tod(i)%ndet
+                if (all(tod(i)%point(1:2,:,j) == 0.d0)) cycle
+                temp = minval(tod(i)%point(1,:,j)) - pad
+                if (temp .le. x_min) x_min = temp
+                temp = maxval(tod(i)%point(1,:,j)) + pad
+                if (temp .ge. x_max) x_max = temp
+                temp = minval(tod(i)%point(2,:,j)) - pad
+                if (temp .le. y_min) y_min = temp
+                temp = maxval(tod(i)%point(2,:,j)) + pad
+                if (temp .ge. y_max) y_max = temp
+             end do
+          end if
        end do
        call mpi_allreduce(MPI_IN_PLACE, x_min, 1, mpi_double_precision, mpi_min, mpi_comm_world, ierr)
        call mpi_allreduce(MPI_IN_PLACE, x_max, 1, mpi_double_precision, mpi_max, mpi_comm_world, ierr)
@@ -123,14 +141,18 @@ contains
   end subroutine initialize_mapmaker
 
 
-  subroutine time2pix(tod, map)
+  subroutine time2pix(tod, map, parfile)
     implicit none
     type(tod_type), dimension(:), intent(inout) :: tod
     type(map_type),               intent(inout) :: map
+    character(len=*)                            :: parfile
 
     integer(i4b) :: scan, i, j, p, q, sb, freq
     real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
+    character(len=15) :: coord_system
     real(dp), allocatable, dimension(:,:) :: sigma0
+
+    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
 
     x_min = map%x(1); x_max = map%x(map%n_x)
     y_min = map%y(1); y_max = map%y(map%n_y)
@@ -145,12 +167,18 @@ contains
        do j = 1, tod(scan)%ndet
           if (.not. is_alive(j)) cycle
           do i = 1, tod(scan)%nsamp
-             if (tod(scan)%point(1,i,j) < x_min) write(*,*) "Expand your grid! (x_min)", scan, i,j,tod(scan)%point(1,i,j), x_min
-             if (tod(scan)%point(1,i,j) > x_max) write(*,*) "Expand your grid! (x_max)", scan, i,j,tod(scan)%point(1,i,j), x_max
-             if (tod(scan)%point(2,i,j) < y_min) write(*,*) "Expand your grid! (y_min)"
-             if (tod(scan)%point(2,i,j) > y_max) write(*,*) "Expand your grid! (y_max)"
-             p = min(max(nint((tod(scan)%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
-             q = min(max(nint((tod(scan)%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
+             !if (tod(scan)%point(1,i,j) < x_min) write(*,*) "Expand your grid! (x_min)", scan, i,j,tod(scan)%point(1,i,j), x_min
+             !if (tod(scan)%point(1,i,j) > x_max) write(*,*) "Expand your grid! (x_max)", scan, i,j,tod(scan)%point(1,i,j), x_max
+             !if (tod(scan)%point(2,i,j) < y_min) write(*,*) "Expand your grid! (y_min)"
+             !if (tod(scan)%point(2,i,j) > y_max) write(*,*) "Expand your grid! (y_max)"      
+             !if (tod(scan)%point_tel(2,i,j) > 30.d0) cycle
+             if (trim(coord_system) .eq. 'horizontal') then
+                p = min(max(nint((tod(scan)%point_tel(1,i,j)-x_min)/map%dthetax),1),map%n_x)
+                q = min(max(nint((tod(scan)%point_tel(2,i,j)-y_min)/map%dthetay),1),map%n_y)
+             else
+                p = min(max(nint((tod(scan)%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
+                q = min(max(nint((tod(scan)%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
+             end if
              tod(scan)%pixels(i,j) = (q-1)*map%n_x + p
              do sb = 1, tod(scan)%nsb
                 do freq = 1, tod(scan)%nfreq
@@ -186,21 +214,71 @@ contains
   end subroutine time2pix
 
 
+  subroutine rotation_matrix(ra_center, dec_center, x, y, z)
+    implicit none
+    real(dp) :: ra_center, dec_center, ra, dec
+    real(dp) :: cosd, sind, cosa, sina
+    real(dp) :: x, y, z, x_temp, y_temp, z_temp
+    real(8), parameter :: PI = 4*atan(1.d0)
+
+    ra_center = ra_center * PI/180.d0
+    dec_center = (90.d0 - dec_center) * PI/180.d0
+
+    cosd = cos(dec_center); sind = sin(dec_center)
+    cosa = cos(ra_center); sina = sin(ra_center)
+
+    x_temp = cosd*cosa*x + cosd*sina*y - sind*z
+    y_temp = -sina*x + cosa*y
+    z_temp = sind*cosa*x + sind*sina*y + cosd*z
+
+    x = x_temp; y = y_temp; z = z_temp
+
+  end subroutine rotation_matrix
+
+
+
+  subroutine lambert(ra, dec, ra_center, dec_center)
+    implicit none
+    real(dp) :: ra, dec, ra_center, dec_center
+    real(dp) :: ra_new, dec_new, x, y
+    real(8), parameter :: PI = 4*atan(1.d0)
+
+    dec = (90.d0 - dec) * PI/180.d0
+    ra  = ra * PI/180.d0
+
+    
+
+    ! rotation equations here!!
+    !ra_new  = cos(ra_center) * cos(dec_center) * x - sin(ra_center) * y
+    !dec_new = sin(ra_center) * cos(dec_center) * x + cos(ra_center) * y
+
+
+    x = 2.d0 * cos(dec_new/2.d0) * cos(ra_new)
+    y = 2.d0 * cos(dec_new/2.d0) * sin(ra_new)
+
+  end subroutine lambert
+
+
+
   
   !!!!!!!!!!!!!!!!!
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map_tot, map_scan, tod, alist, scan)
+  subroutine binning(map_tot, map_scan, tod, scan, parfile)!(map_tot, map_scan, tod, alist, scan, parfile)
     implicit none
     type(tod_type),   intent(in)    :: tod
     type(map_type),   intent(inout) :: map_tot, map_scan
-    type(acceptlist), intent(in)    :: alist
+    !type(acceptlist), intent(in)    :: alist
+    character(len=*)                :: parfile
 
     integer(i4b) :: det, sb, freq, ndet, nsb, nfreq
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
     real(dp)     :: x_min, x_max, y_min, y_max
+    character(len=15) :: coord_system
     real(dp), allocatable, dimension(:) :: dsum, div
+
+    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
 
     x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
     y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
@@ -216,11 +294,17 @@ contains
     do i = 1, tod%nsamp
        do det = 1, ndet
           if (.not. is_alive(det)) cycle
-          p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
-          q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+          !if (tod%point_tel(2,i,det) > 30.d0) cycle
+          if (trim(coord_system) .eq. 'horizontal') then
+             p = min(max(nint((tod%point_tel(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
+             q = min(max(nint((tod%point_tel(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+          else
+             p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
+             q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+          end if
           do sb = 1, nsb
              do freq = 1, nfreq
-                if (tod%fknee(freq,sb,det) > 0.5d0) cycle
+                !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
                 if (tod%freqmask(freq,sb,det) == 0) cycle
                 if (tod%rms(i,freq,sb,det) == 0.d0) cycle
                 !write(*,*) i, det, sb, freq
@@ -463,11 +547,11 @@ contains
    end subroutine get_lhs
 
 
-  subroutine pcg_mapmaker(tod, map, alist, det, sb, freq, parfile)
+  subroutine pcg_mapmaker(tod, map, det, sb, freq, parfile)!(tod, map, alist, det, sb, freq, parfile)
     implicit none
     type(tod_type),   dimension(:), intent(in) :: tod
     type(map_type),   intent(inout) :: map
-    type(acceptlist), intent(in)    :: alist
+    !type(acceptlist), intent(in)    :: alist
     integer(i4b),     intent(in)    :: det, sb, freq
     character(len=*)                :: parfile
 

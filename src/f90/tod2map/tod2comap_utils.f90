@@ -16,9 +16,9 @@ module tod2comap_utils
 
 contains
 
-  subroutine get_tod(l3file, tod, parfile)
+  subroutine get_tod(l2file, tod, parfile)
     implicit none
-    character(len=*), intent(in)    :: l3file, parfile
+    character(len=*), intent(in)    :: l2file, parfile
     type(tod_type),   intent(inout) :: tod
 
     integer(i4b) :: i, j, k, l
@@ -29,7 +29,7 @@ contains
     nu_cut = 0.1d0
 
     ! Read data
-    call read_l3_file(l3file, data)
+    call read_l2_file(l2file, data)
     call free_tod_type(tod)
 
     call get_parameter(0, parfile, 'APPLY_HIGHPASS_FILTER', par_lgt=hifreq)
@@ -40,7 +40,7 @@ contains
     tod%nsb   = size(data%tod,3)
     tod%ndet  = size(data%tod,4)
 
-!    write(*,*) tod%nsamp, tod%nfreq, tod%nsb, tod%ndet
+    !write(*,*) tod%nsamp, tod%nfreq, tod%nsb, tod%ndet
 
     allocate( tod%t(tod%nsamp), tod%f(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%point(3,tod%nsamp,tod%ndet), tod%pixels(tod%nsamp, tod%ndet), &
@@ -48,14 +48,15 @@ contains
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet))!, &
+
+    allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%alpha(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%freqmask(tod%nfreq, tod%nsb, tod%ndet))
 
     tod%t = data%time; tod%f = data%nu
-    tod%point = data%point!_cel ! call make_angles_safe(tod%point(1,:),maxang)
+    tod%point = data%point_cel ! call make_angles_safe(tod%point(1,:),maxang)
     tod%point_tel = data%point_tel
     !tod%g     = data%gain
     tod%sigma0 = data%sigma0
@@ -128,6 +129,7 @@ contains
     if (allocated(tod%fknee))  deallocate(tod%fknee)
     if (allocated(tod%alpha))  deallocate(tod%alpha)
     if (allocated(tod%pixels)) deallocate(tod%pixels)
+    if (allocated(tod%freqmask)) deallocate(tod%freqmask)
 
   end subroutine free_tod_type
 
