@@ -43,7 +43,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
-     real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (start/stop or middle, freq, sb,detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
 
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys

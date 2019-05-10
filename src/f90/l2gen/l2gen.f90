@@ -46,17 +46,7 @@ program l2gen
   call get_parameter(unit, parfile, 'PCA_ERROR_TOLERANCE',       par_dp=pca_err_tol)
   call get_parameter(unit, parfile, 'PCA_MAX_ITERATIONS',        par_int=pca_max_iter)
   call get_parameter(unit, parfile, 'MASK_OUTLIERS',             par_int=mask_outliers)
-  call get_parameter(unit, parfile, 'CORRELATION_CUT',           par_dp=corr_cut)
-  call get_parameter(unit, parfile, 'MEAN_CORRELATION_CUT',      par_dp=mean_corr_cut)
-  call get_parameter(unit, parfile, 'VARIANCE_CUT',              par_dp=var_cut)
-  call get_parameter(unit, parfile, 'MEAN_ABS_CORRELATION_CUT',  par_dp=mean_abs_corr_cut)
-  call get_parameter(unit, parfile, 'MEDIAN_CUT',                par_dp=med_cut)
-  call get_parameter(unit, parfile, 'N_NEIGHBOR',                par_int=n_nb)
-  call get_parameter(unit, parfile, 'VARIANCE_MAX',              par_dp=var_max)
-  call get_parameter(unit, parfile, 'CORRELATION_MAX',           par_dp=corr_max)
-  call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=nb_factor)
   call get_parameter(unit, parfile, 'MIN_ACCEPTRATE',            par_dp=min_acceptrate)
-  call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
   call get_parameter(unit, parfile, 'LEVEL2_DIR',                par_string=l2dir)
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
     
@@ -174,7 +164,7 @@ program l2gen
            call update_status(status, 'pca_filter0')
            
            ! flag correlations and variance
-           call flag_correlations(data_l2_filter, scan%ss(k)%id, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
+           call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
            call update_status(status, 'flag_corr')
 
            ! replace freqmask in original tod
@@ -182,7 +172,7 @@ program l2gen
 
            call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id)
            call update_status(status, 'made_freqmask')
-           !write(*,*) data_l2_fullres%freqmask_reason(:,:,2)
+
            call free_lx_struct(data_l2_filter)
         end if
         write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
@@ -213,7 +203,9 @@ program l2gen
         
            call remove_pca_components(data_l2_filter, data_l2_fullres, pca_sig_rem)
         end if
-
+!        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
+!        write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
+    
         ! Fourier transform frequency direction
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
@@ -303,7 +295,7 @@ contains
              data_l2%freqmask_full(:,j,i) = 0.d0
              write(*,*) "Rejecting entire sideband (too much was masked) det, sb, acceptrate, scanid:"
              write(*,*) i, j, data_l2%acceptrate(j,i), id
-!             data_l2%acceptrate(j,i) = 0.d0
+             data_l2%acceptrate(j,i) = 0.d0
           end if
        end do
     end do
@@ -319,41 +311,120 @@ contains
         
   end subroutine update_freqmask
 
-  subroutine flag_correlations(data_l2, id, corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
+  subroutine mask_specific_corr(data_l2, vars, means, i, j, k, l, m, n, cut, id, reason)
+    implicit none
+    type(Lx_struct),                            intent(inout) :: data_l2
+    integer(i4b),                               intent(in)    :: id, reason
+    real(dp), allocatable, dimension(:, :, :),  intent(in)    :: means, vars
+    integer(i4b),                               intent(in)    :: i, j, k, l, m, n           
+    real(dp),                                   intent(in)    :: cut
+    real(dp)                                                  :: corr
+    integer(i4b)                                              :: nsamp
+    if (vars(k,j,i) < 1.d-14) return
+    if (vars(n,m,l) < 1.d-14) return
+    nsamp       = size(data_l2%tod,1)
+    
+    corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
+    if (.not. (vars(k,j,i) > 0)) then
+       write(*,*) vars(k,j,i), k,j,i
+    end if
+    if (.not. (vars(n,m,l) > 0)) then
+       write(*,*) vars(n,m,l), n,m,l
+    end if
+    
+    corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
+    
+    if (corr > cut) then
+       data_l2%freqmask_full(k,j,i) = 0.d0
+       data_l2%freqmask_full(n,m,l) = 0.d0
+       data_l2%freqmask_reason(k,j,i) = reason
+       data_l2%freqmask_reason(n,m,l) = reason
+    end if
+
+  end subroutine mask_specific_corr
+
+
+  subroutine flag_correlations(data_l2, id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
     implicit none
     type(Lx_struct),          intent(inout) :: data_l2
     integer(i4b),             intent(in)    :: id
-    real(dp),                 intent(in)    :: corr_cut, mean_corr_cut, var_cut, median_cut
-    real(dp),                 intent(in)    :: mean_abs_corr_cut, neighbor_factor, var_max, corr_max
-    integer(i4b),             intent(in)    :: n_neighbor
-    integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nsb, ndet
-    real(dp)     :: corr, mean, var_0, std_median, dnu, radiometer
+    type(hdf_file)                          :: file
+    character(len=512),       intent(in)    :: parfile
+    integer(i4b) :: i, j, k, l, m, n, o, p, p2, q, q2, pp, qq, kk, nn, reason
+    integer(i4b) :: nsamp, nfreq, nsb, ndet, n_offset, dof, nprod, jump, unit
+    real(dp)     :: corr, mean, var_0, std_median, dnu, radiometer, prod, box_sum, edge_corr_cut
     real(dp)     :: mean_meancorr, sigma_meancorr, mean_vars, sigma_vars, mean_maxcorr, sigma_maxcorr
     real(dp)     :: mean_meanabscorr, sigma_meanabscorr, mean_corrsum, sigma_corrsum
+    real(dp)     :: corr_cut, mean_corr_cut, var_cut, median_cut, nsigma_edge_corrs
+    real(dp)     :: mean_abs_corr_cut, neighbor_factor, var_max, corr_max
     real(dp),     allocatable, dimension(:, :, :)   :: means, vars, maxcorr, meancorr, meanabscorr
-    real(dp),     allocatable, dimension(:, :, :)   :: corrsum
+    real(dp),     allocatable, dimension(:, :, :)   :: temp_freqmask !corrsum
     real(sp),     allocatable, dimension(:, :, :)   :: corrsum_mask
     real(dp),     allocatable, dimension(:)         :: subt, median, smedian, minimum
-    real(dp),     allocatable, dimension(:,:)       :: corrs
+    real(dp),     allocatable, dimension(:,:)       :: corrs, corr_prod
+    real(sp),     allocatable, dimension(:,:)       :: corr_template
     real(dp),     allocatable, dimension(:,:)       :: outlier_mask
+    logical(lgt) :: mask_edge_corrs, rm_outliers
+    character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
+    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str
+    real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe
+    integer(i4b) :: n_neighbor, prod_offset
+    integer(i4b), dimension(3) :: box_offsets, stripe_offsets
+    real(dp),     dimension(3) :: nsigma_prod_box, nsigma_prod_stripe, nsigma_mean_box
+    
     nsamp       = size(data_l2%tod,1)
     nfreq       = size(data_l2%tod,2)
     nsb         = size(data_l2%tod,3)
     ndet        = size(data_l2%tod,4)
-    
+
+    call get_parameter(unit, parfile, 'CORRELATION_CUT',           par_dp=corr_cut)
+    call get_parameter(unit, parfile, 'MEAN_CORRELATION_CUT',      par_dp=mean_corr_cut)
+    call get_parameter(unit, parfile, 'VARIANCE_CUT',              par_dp=var_cut)
+    call get_parameter(unit, parfile, 'MEAN_ABS_CORRELATION_CUT',  par_dp=mean_abs_corr_cut)
+    call get_parameter(unit, parfile, 'MEDIAN_CUT',                par_dp=median_cut)
+    call get_parameter(unit, parfile, 'N_NEIGHBOR',                par_int=n_neighbor)
+    call get_parameter(unit, parfile, 'VARIANCE_MAX',              par_dp=var_max)
+    call get_parameter(unit, parfile, 'CORRELATION_MAX',           par_dp=corr_max)
+    call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=neighbor_factor)
+    call get_parameter(unit, parfile, 'NSIGMA_EDGE_CORRS',         par_dp=nsigma_edge_corrs)
+    call get_parameter(unit, parfile, 'MASK_EDGE_CORRS',           par_lgt=mask_edge_corrs)
+    call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
+    call get_parameter(unit, parfile, 'BOX_OFFSETS',               par_string=box_offset_str)
+    call get_parameter(unit, parfile, 'STRIPE_OFFSETS',            par_string=stripe_offset_str)
+    call get_parameter(unit, parfile, 'NSIGMA_PROD_BOX',           par_string=nsigma_prod_box_str)
+    call get_parameter(unit, parfile, 'NSIGMA_PROD_STRIPE',        par_string=nsigma_prod_stripe_str)
+    call get_parameter(unit, parfile, 'NSIGMA_MEAN_BOX',           par_string=nsigma_mean_box_str)
+    call get_parameter(unit, parfile, 'PROD_OFFSET',               par_int=prod_offset)
+    call get_parameter(unit, parfile, 'NSIGMA_CHI2_BOX',           par_dp=nsigma_chi2_box)
+    call get_parameter(unit, parfile, 'NSIGMA_CHI2_STRIPE',        par_dp=nsigma_chi2_stripe)
+
+    read(box_offset_str,*) box_offsets
+    read(stripe_offset_str,*) stripe_offsets
+    read(nsigma_prod_box_str,*) nsigma_prod_box
+    read(nsigma_prod_stripe_str,*) nsigma_prod_stripe
+    read(nsigma_mean_box_str,*) nsigma_mean_box
+
     allocate(means(nfreq, nsb, ndet), vars(nfreq, nsb, ndet))
     allocate(maxcorr(nfreq, nsb, ndet), meancorr(nfreq, nsb, ndet))
     allocate(meanabscorr(nfreq, nsb, ndet))
     if(.not. allocated(data_l2%diagnostics)) allocate(data_l2%diagnostics(nfreq,nsb,ndet,5)) 
     if(.not. allocated(data_l2%cut_params)) allocate(data_l2%cut_params(2,5)) 
-    allocate(corrs(nfreq,nfreq))
+!    allocate(corrs(nfreq,nfreq), corr_template(nfreq,nfreq))
+    allocate(corrs(2 * nfreq, 2 * nfreq))
+!    allocate(corr_prod(2 * nfreq-1, 2 * nfreq))
     allocate(subt(nsamp-1), median(nfreq))
-
+    allocate(temp_freqmask(nfreq,nsb,ndet))
+    
     means = 0.d0
     vars = 0.d0
     maxcorr = 0.d0
     meancorr = 0.d0
     meanabscorr = 0.d0
+    temp_freqmask = 1.d0
+
+    !call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
+    !call read_hdf(file, "corr", corr_template)
+    !call close_hdf_file(file)
     
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
@@ -366,53 +437,229 @@ contains
        end do
     end do
     
+    if (mask_edge_corrs) then
+       edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
+       do i = 1, ndet
+          if (.not. is_alive(i)) cycle
+          do k = 1, nfreq
+             reason = 40
+             j = 1
+             n = 1 + nfreq - k ! type 1
+             m = 2
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 2
+             n = 1 + nfreq - k ! type 1
+             m = 3
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 3
+             n = 1 + nfreq - k ! type 1
+             m = 4
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 1
+             n = 1 + nfreq - k ! type 1
+             m = 3
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 1
+             n = 1 + nfreq - k ! type 1
+             m = 4
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             reason = 41
+             j = 1
+             n = k ! type 2
+             m = 2
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 2
+             n = k ! type 2
+             m = 3
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 2
+             n = k ! type 2
+             m = 4
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 3
+             n = k ! type 2
+             m = 4
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 1
+             n = k ! type 2
+             m = 3
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+             j = 1
+             n = k ! type 2
+             m = 4
+             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+          end do
+       end do
+       vars = vars * data_l2%freqmask_full
+    end if
+!    allocate(box_offsets(3), prod_offsets(3))
+    
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
-       do j = 1, nsb
+       do o = 1, nsb / 2
           corrs = 0.d0
           !$OMP PARALLEL PRIVATE(k,l,m,n,corr)
           !$OMP DO SCHEDULE(guided)    
-          do k = 1, nfreq
+          do p = 1, 2 * nfreq
+             j = (o-1) * 2 + 1 + (p-1) / nfreq
+             k = mod((p-1), nfreq) + 1
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
              !do l = i, ndet
              !   if (.not. is_alive(l)) cycle
              !   do m = j, nsb
              l = i
-             m = j
-             do n = k + 1, nfreq 
+             !m = j
+             do q = p + 2, 2 * nfreq
+                m = (o-1) * 2 + 1 + (q-1) / nfreq
+                n = mod((q-1), nfreq) + 1
                 if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
                 corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
                 corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
-                corrs(k,n) = corr
-                corrs(n,k) = corr
+                if (j == m) then
+                   corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
+                end if
+                corrs(p,q) = corr
+                corrs(q,p) = corr
              end do
           end do
           !$OMP END DO
           !$OMP END PARALLEL
-          !if (i == 6 .and. j == 4) then
-          !   open(22, file="corr_6_4_"//trim(id)//".unf", form="unformatted") ! Adjusted open statement
-          !   write(22) corrs
-          !   close(22)
-          !end if
-          !if (i == 14 .and. j == 4) then
-          !   open(22, file="corr_14_4_"//trim(id)//".unf", form="unformatted") ! Adjusted open statement
-          !   write(22) corrs
-          !   close(22)
-          !end if
-          do k = 1, nfreq
+    
+          !corrs = corrs - corr_template
+                    
+
+          ! if (i == 12 .and. o == 1) then
+          !    open(22, file="corr_12_12.unf", form="unformatted") ! Adjusted open statement
+          !    write(22) corrs
+          !    close(22)
+          ! end if
+
+          do p = 1, 2 * nfreq
+             j = (o-1) * 2 + 1 + (p-1) / nfreq
+             k = mod((p-1), nfreq) + 1
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
-             meancorr(k,j,i)    = sum(corrs(k,:)) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
-             maxcorr(k,j,i)     = maxval(abs(corrs(k,:)))
-             meanabscorr(k,j,i) = sum(abs(corrs(k,:))) / (sum(data_l2%freqmask_full(:,j,i))-1.d0)
+             meancorr(k,j,i)    = sum(corrs(p,:)) / sum(merge(1.d0,0.d0,corrs(p,:) /= 0.d0))
+             maxcorr(k,j,i)     = maxval(abs(corrs(p,:)))
+             meanabscorr(k,j,i) = sum(abs(corrs(p,:))) / sum(merge(1.d0,0.d0,corrs(p,:) /= 0.d0))
+          end do
+          
+          !!! Boxes
+!          box_offsets = (/32, 128, 512/)  ! must divide 1024
+!          prod_offsets = 16 !box_offsets / 2 + 1
+          do l = 1, 3
+             n_offset = box_offsets(l)
+             jump = prod_offset
+             !write(*,*) l, i, o
+             do pp = 1, (2 * nfreq)/n_offset
+                p = (pp-1) * n_offset + 1
+                j = (o-1) * 2 + 1 + (p-1) / nfreq
+                k = mod((p-1), nfreq) + 1
+                p2 = pp * n_offset
+                kk = mod((p2-1), nfreq) + 1
+                do qq = pp + 1, (2 * nfreq)/n_offset
+                   q = (qq-1) * n_offset + 1
+                   m = (o-1) * 2 + 1 + (q-1) / nfreq
+                   n = mod((q-1), nfreq) + 1
+                   q2 = qq * n_offset
+                   nn = mod((q2-1), nfreq) + 1
+                   box_sum = sum(corrs(p:p2, q:q2) * sqrt(1.d0 * nsamp))
+                   corr = sum(corrs(p:p2, q:q2) ** 2 * nsamp) 
+                   dof = sum(merge(1,0,corrs(p:p2, q:q2) /= 0.d0))
+                   prod = sum(corrs(p:p2-jump:2, q:q2) * corrs(p+jump:p2:2, q:q2) * nsamp)
+                   nprod = sum(merge(1,0,corrs(p:p2-jump:2, q:q2) * corrs(p+jump:p2:2, q:q2) /= 0.d0))
+                   if (nprod == 0) nprod = 1
+                   if (dof == 0) dof = 1
+                   if (corr - dof > nsigma_chi2_box * sqrt(2.d0 * dof)) then
+                   !   if (i == 10 .and. o == 2) then
+                   !      write(*,*) (corr - n_offset ** 2) / sqrt(2.d0 * n_offset ** 2), l, pp, qq, k, kk, n, nn, j, m
+                   !   end if
+                   
+                      temp_freqmask(k:kk,j,i) = 0.d0
+                      data_l2%freqmask_reason(k:kk,j,i) = 15 + l
+                      temp_freqmask(n:nn,m,i) = 0.d0
+                      data_l2%freqmask_reason(n:nn,m,i) = 15 + l
+                   else if (prod / nprod > nsigma_prod_box(l) * sqrt(1.d0 / nprod)) then
+                      !write(*,*) prod * sqrt(1.d0 / nprod), l, "box", i, j, k
+                      temp_freqmask(k:kk,j,i) = 0.d0
+                      data_l2%freqmask_reason(k:kk,j,i) = 21 + l
+                      !data_l2%freqmask_full(n * n_offset:(n+1) * n_offset,j,i) = 0.d0
+                      temp_freqmask(n:nn,m,i) = 0.d0
+                      data_l2%freqmask_reason(n:nn,m,i) = 21 + l
+                   else if (abs(box_sum / dof) > nsigma_mean_box(l) * sqrt(1.d0 / dof)) then
+                      !write(*,*) abs(box_sum / dof) / sqrt(1.d0 / dof), l, "box_mean", i, j, k
+                      temp_freqmask(k:kk,j,i) = 0.d0
+                      data_l2%freqmask_reason(k:kk,j,i) = 30 + l
+                      temp_freqmask(n:nn,m,i) = 0.d0
+                      data_l2%freqmask_reason(n:nn,m,i) = 30 + l
+                   end if
+                end do
+             end do
+          end do
+          
+          !!!! Stripes
+          do l = 1, 3
+             n_offset = stripe_offsets(l)
+             jump = prod_offset
+             do pp = 1, (2 * nfreq)/n_offset
+                corr = 0.d0
+                dof = 0
+                prod = 0.d0
+                nprod = 0
+                p = (pp-1) * n_offset + 1
+                j = (o-1) * 2 + 1 + (p-1) / nfreq
+                k = mod((p-1), nfreq) + 1
+                p2 = pp * n_offset
+                kk = mod((p2-1), nfreq) + 1
+                if (pp > 1) then 
+                   corr = corr + sum(corrs(p:p2, :p-1) ** 2 * nsamp)
+                   dof = dof + sum(merge(1,0,corrs(p:p2, :p-1) /= 0.d0))
+                   prod = sum(corrs(p:p2, :p-1-jump:2) * corrs(p:p2, 1+jump:p-1:2) * nsamp)
+                   nprod = sum(merge(1,0,corrs(p:p2, :p-1-jump:2) * corrs(p:p2, 1+jump:p-1:2) /= 0.d0))
+                end if
+                ! if (i == 12 .and. o == 1) then
+                !    write(*,*) "stripes, first"
+                !    if (nprod > 0) then
+                !       write(*,*) prod * sqrt(1.d0 / nprod), nprod, l, pp, k, kk, j
+                !       write(*,*) p, p2, p-2
+                !       write(*,*) sum(merge(1,0,corrs(p:p2, :p-2:jump) * corrs(p:p2, 2:p-1:jump) /= 0.d0))
+                !    end if
+                ! end if
+                
+                corr = corr + sum(corrs(p:p2,p:p2) ** 2 * nsamp) / 2.d0 
+                dof = dof + sum(merge(1,0,corrs(p:p2,p:p2) /= 0.d0)) / 2
+                prod = prod + sum(corrs(p:p2-jump:2, p:p2-jump:2) * corrs(p+jump:p2:2, p+jump:p2:2) * nsamp) / 2.d0
+                nprod = nprod + sum(merge(1,0,corrs(p:p2-jump:2, p:p2-jump:2) * corrs(p+jump:p2:2, p+jump:p2:2) /= 0.d0)) / 2
+
+                if (pp < (2 * nfreq)/n_offset) then
+                   corr = corr + sum(corrs(p:p2, p2+1:) ** 2 * nsamp)
+                   dof = dof + sum(merge(1,0,corrs(p:p2, p2+1:) /= 0.d0))
+                   prod = prod + sum(corrs(p:p2, p2+1 + jump::2) * corrs(p:p2, p2+1:2 * nfreq - jump:2) * nsamp)
+                   nprod = nprod + sum(merge(1,0,corrs(p:p2, p2+1 + jump::2) * corrs(p:p2, p2+1:2 * nfreq - jump:2) /= 0.d0))
+                end if
+                if (nprod == 0) nprod = 1
+                if (corr - dof > nsigma_chi2_stripe * sqrt(2.d0 * dof)) then
+                   !   if (i == 10 .and. o == 2) then
+                   !      write(*,*) (corr - n_offset ** 2) / sqrt(2.d0 * n_offset ** 2), l, pp, qq, k, kk, n, nn, j, m
+                   !   end if
+
+                   temp_freqmask(k:kk,j,i) = 0.d0
+                   data_l2%freqmask_reason(k:kk,j,i) = 18 + l
+                else if (prod / nprod > nsigma_prod_stripe(l) * sqrt(1.d0 / nprod)) then
+                   !write(*,*) prod * sqrt(1.d0 / nprod), l, "stripe", i, j, k
+                   temp_freqmask(k:kk,j,i) = 0.d0
+                   data_l2%freqmask_reason(k:kk,j,i) = 24 + l
+                end if
+             end do
           end do
        end do
        !write(*,*) "Done with correlation masking in detector", i
     end do
     
-    ! Thresholds for removing PCA-components
+    ! Thresholds for masking frequencies (radiometer noise is null-hypothesis
     dnu = (data_l2%nu(2, 1, 1) - data_l2%nu(3, 1, 1)) * 1d9
     radiometer = 1.0d0 / sqrt(dnu * 1.d0 / data_l2%samprate)
     !write(*,*) radiometer, dnu, data_l2%samprate
+
     ! Hard cuts
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
@@ -433,6 +680,7 @@ contains
        write(*,*) "All frequencies masked after hard cut, id: ", id
        stop  ! fix this to "stop working on this file"
     end if
+
     ! convert to relative variance
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
@@ -446,12 +694,13 @@ contains
           end do
        end do
     end do
-    call get_mean_and_sigma(maxcorr, data_l2%freqmask_full, mean_maxcorr, sigma_maxcorr, .true.)
-    call get_mean_and_sigma(meancorr, data_l2%freqmask_full, mean_meancorr, sigma_meancorr, .true.)
-    call get_mean_and_sigma(meanabscorr, data_l2%freqmask_full, mean_meanabscorr, sigma_meanabscorr, .true.)
-    call get_mean_and_sigma(vars, data_l2%freqmask_full, mean_vars, sigma_vars, .true.)
+
+    call get_mean_and_sigma(maxcorr, data_l2%freqmask_full, mean_maxcorr, sigma_maxcorr, rm_outliers)
+    call get_mean_and_sigma(meancorr, data_l2%freqmask_full, mean_meancorr, sigma_meancorr, rm_outliers)
+    call get_mean_and_sigma(meanabscorr, data_l2%freqmask_full, mean_meanabscorr, sigma_meanabscorr, rm_outliers)
+    call get_mean_and_sigma(vars, data_l2%freqmask_full, mean_vars, sigma_vars, rm_outliers)
     
-    median = 0.0055d0
+    median = 0.001d0!0.0055d0
     std_median = 0.0001d0 
     deallocate(subt)
     allocate(subt(nfreq-1))
@@ -470,11 +719,11 @@ contains
              var_0 = 0.d0
           else 
              var_0 = var_0 / sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
+             std_median = std_median + 0.00002 * sign(1.d0, sqrt(var_0) - std_median)
           end if
-          std_median = std_median + 0.00005 * sign(1.d0, sqrt(var_0) - std_median)
        end do
     end do
-    !write(*,*) std_median, median(10)
+!    write(*,*) std_median, median
     ! Mask outlier frequencies
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
@@ -521,7 +770,17 @@ contains
           end do
        end do
     end do
-    
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             if (temp_freqmask(k,j,i) == 0.d0) then
+                data_l2%freqmask_full(k,j,i) = 0.d0
+             end if
+          end do
+       end do
+    end do
     data_l2%diagnostics(:,:,:,1) = means
     data_l2%diagnostics(:,:,:,2) = vars
     data_l2%diagnostics(:,:,:,3) = maxcorr
@@ -1138,7 +1397,7 @@ contains
     end do
     
     nsamp_tot = ind(2)-ind(1)+1
-
+    call free_lx_struct(data_l2)
     ! Allocate full-resolution L2 structure
     allocate(data_l2%time(nsamp_tot), stat=err)
     allocate(data_l2%nu(nfreq,nsb,ndet))
@@ -1189,7 +1448,7 @@ contains
     type(Lx_struct),                   intent(in)  :: data_in
     type(Lx_struct),                   intent(out) :: data_out
 
-    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb, numfreq_in
+    integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb, numfreq_in, nw
     real(dp)     :: w, weight
     real(dp), allocatable, dimension(:,:,:) :: sigmasq
 
@@ -1314,7 +1573,7 @@ contains
                    if (data_out%var_fullres(n,j,l) <= 0) then
                       w = 0.d0
                    else
-                      w      = 1.d0 / data_out%var_fullres(n,j,l) * data_in%freqmask_full(n,j,l)
+                      w  = 1.d0 / data_out%var_fullres(n,j,l) * data_in%freqmask_full(n,j,l)
                    end if
                    weight = weight + w 
                    do m = (i-1)*dt+1, i*dt
@@ -1333,7 +1592,36 @@ contains
     end do
     !$OMP END DO
     !$OMP END PARALLEL
-
+    
+    data_out%Tsys_lowres = 0.d0
+    ! Calculate properly weighted lowres tsys
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          do k = 1, numfreq_out
+             weight = 0.d0
+             nw     = 0
+             do n = (k-1)*dnu+1, k*dnu
+                if (data_out%freqmask_full(n,j,i) == 0) cycle
+                if (data_out%var_fullres(n,j,i) <= 0) then
+                   w = 0.d0
+                else
+                   w  = 1.d0 / data_out%var_fullres(n,j,i) * data_in%freqmask_full(n,j,i)
+                   nw = nw + 1
+                end if
+                weight = weight + w 
+                data_out%Tsys_lowres(k,j,i) = data_out%Tsys_lowres(k,j,i) + (w * (data_in%Tsys(1,n,j,i) + data_in%Tsys(2,n,j,i))/2.d0) ** 2
+             end do
+             data_out%Tsys_lowres(k,j,i) = sqrt(data_out%Tsys_lowres(k,j,i))
+             if (weight > 0.d0) then
+                data_out%Tsys_lowres(k,j,i) = data_out%Tsys_lowres(k,j,i) * sqrt(1.d0 * nw) / weight
+             else
+                data_out%Tsys_lowres(k,j,i) = 0.d0
+             end if
+          end do
+       end do
+    end do
+  
     ! Polyfiltered TOD
     data_out%polyorder = data_in%polyorder
     if (data_out%polyorder >= 0) then
