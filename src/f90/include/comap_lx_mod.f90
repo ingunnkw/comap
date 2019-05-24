@@ -11,6 +11,7 @@ module comap_lx_mod
      ! Level 1 fields
      real(dp)                                        :: mjd_start
      real(dp)                                        :: samprate
+     real(dp),     allocatable, dimension(:)         :: t_hot
      real(dp),     allocatable, dimension(:)         :: time
      real(dp),     allocatable, dimension(:)         :: sec         ! (time) in seconds since start
      real(dp),     allocatable, dimension(:,:,:)     :: nu          ! (freq, sideband, detector)
@@ -69,7 +70,7 @@ contains
     real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
-    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1), numbad
+    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1), numbad, temp_samp
     logical(lgt)                           :: all, ok, init_
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
@@ -83,6 +84,9 @@ contains
     call get_size_hdf(file, "spectrometer/tod", ext4)
     nsamp_tot = ext4(1); nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
 
+    call get_size_hdf(file, "hk/antenna0/env/ambientLoadTemp", temp_samp)
+
+    allocate(data%t_hot(temp_samp))
     allocate(data%point_tel(3,nsamp_tot,ndet))
     allocate(data%point_cel(3,nsamp_tot,ndet))
     allocate(data%pixels(ndet))
@@ -97,6 +101,9 @@ contains
     call read_hdf(file, "spectrometer/pixel_pointing/pixel_ra",            data%point_cel(1,:,:))
     call read_hdf(file, "spectrometer/pixel_pointing/pixel_dec",           data%point_cel(2,:,:))
     data%point_cel(3,:,:) = 0.d0
+
+    ! Read ambient temp
+    call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
 
     call read_hdf(file, "spectrometer/feeds",               data%pixels)
     if (all) call read_hdf(file, "spectrometer/frequency",       data%nu(:,:,1))
