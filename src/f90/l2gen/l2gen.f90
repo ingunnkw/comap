@@ -12,6 +12,7 @@ program l2gen
   use quiet_status_mod
   use comap_gain_mod
   use comap_patch_mod
+  use comap_ephem_mod
   implicit none
 
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
@@ -436,7 +437,40 @@ contains
           end do
        end do
     end do
+
+!     allocate(corrs(4 * nfreq, 4 * nfreq))
+!     corrs = 0.d0
+!     i = 6
+!     l = i
+!     !!$OMP PARALLEL PRIVATE(j,k,l,m,n,p,q,corr)
+!     !!$OMP DO SCHEDULE(guided)    
+!     do p = 1, nsb * nfreq
+!        k = mod((p-1), nfreq) + 1
+!        j = (p-1) / nfreq + 1
+! !       write(*,*) k, j, p
+!        if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+!        do q = p+1, nsb * nfreq
+!           n = mod((q-1), nfreq) + 1
+!           m = (q-1) / nfreq + 1 
+! !          write(*,*) k, j, n, m, p, q
+!           if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
+!           !write(*,*) k, j, n, m, p, q
+!           corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
+! !          write(*,*) k, j, n, m, p, q, corr          
+!           corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
+!           corrs(p,q) = corr
+!           corrs(q,p) = corr
+!        end do
+!     end do
+!     !!$OMP END DO
+!     !!$OMP END PARALLEL
+!     open(22, file="corr_06.unf", form="unformatted") ! Adjusted open statement
+!     write(22) corrs
+!     close(22)
     
+!     deallocate(corrs)
+!     allocate(corrs(2 * nfreq, 2 * nfreq))
+
     if (mask_edge_corrs) then
        edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
        do i = 1, ndet
@@ -498,7 +532,7 @@ contains
        if (.not. is_alive(i)) cycle
        do o = 1, nsb / 2
           corrs = 0.d0
-          !$OMP PARALLEL PRIVATE(k,l,m,n,corr)
+          !$OMP PARALLEL PRIVATE(k,l,p,q,j,m,n,corr)
           !$OMP DO SCHEDULE(guided)    
           do p = 1, 2 * nfreq
              j = (o-1) * 2 + 1 + (p-1) / nfreq
@@ -538,6 +572,7 @@ contains
              j = (o-1) * 2 + 1 + (p-1) / nfreq
              k = mod((p-1), nfreq) + 1
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+             if (sum(merge(1.d0,0.d0,corrs(p,:) /= 0.d0)) == 0.d0) cycle
              meancorr(k,j,i)    = sum(corrs(p,:)) / sum(merge(1.d0,0.d0,corrs(p,:) /= 0.d0))
              maxcorr(k,j,i)     = maxval(abs(corrs(p,:)))
              meanabscorr(k,j,i) = sum(abs(corrs(p,:))) / sum(merge(1.d0,0.d0,corrs(p,:) /= 0.d0))

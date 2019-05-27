@@ -4,7 +4,7 @@
 
 OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_pixspace_mod.o quiet_module_mod.o comap_detector_mod.o \
-         comap_frequency_mod.o comap_acceptlist_mod.o comap_scan_mod.o \
+         comap_frequency_mod.o comap_ephem_mod.o comap_acceptlist_mod.o comap_scan_mod.o \
          d1mach.o drc3jj.o quiet_l1_defs.o \
          math_tools.o powell_mod.o quasi_newton_mod.o \
          quiet_fileutils.o quiet_detector_mod.o quiet_mapfile_mod.o \
@@ -60,6 +60,7 @@ comap_acceptlist_mod.o   : comap_scan_mod.o comap_detector_mod.o comap_frequency
 quiet_target_mod.o       : quiet_utils.o quiet_ces_mod.o quiet_acceptlist_mod.o quiet_defs.o
 #l1_read_comap_mod.o      : quiet_utils.o 
 comap_scan_mod.o         : quiet_utils.o
+comap_ephem_mod.o        : spline_1D_mod.o
 quiet_ces_mod.o          : quiet_utils.o
 quiet_Lx_mod.o           : quiet_hdf_mod.o quiet_fft_mod.o
 comap_lx_mod.o		 : quiet_mpi_mod.o quiet_hdf_mod.o quiet_fft_mod.o
