@@ -111,7 +111,7 @@ program l2gen
      call update_status(status, 'freq_mask2')
      
      ! Compute absolute calibration
-     call compute_Tsys(tsysfile, data_l1)
+     call compute_Tsys_per_tp(tsysfile, data_l1)
 
      ! Get patch info
      found = get_patch_info(scan%object, pinfo) 
@@ -1445,7 +1445,7 @@ contains
     allocate(data_l2%freqmask_full(size(data_l1%nu,1,1),nsb,ndet))
     allocate(data_l2%freqmask_reason(size(data_l1%nu,1,1),nsb,ndet))
     !allocate(data_l2%flag(nsamp_tot))
-    allocate(data_l2%Tsys(2,nfreq,nsb,ndet))
+    allocate(data_l2%Tsys(1,nfreq,nsb,ndet))
 
     ! Merge L1 data
     data_l2%decimation_time = 1
@@ -1952,7 +1952,7 @@ contains
   end subroutine remove_elevation_gain
 
 
-  subroutine compute_Tsys(tsys_file, data)
+  subroutine compute_Tsys_per_tp(tsys_file, data)
     implicit none
     character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
@@ -2027,7 +2027,7 @@ contains
     deallocate(tsys_fullres)
     deallocate(time)
 !    write(*,*) data%Tsys
-  end subroutine compute_Tsys
+  end subroutine compute_Tsys_per_tp
 
   subroutine calibrate_tod(data_l1, data_l2_fullres)
     implicit none

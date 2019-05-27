@@ -22,6 +22,9 @@ module comap_lx_mod
      integer(i4b), allocatable, dimension(:)         :: pixels      ! Active pixels/detectors
      integer(i4b), allocatable, dimension(:,:,:)     :: n_nan       ! number of nan values for each frequency
      real(dp),     allocatable, dimension(:,:,:,:)   :: Tsys        ! (start/stop or middle, freq, sb,detector)
+     real(dp),     allocatable, dimension(:)         :: t_hot       ! Ambient temperature in K
+     integer(i4b), allocatable, dimension(:)         :: amb_state   ! Ambient load in/out
+     real(dp),     allocatable, dimension(:)         :: amb_time    ! Ambient time in MJD
 
      ! Level 2 fields
      integer(i4b)                                    :: polyorder     ! Polynomial order for frequency filter
@@ -69,7 +72,7 @@ contains
     real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
-    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1), numbad
+    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1), numbad, temp_samp
     logical(lgt)                           :: all, ok, init_
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
@@ -83,6 +86,12 @@ contains
     call get_size_hdf(file, "spectrometer/tod", ext4)
     nsamp_tot = ext4(1); nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
 
+    call get_size_hdf(file, "hk/antenna0/env/ambientLoadTemp", ext1)
+    temp_samp = ext1(1)
+
+    allocate(data%t_hot(temp_samp))
+    allocate(data%amb_state(temp_samp))
+    allocate(data%amb_time(temp_samp))
     allocate(data%point_tel(3,nsamp_tot,ndet))
     allocate(data%point_cel(3,nsamp_tot,ndet))
     allocate(data%pixels(ndet))
@@ -98,6 +107,12 @@ contains
     call read_hdf(file, "spectrometer/pixel_pointing/pixel_dec",           data%point_cel(2,:,:))
     data%point_cel(3,:,:) = 0.d0
 
+    ! Read ambient temp
+    call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
+    call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
+    call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
+
+    ! Read feed information
     call read_hdf(file, "spectrometer/feeds",               data%pixels)
     if (all) call read_hdf(file, "spectrometer/frequency",       data%nu(:,:,1))
     do i = 2, ndet

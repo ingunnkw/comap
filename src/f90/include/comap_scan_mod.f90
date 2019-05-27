@@ -137,14 +137,14 @@ contains
        read(unit,*) name, nscan
        do j = 1, nscan
           read(unit,'(a)') line
-          read(line,*) scan%id, scan%mjd, scan%nsub, feature
-          scan%l1file = trim(l1dir) // "/" // trim(get_token(line, " ", 6))
+          read(line,*) scan%id, scan%mjd, scan%nsub
+          scan%l1file = trim(l1dir) // "/" // trim(get_token(line, " ", 5))
           scan%object = name
           allocate(scan%ss(scan%nsub))
           cnum         = cnum+1
           runlist%nsub = runlist%nsub + scan%nsub
           do k = 1, scan%nsub
-             read(unit,*) scan%ss(k)%id, scan%ss(k)%mjd, &
+             read(unit,*) scan%ss(k)%id, scan%ss(k)%mjd, feature, &
                   & scan%ss(k)%az, scan%ss(k)%el, scan%ss(k)%dk, a, b, c, d
              call int2string(scan%ss(k)%id, subsid)
              if (present(object)) then
@@ -157,6 +157,8 @@ contains
                 scan%ss(k)%scanmode = 'ces'
              else if (feature == 512) then
                 scan%ss(k)%scanmode = 'raster'
+             else if (feature == 8192) then
+                scan%ss(k)%scanmode = 'tsys'
              else
                 scan%ss(k)%scanmode = 'none'
              end if
