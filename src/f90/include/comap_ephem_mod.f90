@@ -15,10 +15,14 @@ contains
     character(len=512)             :: ephem_file
     type(hdf_file)                 :: file
     integer(i4b)                   :: i, arr_dim(2)
-    n_objects = 1
+    n_objects = 6
     allocate(obj_list(n_objects))
     obj_list(1) = 'jupiter'
-
+    obj_list(2) = 'mars'
+    obj_list(3) = 'moon'
+    obj_list(4) = 'saturn'
+    obj_list(5) = 'sun'
+    obj_list(6) = 'venus'
     call get_parameter(0, parfile,  'EPHEMERIS_FILE', par_string=ephem_file)
     
     call open_hdf_file(ephem_file, file, "r")
