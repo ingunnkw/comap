@@ -18,9 +18,9 @@ program l2gen
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter
-  real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2), tsys_time(2)
+  real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   logical(lgt)         :: process
@@ -110,8 +110,48 @@ program l2gen
      call postprocess_frequency_mask(numfreq, data_l1, scan%id)
      call update_status(status, 'freq_mask2')
      
-     ! Compute absolute calibration
-     call compute_Tsys_per_tp(tsysfile, data_l1)
+     n_tsys = 0
+     nsamp = size(data_l1%tod,1)
+     !write(*,*) 4                                                                                                                                                                                                                
+     !write(*,*) data_l1%tod(1751:2650,1,1,1)                                                                                                                                                                                     
+     do i=1, scan%nsub
+        if (scan%ss(i)%scanmode == 'tsys') then
+           n_tsys = n_tsys + 1
+           if (n_tsys > 2) exit
+           tsys_mjd_min     = max(scan%ss(i)%mjd(1), minval(data_l1%time))
+           tsys_mjd_max     = min(scan%ss(i)%mjd(2), maxval(data_l1%time))
+           write(*,*) "A", tsys_mjd_min, tsys_mjd_max
+           ! Find start position                                                                                                                                                                                                  
+           !write(*,* ) scan%ss(i)%mjd(1), scan%ss(i)%mjd(2)                                                                                                                                                                      
+           !write(*,*) maxval(data_l1%time), minval(data_l1%time)                                                                                                                                                                 
+           !write(*,*) tsys_mjd_min, tsys_mjd_max                                                                                                                                                                                 
+           !stop                                                                                                                                                                                                                  
+           tsys_ind(1) = 1
+           do while (tsys_ind(1) <= nsamp)
+              if (data_l1%time(tsys_ind(1)) > tsys_mjd_min) exit
+              tsys_ind(1) = tsys_ind(1) + 1
+           end do
+
+
+              ! Find end position                                                                                                                                                                                                    
+           tsys_ind(2) = nsamp
+           do while (tsys_ind(2) >= 1)
+              if (data_l1%time(tsys_ind(2)) < tsys_mjd_max) exit
+              tsys_ind(2) = tsys_ind(2) - 1
+           end do
+           write(*,*) "B", tsys_ind
+           !stop                                                                                                                                                                                                                  
+
+           ! Compute absolute calibration                                                                                                                                                                                         
+           call compute_Tsys_per_tp(tsysfile, data_l1, tsys_ind, n_tsys)
+           tsys_time(n_tsys) = 0.5*(tsys_mjd_min + tsys_mjd_max)
+           end if
+     end do
+     if (n_tsys == 1) tsys_time(2) = data_l1%time(nsamp)
+     if (n_tsys == 0) then
+        write(*,*) "No ambient subscans!"
+        stop
+     end if
 
      ! Get patch info
      found = get_patch_info(scan%object, pinfo) 
@@ -121,7 +161,7 @@ program l2gen
         stop
      end if
 
-     do k = 1, scan%nsub
+     do k = 2, scan%nsub-1
 
         ! Reformat L1 data into L2 format, and truncate
         call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
@@ -211,7 +251,7 @@ program l2gen
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
         ! Apply absolute calibration
-        call calibrate_tod(data_l1, data_l2_fullres)
+        call calibrate_tod(data_l1, data_l2_fullres, tsys_time)
         
         if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
            write(*,*) "NaN in tod after filtering!"
@@ -1833,7 +1873,7 @@ contains
     implicit none
     integer(i4b),                                    intent(in)    :: sid, nfreq
     type(Lx_struct),                                 intent(inout) :: data
-    
+
 
     integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
     logical(lgt) :: first
@@ -1843,7 +1883,7 @@ contains
     nsb        = get_num_sideband()
     nfreq_full = size(data%freqmask_full,1)
 
-    ! Exclude frequencies with any NaNs
+    ! Exclude frequencies with any NaNs                                                                                                                                                                                           
     do k = 1, ndet
        do j = 1, nsb
           do i = 1, nfreq_full
@@ -1856,8 +1896,8 @@ contains
           end do
        end do
     end do
-    
-    ! Downgrade mask
+
+    ! Downgrade mask                                                                                                                                                                                                              
     allocate(data%freqmask(nfreq,nsb,ndet))
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
@@ -1952,101 +1992,138 @@ contains
   end subroutine remove_elevation_gain
 
 
-  subroutine compute_Tsys_per_tp(tsys_file, data)
+  subroutine init_vanemask(data, vanemask, tsys_ind)
+    implicit none
+    type(Lx_struct),                                 intent(inout) :: data    
+    integer(i4b), dimension(:), allocatable,         intent(inout) :: vanemask
+    integer(i4b),                                    intent(in)    :: tsys_ind(2)
+
+    integer(i4b) :: i, j, nsamp_lowres, nsamp_highres
+    real(dp)     :: mjd_start, mjd_stop
+
+    nsamp_lowres  = size(data%amb_state, 1)
+    nsamp_highres = size(data%tod,1)
+
+    allocate(vanemask(nsamp_highres))
+    vanemask = -1
+    i = 1 ! Counter for highres grid                                                                                                                                                                                              
+    j = 1 ! Couner for lowres grid                                                                                                                                                                                                
+    do j = 1, nsamp_lowres-1
+       if (data%amb_state(j) == 0 .or. data%amb_state(j) == 1) then
+          mjd_start = data%amb_time(j)
+          mjd_stop  = data%amb_time(j+1)
+          do while (data%time(i) < mjd_start)
+             i = i+1
+          end do
+          do while (data%time(i) < mjd_stop)
+             if (i > tsys_ind(1) .and. i < tsys_ind(2)) then
+                vanemask(i) = data%amb_state(j)
+             end if
+             i            = i+1
+          end do
+       end if
+    end do
+  end subroutine init_vanemask
+
+  subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys)
     implicit none
     character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
     type(hdf_file)                                :: file
-    real(dp)                                      :: mean_tod
+    real(dp)                                      :: mean_tod, P_hot, P_cold
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
-    integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu
-    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count
-    integer(i4b), dimension(:), allocatable       :: scanID
-    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec
-    real(dp), dimension(:), allocatable           :: time
+    integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
+    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys
+    integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
+    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
+    real(dp), dimension(:), allocatable           :: time, Y
+    integer(i4b), dimension(:), allocatable       :: vanemask
 
     nsamp         = size(data%tod,1)
     nfreq_fullres = size(data%tod,2)
     nsb           = size(data%tod,3)
-    ndet          = size(data%tod,4)  ! Must be fixed somehow
+    ndet          = size(data%tod,4)
 
-    allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))                                                     
-    data%Tsys = 0.d0
 
-    ! 1) get tsys-values                                                                                                                        
-    call open_hdf_file(tsys_file, file, "r")
-    call read_hdf(file, "nfreq", nfreq_fullres)
-    call get_size_hdf(file, "MJD", nsamp_gain)
+    if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
+    allocate(Y(nfreq_fullres))
 
-    allocate(tsys_fullres(ndet, nsb, nfreq_fullres, nsamp_gain(1)))
-    !allocate(tsys_1(nfreq_fullres, nsb, ndet))
-    !allocate(tsys_2(nfreq_fullres, nsb, ndet))
-    allocate(time(nsamp_gain(1)))
-    call read_hdf(file, "MJD", time)
-    call read_hdf(file, "tsys_pr_P", tsys_fullres)
-    call close_hdf_file(file)
+    data%Tsys = 40.d0
+    t_cold = 2.73
+    t_hot = mean(data%t_hot)/100 + 273.15
 
-    ! finding closest time-value                                                                                                                
-    mjd_index1 = max(locate(time, data%time(1)),1)
-    mjd_index2 = mjd_index1 ! Must be fixed
-    !write(*,*) mjd_index1, size(tsys_fullres,1)
+    !call locate_ambient_indecies(data, vane_in_index, vane_out_index, tsys_ind)                                                                                                                                                  
+    call init_vanemask(data, vanemask, tsys_ind)
 
-    !if (mjd_index1 < data%time(1)) then
-    !    mjd_index2 = mjd_index1 + 1
-    !else
-    !   mjd_index2   = mjd_index1 - 1
-    !end if
-!    write(*,*) mjd_index1
-!    write(*,*) tsys_fullres(2,4,230, mjd_index1)
-
-    !tsys_1 = tsys_fullres(mjd_index1,:,:,:)
-    !tsys_2 = tsys_fullres(mjd_index1,:,:,:)
-     
     do i=1, ndet
-!       write(*,*) "det ", i
        if (.not. is_alive(i)) cycle
        do j=1, nsb
-          !$OMP PARALLEL PRIVATE(k,l,mean_tod)
-          !$OMP DO SCHEDULE(guided)
           do k=1, nfreq_fullres
-             if (data%freqmask_full(k,j,i) == 0.d0) cycle
-             mean_tod           = mean(data%tod(:,k,j,i))
-             
-             if (.not. (tsys_fullres(i,j,k,mjd_index1) == tsys_fullres(i,j,k,mjd_index1))) then
-                write(*,*) "NaN in tsys_fullres", i, j, k
-             end if
-    
-             data%Tsys(1,k,j,i) = tsys_fullres(i,j,k,mjd_index1)*mean_tod * data%freqmask_full(k,j,i)
-             data%Tsys(2,k,j,i) = tsys_fullres(i,j,k,mjd_index2)*mean_tod * data%freqmask_full(k,j,i)
+             P_hot = 0.d0
+             P_cold = 0.d0
+             n_hot = 0
+             n_cold = 0
+             do l = 1, nsamp
+                if (vanemask(l) == 1 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+                   P_hot = P_hot + data%tod(l,k,j,i)
+                   n_hot = n_hot + 1
+                else if (vanemask(l) == 0 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+                   P_cold = P_cold + data%tod(l,k,j,i)
+                   n_cold = n_cold + 1
+                else
+                   cycle
+                end if
+             end do
+
+             P_hot  = P_hot  / n_hot
+             P_cold = P_cold / n_cold
+             Y(k)   = P_hot/P_cold
+             data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+             write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
           end do
-          !$OMP END DO
-          !$OMP END PARALLEL
        end do
     end do
-    
-    deallocate(tsys_fullres)
-    deallocate(time)
-!    write(*,*) data%Tsys
+
   end subroutine compute_Tsys_per_tp
 
-  subroutine calibrate_tod(data_l1, data_l2_fullres)
+
+  subroutine calibrate_tod(data_l1, data_l2_fullres, tsys_time)
     implicit none
     type(lx_struct), intent(in)    :: data_l1
     type(lx_struct), intent(inout) :: data_l2_fullres
+    integer(i4b),    intent(in)    :: tsys_time(2)
 
-    integer(i4b) :: i, j, k, ndet, nfreq, nsb
+    real(dp)                       :: interp1d_tsys, mean_tod, y0, y1, x0, x1, x, scan_time
+    integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp
+    l2_nsamp = size(data_l2_fullres%tod, 1)
+    nfreq    = size(data_l1%tod,2)
+    nsb      = size(data_l1%tod,3)
+    ndet     = size(data_l1%tod,4)
 
-    nfreq = size(data_l1%tod,2)
-    nsb   = size(data_l1%tod,3)
-    ndet  = size(data_l1%tod,4)
-
-    ! Interpolate Tsys to current time for each detector
+    ! Interpolate Tsys to current time for each detector                                                        
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2_fullres%freqmask_full(k,j,i) == 0.d0) cycle
-             data_l2_fullres%tod(:,k,j,i)  = (data_l1%Tsys(1,k,j,i) + data_l1%Tsys(2,k,j,i))/2.d0 * data_l2_fullres%tod(:,k,j,i)
+             scan_time = data_l2_fullres%time(l2_nsamp/2)
+             x0 = tsys_time(1); x1 = tsys_time(2)
+             y0 = data_l1%Tsys(1,k,j,i); y1 = data_l1%Tsys(2,k,j,i)
+
+             interp1d_tsys = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
+
+
+             mean_tod = mean(data_l1%tod(:,k,j,i))
+             data_l2_fullres%tod(:,k,j,i)  = interp1d_tsys * mean_tod * data_l2_fullres%tod(:,k,j,i)
+             !write(*,*) "----------------"                                                                     
+             !write(*,*) data_l1%Tsys(1,k,j,i)                                                                  
+             !write(*,*) data_l1%Tsys(2,k,j,i)                                                                  
+             !write(*,*) "----------------"                                                                     
+             !write(*,*) mean_tod                                                                               
+             !write(*,*) "----------------"                                                                     
+
+             !write(*,*) interp1d_tsys*mean_tod                                                                 
+             !write(*,*) "----------------"                                                                     
           end do
        end do
     end do
