@@ -19,8 +19,8 @@ program l2gen
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2), tsys_time(2)
-  real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
+  real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   logical(lgt)         :: process
@@ -216,6 +216,9 @@ program l2gen
 
            call free_lx_struct(data_l2_filter)
         end if
+        !write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
+        !'write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
+
         write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
            write(*,*) "All channels masked! Scan: ", scan%ss(k)%id
@@ -244,8 +247,6 @@ program l2gen
         
            call remove_pca_components(data_l2_filter, data_l2_fullres, pca_sig_rem)
         end if
-!        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
-!        write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
     
         ! Fourier transform frequency direction
         !call convert_GHz_to_k(data_l2_fullres(i))               
@@ -256,6 +257,7 @@ program l2gen
         if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
            write(*,*) "NaN in tod after filtering!"
         end if
+
         ! If necessary, decimate L2 file in both time and frequency
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
         call update_status(status, 'decimate')
@@ -451,6 +453,7 @@ contains
     if(.not. allocated(data_l2%diagnostics)) allocate(data_l2%diagnostics(nfreq,nsb,ndet,5)) 
     if(.not. allocated(data_l2%cut_params)) allocate(data_l2%cut_params(2,5)) 
 !    allocate(corrs(nfreq,nfreq), corr_template(nfreq,nfreq))
+    allocate(corr_template(nfreq,nfreq))
     allocate(corrs(2 * nfreq, 2 * nfreq))
 !    allocate(corr_prod(2 * nfreq-1, 2 * nfreq))
     allocate(subt(nsamp-1), median(nfreq))
@@ -462,11 +465,13 @@ contains
     meancorr = 0.d0
     meanabscorr = 0.d0
     temp_freqmask = 1.d0
-
-    !call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
-    !call read_hdf(file, "corr", corr_template)
-    !call close_hdf_file(file)
     
+    if (data_l2%polyorder == 1) then
+       call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
+       call read_hdf(file, "corr", corr_template)
+       call close_hdf_file(file)
+    end if
+
     do i = 1, ndet
        if (.not. is_alive(i)) cycle
        do j = 1, nsb
@@ -589,7 +594,7 @@ contains
                 if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
                 corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
                 corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
-                if (j == m) then
+                if ((j == m) .and. (data_l2%polyorder == 0)) then
                    corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
                 end if
                 corrs(p,q) = corr
@@ -598,9 +603,18 @@ contains
           end do
           !$OMP END DO
           !$OMP END PARALLEL
-    
-          !corrs = corrs - corr_template
-                    
+
+          ! if (i == 12 .and. o == 1) then
+          !    open(22, file="corr_12_12_before.unf", form="unformatted") ! Adjusted open statement
+          !    write(22) corrs
+          !    close(22)
+          ! end if
+
+
+          if (data_l2%polyorder == 1) then
+             corrs(1:nfreq,1:nfreq) = corrs(1:nfreq,1:nfreq) - corr_template * merge(1.d0,0.d0,corrs(1:nfreq,1:nfreq) /= 0.d0)
+             corrs(nfreq+1:,nfreq+1:) = corrs(nfreq+1:,nfreq+1:) - corr_template * merge(1.d0,0.d0,corrs(nfreq+1:,nfreq+1:) /= 0.d0)
+          end if
 
           ! if (i == 12 .and. o == 1) then
           !    open(22, file="corr_12_12.unf", form="unformatted") ! Adjusted open statement
@@ -818,9 +832,9 @@ contains
                 else if (all(mean_abs_corr_cut * sigma_meanabscorr * neighbor_factor < abs(meanabscorr(k:k+n_neighbor,j,i) - mean_meanabscorr))) then
                    data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
                    data_l2%freqmask_reason(k,j,i) = 8
-                else if (all(median_cut * std_median * neighbor_factor < meanabscorr(k:k+n_neighbor,j,i) - median(k))) then
-                   data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
-                   data_l2%freqmask_reason(k,j,i) = 9
+                ! else if (all(median_cut * std_median * neighbor_factor < meanabscorr(k:k+n_neighbor,j,i) - median(k))) then
+                !    data_l2%freqmask_full(k:k+n_neighbor,j,i) = 0.d0
+                !    data_l2%freqmask_reason(k,j,i) = 9
                 end if
              end if
              
@@ -838,9 +852,9 @@ contains
              else if (mean_abs_corr_cut * sigma_meanabscorr < abs(meanabscorr(k,j,i) - mean_meanabscorr)) then
                 data_l2%freqmask_full(k,j,i) = 0.d0
                 data_l2%freqmask_reason(k,j,i) = 13
-             else if (median_cut * std_median < meanabscorr(k,j,i) - median(k)) then
-                data_l2%freqmask_full(k,j,i) = 0.d0
-                data_l2%freqmask_reason(k,j,i) = 14
+!             else if (median_cut * std_median < meanabscorr(k,j,i) - median(k)) then
+!                data_l2%freqmask_full(k,j,i) = 0.d0
+!                data_l2%freqmask_reason(k,j,i) = 14
              end if                       
           end do
        end do
@@ -1574,7 +1588,7 @@ contains
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
     data_out%pixels        = data_in%pixels
-    data_out%Tsys          = data_in%Tsys
+    data_out%Tsys          = 0.d0  ! data_in%Tsys
     
     data_out%n_pca_comp    = data_in%n_pca_comp
     if (data_in%n_pca_comp > 0) then
@@ -1709,7 +1723,12 @@ contains
           do j = 1, nsb
              do k = 0, data_out%polyorder
                 do i = 1, nsamp_out
-                   data_out%tod_poly(i,k,j,l) = mean(data_in%tod_poly((i-1)*dt+1:i*dt,k,j,l))
+                   data_out%tod_poly(i,k,j,l) = data_in%tod_poly(i,k,j,l) ! MUST BE CHANGED IF WE WILL DECIMATE IN TIME
+                   !if (all(data_in%tod_poly((i-1)*dt+1:i*dt,k,j,l) == data_in%tod_poly((i-1)*dt+1:i*dt,k,j,l))) then
+                   !   data_out%tod_poly(i,k,j,l) = mean(data_in%tod_poly((i-1)*dt+1:i*dt,k,j,l))
+                   !else
+                   !   data_out%tod_poly(i,k,j,l) = 0.d0
+                   !end if
                 end do
              end do
           end do
@@ -2048,7 +2067,7 @@ contains
     if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
     allocate(Y(nfreq_fullres))
 
-    data%Tsys = 40.d0
+    data%Tsys(n_tsys,:,:,:) = 40.d0
     t_cold = 2.73
     t_hot = mean(data%t_hot)/100 + 273.15
 
@@ -2059,6 +2078,8 @@ contains
        if (.not. is_alive(i)) cycle
        do j=1, nsb
           do k=1, nfreq_fullres
+             if (data%freqmask_full(k,j,i) == 0.d0) cycle
+
              P_hot = 0.d0
              P_cold = 0.d0
              n_hot = 0
@@ -2074,12 +2095,16 @@ contains
                    cycle
                 end if
              end do
-
-             P_hot  = P_hot  / n_hot
-             P_cold = P_cold / n_cold
-             Y(k)   = P_hot/P_cold
-             data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
-             write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
+             if ((n_hot == 0) .or. (n_cold == 0)) then
+                data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+                write(*,*) "no n_cold", i, j, k
+             else
+                P_hot  = P_hot  / n_hot
+                P_cold = P_cold / n_cold
+                Y(k)   = P_hot/P_cold
+                data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+                !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
+             end if
           end do
        end do
     end do
@@ -2091,7 +2116,7 @@ contains
     implicit none
     type(lx_struct), intent(in)    :: data_l1
     type(lx_struct), intent(inout) :: data_l2_fullres
-    integer(i4b),    intent(in)    :: tsys_time(2)
+    real(dp),    intent(in)    :: tsys_time(2)
 
     real(dp)                       :: interp1d_tsys, mean_tod, y0, y1, x0, x1, x, scan_time
     integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp
@@ -2111,10 +2136,12 @@ contains
              y0 = data_l1%Tsys(1,k,j,i); y1 = data_l1%Tsys(2,k,j,i)
 
              interp1d_tsys = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
-
-
              mean_tod = mean(data_l1%tod(:,k,j,i))
              data_l2_fullres%tod(:,k,j,i)  = interp1d_tsys * mean_tod * data_l2_fullres%tod(:,k,j,i)
+             data_l2_fullres%Tsys(1,k,j,i) = interp1d_tsys * mean_tod
+             data_l2_fullres%Tsys(2,k,j,i) = interp1d_tsys * mean_tod
+
+             !data_l2_fullres%tod(:,k,j,i)  = 40.d0 * data_l2_fullres%tod(:,k,j,i)
              !write(*,*) "----------------"                                                                     
              !write(*,*) data_l1%Tsys(1,k,j,i)                                                                  
              !write(*,*) data_l1%Tsys(2,k,j,i)                                                                  
