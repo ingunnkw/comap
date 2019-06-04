@@ -1513,7 +1513,7 @@ contains
     data_l2%freqmask        = data_l1%freqmask
     data_l2%freqmask_full   = data_l1%freqmask_full
     data_l2%freqmask_reason = data_l1%freqmask_reason
-    data_l2%Tsys            = data_l1%Tsys
+    data_l2%Tsys            = 0.d0 !data_l1%Tsys
     
     do j = 1, ndet
        if (.not. is_alive(j)) cycle
@@ -1588,7 +1588,7 @@ contains
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
     data_out%pixels        = data_in%pixels
-    data_out%Tsys          = 0.d0  ! data_in%Tsys
+    data_out%Tsys          = data_in%Tsys
     
     data_out%n_pca_comp    = data_in%n_pca_comp
     if (data_in%n_pca_comp > 0) then
