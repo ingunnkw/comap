@@ -81,13 +81,13 @@ program tod2comap
   !allocate(alist%status(tod(i)%nfreq, tod(i)%ndet))
   !alist%status = 0
 
-  if (myid==0) then
+  !if (myid==0) then
      write(*,*) "Initialising mapmaker"
      call initialize_mapmaker(map_scan, parfile, pinfo)
      call initialize_mapmaker(map_tot,  parfile, pinfo)
      call initialize_mapmaker(buffer,   parfile, pinfo)
      call nullify_map_type(map_tot)
-  end if
+  !end if
 
 
   ! This loop currently requiers that all scans are of the same patch
