@@ -3,6 +3,7 @@ module tod2comap_mapmaker
   use comap_map_mod
   use comap_acceptlist_mod
   use comap_patch_mod
+  use comap_ephem_mod
   !use quiet_fft_mod
   use tod2comap_utils
   implicit none
@@ -12,9 +13,9 @@ module tod2comap_mapmaker
 contains
 
 
-  subroutine initialize_mapmaker(map, tod, parfile, pinfo)
+  subroutine initialize_mapmaker(map, parfile, pinfo)
     implicit none
-    type(tod_type), dimension(:), intent(in)    :: tod
+    !type(tod_type), dimension(:), intent(in)    :: tod
     type(map_type),               intent(inout) :: map
     type(patch_info),             intent(in)    :: pinfo
     character(len=*)                            :: parfile
@@ -40,18 +41,7 @@ contains
     map%mean_el = 0.d0!mean(tod(:)%mean_el)
     map%mean_az = 0.d0!mean(tod(:)%mean_az)
     mean_dec = 0.d0
-    if (pinfo%fixed) then 
-       mean_dec = pinfo%pos(2)
-    else 
-       do i = 1, size(tod)
-          write(*,*) tod(i)%point(2,1,1)
-          if (trim(coord_system) .eq. 'celestial') mean_dec = mean_dec + mean(tod(i)%point(2,:,1))
-          if(trim(coord_system) .eq. 'horizontal') mean_dec = mean_dec + tod(i)%mean_el
-       end do
-       call mpi_allreduce(MPI_IN_PLACE, mean_dec, 1, mpi_double_precision, mpi_sum, mpi_comm_world, ierr)
-       mean_dec = mean_dec/size(tod)
-    end if
-    !map%dthetax = map%dthetay/abs(cos(map%mean_el*PI/180.d0))
+    if (pinfo%fixed) mean_dec = pinfo%pos(2)
     map%dthetax = map%dthetay/abs(cos(mean_dec*PI/180.d0))
 
     x_min = 500.d0; x_max = -500.d0
@@ -63,55 +53,17 @@ contains
        y_min = pinfo%pos(2) - pinfo%obj_rad 
        y_max = pinfo%pos(2) + pinfo%obj_rad 
     else
-       do i = 1, size(tod)
-          if (.not. allocated(tod(i)%point)) cycle
-          if (trim(coord_system) .eq. 'horizontal') then
-             do j = 1, tod(i)%ndet
-                if (all(tod(i)%point_tel(1:2,:,j) == 0.d0)) cycle
-                temp = minval(tod(i)%point_tel(1,:,j)) - pad
-                if (temp .le. x_min) x_min = temp
-                temp = maxval(tod(i)%point_tel(1,:,j)) + pad
-                if (temp .ge. x_max) x_max = temp
-                temp = minval(tod(i)%point_tel(2,:,j)) - pad
-                if (temp .le. y_min) y_min = temp
-                temp = maxval(tod(i)%point_tel(2,:,j)) + pad
-                if (temp .ge. y_max) y_max = temp
-             end do
-          else
-             do j = 1, tod(i)%ndet
-                if (all(tod(i)%point(1:2,:,j) == 0.d0)) cycle
-                temp = minval(tod(i)%point(1,:,j)) - pad
-                if (temp .le. x_min) x_min = temp
-                temp = maxval(tod(i)%point(1,:,j)) + pad
-                if (temp .ge. x_max) x_max = temp
-                temp = minval(tod(i)%point(2,:,j)) - pad
-                if (temp .le. y_min) y_min = temp
-                temp = maxval(tod(i)%point(2,:,j)) + pad
-                if (temp .ge. y_max) y_max = temp
-             end do
-          end if
-       end do
-       call mpi_allreduce(MPI_IN_PLACE, x_min, 1, mpi_double_precision, mpi_min, mpi_comm_world, ierr)
-       call mpi_allreduce(MPI_IN_PLACE, x_max, 1, mpi_double_precision, mpi_max, mpi_comm_world, ierr)
-       call mpi_allreduce(MPI_IN_PLACE, y_min, 1, mpi_double_precision, mpi_min, mpi_comm_world, ierr)
-       call mpi_allreduce(MPI_IN_PLACE, y_max, 1, mpi_double_precision, mpi_max, mpi_comm_world, ierr)
+       x_min = 0.d0 - pinfo%obj_rad 
+       x_max = 0.d0 + pinfo%obj_rad 
+       y_min = 0.d0 - pinfo%obj_rad 
+       y_max = 0.d0 + pinfo%obj_rad 
     end if
 
 !!$    write(*,*) x_min, x_max
 !!$    write(*,*) y_min, y_max
 !!$    call mpi_finalize(i)
 !!$    stop
-
-!!$    do k = 1, size(tod)
-!!$       write(*,*) k, minval(tod(k)%point(1,:,:)), maxval(tod(k)%point(1,:,:))
-!!$       write(*,*) k, minval(tod(k)%point(2,:,:)), maxval(tod(k)%point(2,:,:))
-!!$    end do
-!!$    call mpi_finalize(i)
-!!$    stop
     
-
-    !x_min = data%point_lim(1) - pad; x_max = data%point_lim(2) - pad
-    !y_min = data%point_lim(3) - pad; y_max = data%point_lim(4) - pad
     !write(*,*) map%dthetax, map%dthetay
     map%n_x = int((x_max-x_min)/map%dthetax); map%n_y = int((y_max-y_min)/map%dthetay)
     !write(*,*) map%n_x, map%n_y
@@ -141,63 +93,73 @@ contains
   end subroutine initialize_mapmaker
 
 
-  subroutine time2pix(tod, map, parfile)
+  subroutine time2pix(tod, map, parfile, pinfo)
     implicit none
-    type(tod_type), dimension(:), intent(inout) :: tod
-    type(map_type),               intent(inout) :: map
-    character(len=*)                            :: parfile
+    type(tod_type),   intent(inout) :: tod
+    type(map_type),   intent(inout) :: map
+    character(len=*)                :: parfile
+    type(patch_info), intent(in)    :: pinfo
 
     integer(i4b) :: scan, i, j, p, q, sb, freq
     real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
-    character(len=15) :: coord_system
+    character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:,:) :: sigma0
+    real(dp), dimension(3) :: pos
 
     call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+    call initialize_comap_ephem_mod(parfile)
 
     x_min = map%x(1); x_max = map%x(map%n_x)
     y_min = map%y(1); y_max = map%y(map%n_y)
-    allocate(sigma0(tod(1)%nfreq,tod(1)%nsb))
+    allocate(sigma0(tod%nfreq,tod%nsb))
     sigma0 = 0.d0
 
     
     !call wall_time(t1)
     !!$OMP PARALLEL PRIVATE(scan,j,i,p,q,sb,freq)
     !!$OMP DO SCHEDULE(guided)
-    do scan = 1, size(tod)
-       do j = 1, tod(scan)%ndet
-          if (.not. is_alive(j)) cycle
-          do i = 1, tod(scan)%nsamp
-             !if (tod(scan)%point(1,i,j) < x_min) write(*,*) "Expand your grid! (x_min)", scan, i,j,tod(scan)%point(1,i,j), x_min
-             !if (tod(scan)%point(1,i,j) > x_max) write(*,*) "Expand your grid! (x_max)", scan, i,j,tod(scan)%point(1,i,j), x_max
-             !if (tod(scan)%point(2,i,j) < y_min) write(*,*) "Expand your grid! (y_min)"
-             !if (tod(scan)%point(2,i,j) > y_max) write(*,*) "Expand your grid! (y_max)"      
-             !if (tod(scan)%point_tel(2,i,j) > 30.d0) cycle
-             if (trim(coord_system) .eq. 'horizontal') then
-                p = min(max(nint((tod(scan)%point_tel(1,i,j)-x_min)/map%dthetax),1),map%n_x)
-                q = min(max(nint((tod(scan)%point_tel(2,i,j)-y_min)/map%dthetay),1),map%n_y)
-             else
-                p = min(max(nint((tod(scan)%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
-                q = min(max(nint((tod(scan)%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
-             end if
-             tod(scan)%pixels(i,j) = (q-1)*map%n_x + p
-             do sb = 1, tod(scan)%nsb
-                do freq = 1, tod(scan)%nfreq
-                   if (tod(scan)%freqmask(freq,sb,j) == 0) cycle
+
+    ! Get position of a non-fixed object (assuming ~no movement during one subscan)
+    pos = 0.d0
+    !write(*,*) pinfo%fixed
+    if (.not. pinfo%fixed) pos = get_obj_info(object,tod%t(1))
+    !write(*,*) pos
+
+    do j = 1, tod%ndet
+       if (.not. is_alive(j)) cycle
+       do i = 1, tod%nsamp
+          if (trim(coord_system) .eq. 'horizontal') then
+             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
+             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
+          else
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
+             !p = min(max(nint((tod%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
+             !q = min(max(nint((tod%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
+          end if
+          if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
+             tod%pixels(i,j) = (q-1)*map%n_x + p
+             do sb = 1, tod%nsb
+                do freq = 1, tod%nfreq
+                   if (tod%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
                    map%nhit(p,q,freq,sb,j) = map%nhit(p,q,freq,sb,j) + 1.d0
-                   sigma0(freq,sb) = sigma0(freq,sb) + tod(scan)%sigma0(freq,sb,j)
+                   sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,j)
                 end do
              end do
-          end do
+          else
+             tod%pixels(i,j) = -200
+          end if
        end do
     end do
     !!$OMP END DO
     !!$OMP END PARALLEL
     !call wall_time(t2)
     !write(*,*) 'Wall time time2pix = ', t2-t1
-    sigma0 = sigma0/size(tod)
-    do sb = 1, tod(1)%nsb
-       do freq = 1, tod(1)%nfreq
+    !sigma0 = sigma0/size(tod)
+    do sb = 1, tod%nsb
+       do freq = 1, tod%nfreq
           if (sigma0(freq,sb) == 0) cycle
           where(map%nhit(:,:,freq,sb,:) > 0)
              map%rms(:,:,freq,sb,:) = map%rms(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2
@@ -214,18 +176,20 @@ contains
   end subroutine time2pix
 
 
-  subroutine rotation_matrix(ra_center, dec_center, x, y, z)
+  subroutine rotation_matrix(ra_center, dec_center, ra, dec)!x, y, z)
     implicit none
-    real(dp) :: ra_center, dec_center, ra, dec
+    real(dp), intent(in)    :: ra_center, dec_center
+    real(dp), intent(inout) :: ra, dec!x, y, z
+    !real(dp) :: ra, dec
     real(dp) :: cosd, sind, cosa, sina
-    real(dp) :: x, y, z, x_temp, y_temp, z_temp
+    real(dp) :: x_temp, y_temp, z_temp, x, y, z
     real(8), parameter :: PI = 4*atan(1.d0)
 
-    ra_center = ra_center * PI/180.d0
-    dec_center = (90.d0 - dec_center) * PI/180.d0
+    ra = ra_center * PI/180.d0
+    dec = (90.d0 - dec_center) * PI/180.d0
 
-    cosd = cos(dec_center); sind = sin(dec_center)
-    cosa = cos(ra_center); sina = sin(ra_center)
+    cosd = cos(dec); sind = sin(dec)
+    cosa = cos(ra); sina = sin(ra)
 
     x_temp = cosd*cosa*x + cosd*sina*y - sind*z
     y_temp = -sina*x + cosa*y
@@ -246,8 +210,7 @@ contains
     dec = (90.d0 - dec) * PI/180.d0
     ra  = ra * PI/180.d0
 
-    
-
+   
     ! rotation equations here!!
     !ra_new  = cos(ra_center) * cos(dec_center) * x - sin(ra_center) * y
     !dec_new = sin(ra_center) * cos(dec_center) * x + cos(ra_center) * y
@@ -265,9 +228,10 @@ contains
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map_tot, map_scan, tod, scan, parfile)!(map_tot, map_scan, tod, alist, scan, parfile)
+  subroutine binning(map_tot, map_scan, tod, scan, parfile, pinfo)!(map_tot, map_scan, tod, alist, scan, parfile)
     implicit none
     type(tod_type),   intent(in)    :: tod
+    type(patch_info), intent(in)    :: pinfo
     type(map_type),   intent(inout) :: map_tot, map_scan
     !type(acceptlist), intent(in)    :: alist
     character(len=*)                :: parfile
@@ -275,10 +239,12 @@ contains
     integer(i4b) :: det, sb, freq, ndet, nsb, nfreq
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
     real(dp)     :: x_min, x_max, y_min, y_max
-    character(len=15) :: coord_system
+    character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:) :: dsum, div
+    real(dp), dimension(3) :: pos
 
     call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
 
     x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
     y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
@@ -287,6 +253,9 @@ contains
     nsb = map_tot%nsb 
     nfreq = map_tot%nfreq
 
+    pos = 0.d0
+    if (.not. pinfo%fixed) pos = get_obj_info(object, tod%t(1))
+
     !write(*,*) 'Beginning coadding'
 
     !fs = 200 ! starting point
@@ -294,13 +263,16 @@ contains
     do i = 1, tod%nsamp
        do det = 1, ndet
           if (.not. is_alive(det)) cycle
+          if (tod%pixels(i,det) .lt. 0) cycle
           !if (tod%point_tel(2,i,det) > 30.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
-             p = min(max(nint((tod%point_tel(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
-             q = min(max(nint((tod%point_tel(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+             p = nint((tod%point_tel(1,i,det)-x_min)/map_tot%dthetax)
+             q = nint((tod%point_tel(2,i,det)-y_min)/map_tot%dthetay)
           else
-             p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
-             q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+             p = nint((tod%point(1,i,det)-pos(1)-x_min)/map_tot%dthetax)
+             q = nint((tod%point(2,i,det)-pos(2)-y_min)/map_tot%dthetay)
+             !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
+             !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
           end if
           do sb = 1, nsb
              do freq = 1, nfreq
@@ -324,7 +296,7 @@ contains
 
   end subroutine binning
 
-
+  ! Sums over det, sb, and freq  to create one single map for a given subscan
   subroutine finalize_scan_binning(map)
     implicit none
     type(map_type), intent(inout) :: map
@@ -335,6 +307,7 @@ contains
        do q = 1, map%n_y
           map%dsum(p,q,1,1,1) = sum(map%dsum(p,q,:,:,:))
           map%div(p,q,1,1,1)  = sum(map%div(p,q,:,:,:))
+          map%nhit(p,q,1,1,1) = sum(map%nhit(p,q,:,:,:))
        end do
     end do
 

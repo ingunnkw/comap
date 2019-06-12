@@ -16,26 +16,29 @@ contains
     type(hdf_file)                 :: file
     integer(i4b)                   :: i, arr_dim(2)
     n_objects = 6
-    allocate(obj_list(n_objects))
-    obj_list(1) = 'jupiter'
-    obj_list(2) = 'mars'
-    obj_list(3) = 'moon'
-    obj_list(4) = 'saturn'
-    obj_list(5) = 'sun'
-    obj_list(6) = 'venus'
-    call get_parameter(0, parfile,  'EPHEMERIS_FILE', par_string=ephem_file)
+    if (.not. allocated(obj_list)) then
+       allocate(obj_list(n_objects))
+       obj_list(1) = 'jupiter'
+       obj_list(2) = 'mars'
+       obj_list(3) = 'moon'
+       obj_list(4) = 'saturn'
+       obj_list(5) = 'sun'
+       obj_list(6) = 'venus'
+
+       call get_parameter(0, parfile,  'EPHEMERIS_FILE', par_string=ephem_file)
     
-    call open_hdf_file(ephem_file, file, "r")
-    call get_size_hdf(file, obj_list(1), arr_dim)
-    allocate(obj_data(n_objects, arr_dim(1), arr_dim(2)))
-    allocate(obj_data2(n_objects, arr_dim(1) - 1, arr_dim(2)))
-    do i = 1, n_objects
-       call read_hdf(file, obj_list(i), obj_data(i, :, :))
-       call spline(obj_data(i, 1, :), obj_data(i, 2, :), 1.d30, 1.d30, obj_data2(i, 2, :))
-       call spline(obj_data(i, 1, :), obj_data(i, 3, :), 1.d30, 1.d30, obj_data2(i, 3, :))
-       call spline(obj_data(i, 1, :), obj_data(i, 4, :), 1.d30, 1.d30, obj_data2(i, 4, :))
-    end do
-    call close_hdf_file(file)
+       call open_hdf_file(ephem_file, file, "r")
+       call get_size_hdf(file, obj_list(1), arr_dim)
+       allocate(obj_data(n_objects, arr_dim(1), arr_dim(2)))
+       allocate(obj_data2(n_objects, arr_dim(1) - 1, arr_dim(2)))
+       do i = 1, n_objects
+          call read_hdf(file, obj_list(i), obj_data(i, :, :))
+          call spline(obj_data(i, 1, :), obj_data(i, 2, :), 1.d30, 1.d30, obj_data2(i, 2, :))
+          call spline(obj_data(i, 1, :), obj_data(i, 3, :), 1.d30, 1.d30, obj_data2(i, 3, :))
+          call spline(obj_data(i, 1, :), obj_data(i, 4, :), 1.d30, 1.d30, obj_data2(i, 4, :))
+       end do
+       call close_hdf_file(file)
+    end if
   end subroutine initialize_comap_ephem_mod
   
   function get_obj_info(obj, mjd) result(res)
@@ -52,5 +55,13 @@ contains
     res(2) = dec
     res(3) = dist
   end function get_obj_info
+
+  subroutine free_comap_ephem_mod()
+    implicit none
+    
+    deallocate(obj_data)
+    deallocate(obj_data2)
+
+  end subroutine free_comap_ephem_mod
 
 end module comap_ephem_mod

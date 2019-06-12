@@ -4,6 +4,7 @@ program tod2comap
   use comap_scan_mod
   use comap_acceptlist_mod
   use comap_patch_mod
+  use comap_ephem_mod
   use quiet_fft_mod
   use quiet_hdf_mod
   use tod2comap_mapmaker
@@ -22,7 +23,7 @@ program tod2comap
   !end type tod_type
 
 
-  type(tod_type), allocatable, dimension(:) :: tod
+  type(tod_type)        :: tod
   type(map_type)        :: map_tot, map_scan, buffer
   type(comap_scan_info) :: scan
   !type(acceptlist)      :: alist
@@ -38,6 +39,7 @@ program tod2comap
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
 
+
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
@@ -49,6 +51,9 @@ program tod2comap
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   call getarg(1, parfile)
+  !call initialize_comap_ephem_mod(parfile)
+  !write(*,*) get_obj_info('jupiter', 58526.592246526d0)
+  !stop
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
   call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
   !call get_parameter(0, parfile, 'ACCEPTLIST', par_string=acceptfile)
@@ -68,59 +73,54 @@ program tod2comap
   nscan = get_num_scans()
   write(*,*) nscan
   !stop
-  allocate(tod(nscan))
+  !allocate(tod(nscan))
   !nscan = 1
   !call free_map_type(map)
 
 
   !allocate(alist%status(tod(i)%nfreq, tod(i)%ndet))
-  !alist%status = 0 ! TODO: check if any parts of the scan has been rejected
+  !alist%status = 0
+
+  if (myid==0) then
+     write(*,*) "Initialising mapmaker"
+     call initialize_mapmaker(map_scan, parfile, pinfo)
+     call initialize_mapmaker(map_tot,  parfile, pinfo)
+     call initialize_mapmaker(buffer,   parfile, pinfo)
+     call nullify_map_type(map_tot)
+  end if
 
 
   ! This loop currently requiers that all scans are of the same patch
-  do i = 1+myid, nscan, nproc 
+  do i = 1+myid, nscan, nproc !i = 1+myid, nscan, nproc 
      !write(*,*) myid, i, 'of', nscan
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
 
      ! Get TOD / read level 2 file
      nsub = scan%nsub
-     do j = 1, nsub
+     do j = 2, nsub-2
         write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
         filename = scan%ss(j)%l2file
-        call get_tod(trim(filename), tod(i), parfile)
-     end do
 
-  end do
+        !write(*,*) trim(filename)
+        !call mpi_finalize(ierr)
+        !stop
 
-  !stop
+        call get_tod(trim(filename), tod, parfile)
 
+        call int2string(scan%ss(j)%id, scanid)
+        write(*,*) 'scan', scanid
 
-  if (myid==0) write(*,*) "Initialising mapmaker"
-  call initialize_mapmaker(map_scan, tod, parfile, pinfo)
-  call initialize_mapmaker(map_tot,  tod, parfile, pinfo)
-  call initialize_mapmaker(buffer,   tod, parfile, pinfo)
-
-  call nullify_map_type(map_tot)
-  do i = 1+myid, nscan, nproc
-     !prefix = pre//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
-     call get_scan_info(i,scan)
-
-     nsub = scan%nsub
-     do j = 1, nsub
-        call int2string(scan%ss(i)%id, scanid)
-        write(*,*) scanid
-
-        !call nullify_map_type(map_scan) ! eller her????
-        call time2pix(tod(i:i), map_scan, parfile)
-        call time2pix(tod(i:i), map_tot, parfile)
-        call nullify_map_type(map_scan) ! her????
+        call nullify_map_type(map_scan)
+        call time2pix(tod, map_scan, parfile, pinfo)
+        call time2pix(tod, map_tot, parfile, pinfo)
         write(*,*) myid, "making maps, scan", i
-        call binning(map_tot, map_scan, tod(i), i, parfile)
+        call binning(map_tot, map_scan, tod, i, parfile, pinfo)
         call finalize_scan_binning(map_scan)
         prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
-        call output_map_h5(trim(prefix), map_scan)
+        call output_submap_h5(trim(prefix), map_scan)
         !call free_map_type(map_scan)
+        call free_tod_type(tod)
      end do
 
 
@@ -131,8 +131,6 @@ program tod2comap
   call mpi_allreduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit, buffer%nhit, size(map_tot%nhit), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
-  !write(*,*) 'hit', myid, buffer%nhit(5,5,1,1,1)
-  !write(*,*) 'sum', myid, buffer%dsum(5,5,1,1,1)
 
   if (myid == 0) then
      map_tot%div  = buffer%div
@@ -147,8 +145,11 @@ program tod2comap
      call output_map_h5(trim(prefix), map_tot)
      call free_map_type(map_tot)
   end if
+
+  !deallocate(tod)
+  if (myid == 0) write(*,*) 'Done'
   call mpi_finalize(ierr)
-  stop
+  
 
   !if (myid == 0) write(*,*) trim(scan%object), trim(itoa(scan%sid))
   !prefix = trim(pre)//trim(scan%object)//'_'//trim(itoa(scan%sid)) ! patchID_scanID
@@ -188,13 +189,13 @@ program tod2comap
 
   !end do
 
-  if (myid == 0) write(*,*) 'Done'
-  do i = 1, nscan
-     call free_tod_type(tod(i))
-  end do
-  deallocate(tod)
+  !if (myid == 0) write(*,*) 'Done'
+  !do i = 1, nscan
+  !call free_tod_type(tod(i))
+  !end do
+  !deallocate(tod)
   !call free_map_type(map)
-  call mpi_finalize(ierr)
+  !call mpi_finalize(ierr)
 
 contains
 
