@@ -385,6 +385,9 @@ contains
     if(allocated(data%acceptrate))    deallocate(data%acceptrate)
     if(allocated(data%diagnostics))   deallocate(data%diagnostics)
     if(allocated(data%cut_params))    deallocate(data%cut_params)
+    if(allocated(data%t_hot))         deallocate(data%t_hot)
+    if(allocated(data%amb_state))     deallocate(data%amb_state)
+    if(allocated(data%amb_time))      deallocate(data%amb_time)
   end subroutine
 
   subroutine write_l2_file(filename, data)

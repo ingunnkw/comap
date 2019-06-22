@@ -21,9 +21,9 @@ program l2gen
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
-  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
+  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-  logical(lgt)         :: process
+  logical(lgt)         :: process, is_sim
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
@@ -50,7 +50,8 @@ program l2gen
   call get_parameter(unit, parfile, 'MIN_ACCEPTRATE',            par_dp=min_acceptrate)
   call get_parameter(unit, parfile, 'LEVEL2_DIR',                par_string=l2dir)
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
-    
+  call get_parameter(unit, parfile, 'IS_SIM',                    par_lgt=is_sim)
+  call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -133,7 +134,7 @@ program l2gen
            end do
 
 
-              ! Find end position                                                                                                                                                                                                    
+           ! Find end position                                                                                                                                                                                                    
            tsys_ind(2) = nsamp
            do while (tsys_ind(2) >= 1)
               if (data_l1%time(tsys_ind(2)) < tsys_mjd_max) exit
@@ -143,7 +144,7 @@ program l2gen
            !stop                                                                                                                                                                                                                  
 
            ! Compute absolute calibration                                                                                                                                                                                         
-           call compute_Tsys_per_tp(tsysfile, data_l1, tsys_ind, n_tsys)
+           call compute_Tsys_per_tp(tsysfile, data_l1, tsys_ind, n_tsys, is_sim)
            tsys_time(n_tsys) = 0.5*(tsys_mjd_min + tsys_mjd_max)
            end if
      end do
@@ -177,13 +178,25 @@ program l2gen
            call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
            call update_status(status, 'gain_norm')
         end if
-        
+
+        ! if (scan%ss(k)%id == 626202) then
+        !    open(22, file="tod07.unf", form="unformatted") ! Adjusted open statement
+        !    write(22) data_l2_fullres%tod(:,:,2,7)
+        !    close(22)
+        ! end if
+
         ! Remove elevation gain
-        if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
-           write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
-           call remove_elevation_gain(data_l2_fullres)
-           call update_status(status, 'remove_elevation')
-        end if
+        !if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
+        !   write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
+        !   call remove_elevation_gain(data_l2_fullres)
+        !   call update_status(status, 'remove_elevation')
+        !end if
+
+        ! if (scan%ss(k)%id == 626202) then
+        !    open(22, file="tod_07_after_elevation.unf", form="unformatted") ! Adjusted open statement
+        !    write(22) data_l2_fullres%tod(:,:,2,7)
+        !    close(22)
+        ! end if
 
         if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
            write(*,*) "NaN in tod before filtering!"
@@ -231,6 +244,8 @@ program l2gen
         call polyfilter_TOD(data_l2_fullres, bp_filter)
         call update_status(status, 'polyfilter')
         
+        !call freq_filter_TOD(data_l2_fullres)
+
         ! pca filter after polyfilter
         if (trim(pinfo%type) == 'cosmo') then
            call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
@@ -252,7 +267,7 @@ program l2gen
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
         ! Apply absolute calibration
-        call calibrate_tod(data_l1, data_l2_fullres, tsys_time)
+        call calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys)
         
         if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
            write(*,*) "NaN in tod after filtering!"
@@ -1269,6 +1284,86 @@ contains
 
   end subroutine polyfilter_TOD
 
+  subroutine freq_filter_TOD(data_l2)
+    implicit none
+    type(Lx_struct),                            intent(inout) :: data_l2
+    
+    integer*8    :: plan_fwd, plan_back
+    
+    integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nsb, ndet, p, stat, nomp, err
+    real(dp)     :: samprate, nu, mu, freq_step, nu_knee, alpha, mean_val
+    real(sp),     allocatable, dimension(:)   :: dt
+    complex(spc), allocatable, dimension(:)   :: dv
+    real(dp),     allocatable, dimension(:,:) :: T, A
+
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%tod,2)
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    p = 1
+    
+    allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
+    data_l2%tod_poly = 0.d0
+       
+    
+    n = nfreq + 1
+
+    ! Set up OpenMP environment and FFTW plans
+    nomp = 1
+    call sfftw_init_threads(err)
+    call sfftw_plan_with_nthreads(nomp)
+
+    allocate(dt(2*nfreq), dv(0:n-1))
+    call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nfreq, dt, dv, fftw_estimate + fftw_unaligned)
+    call sfftw_plan_dft_c2r_1d(plan_back, 2*nfreq, dv, dt, fftw_estimate + fftw_unaligned)
+    deallocate(dt, dv)
+    freq_step = 31.25d6 / 16.d0 ! Hz
+    nu_knee   = 1 / 4.d9    ! 1 / Hz
+    alpha     = -4.d0
+    do i = 1, ndet
+       if (.not. is_alive(i)) cycle
+       do j = 1, nsb
+          !!$OMP PARALLEL PRIVATE(k,l,m,mean_val,dt,dv,nu)
+          allocate(dt(2*nfreq), dv(0:n-1))
+          !!$OMP DO SCHEDULE(guided)
+          
+          do l = 1, nsamp
+             mean_val = 0.d0
+             do k = 1, nfreq
+                if (data_l2%freqmask_full(k,j,i) == 0.d0) then 
+                   dt(k) = mean_val
+                   cycle
+                end if
+                dt(k) = data_l2%tod(l,k,j,i)
+             end do
+             dt(2*nfreq:nfreq+1:-1) = dt(1:nfreq)
+             call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+             ! Apply highpass filter
+             do m = 1, n-1
+                nu = ind2freq(m+1, 1.d0 / freq_step, n)
+                !write(*,*) m, nu, nu_knee
+                dv(m) = dv(m) * 1.d0/(1.d0 + (nu/nu_knee)**alpha)
+             end do
+             dv(1) = 0.d0
+             !call fft(dt, dv, -1)
+             call sfftw_execute_dft_c2r(plan_back, dv, dt)
+             dt                       = dt / (2*nfreq)
+             do k = 1, nfreq
+                if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+                data_l2%tod(l,k,j,i) = dt(k)
+             end do
+             
+          end do
+          !!$OMP END DO
+          deallocate(dt, dv)
+          !!$OMP END PARALLEL
+       end do
+    end do
+    call sfftw_destroy_plan(plan_fwd)
+    call sfftw_destroy_plan(plan_back)
+
+  end subroutine freq_filter_TOD
+
 
   subroutine get_l2_time_stats(filename, mjd, dt_error)
     implicit none
@@ -2044,10 +2139,11 @@ contains
     end do
   end subroutine init_vanemask
 
-  subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys)
+  subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys, is_sim)
     implicit none
     character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
+    logical(lgt),                intent(in)       :: is_sim 
     type(hdf_file)                                :: file
     real(dp)                                      :: mean_tod, P_hot, P_cold
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
@@ -2057,6 +2153,7 @@ contains
     real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
     real(dp), dimension(:), allocatable           :: time, Y
     integer(i4b), dimension(:), allocatable       :: vanemask
+    
 
     nsamp         = size(data%tod,1)
     nfreq_fullres = size(data%tod,2)
@@ -2102,7 +2199,11 @@ contains
                 P_hot  = P_hot  / n_hot
                 P_cold = P_cold / n_cold
                 Y(k)   = P_hot/P_cold
-                data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+                if (is_sim) then 
+                   data%Tsys(n_tsys,k,j,i) = 1.d0
+                else
+                   data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+                end if
                 !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
              end if
           end do
@@ -2112,12 +2213,13 @@ contains
   end subroutine compute_Tsys_per_tp
 
 
-  subroutine calibrate_tod(data_l1, data_l2_fullres, tsys_time)
+  subroutine calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys)
     implicit none
     type(lx_struct), intent(in)    :: data_l1
     type(lx_struct), intent(inout) :: data_l2_fullres
-    real(dp),    intent(in)    :: tsys_time(2)
-
+    real(dp),        intent(in)    :: sim_tsys
+    real(dp),    intent(in)        :: tsys_time(2)
+    logical(lgt), intent(in)       :: is_sim 
     real(dp)                       :: interp1d_tsys, mean_tod, y0, y1, x0, x1, x, scan_time
     integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp
     l2_nsamp = size(data_l2_fullres%tod, 1)
@@ -2134,13 +2236,17 @@ contains
              scan_time = data_l2_fullres%time(l2_nsamp/2)
              x0 = tsys_time(1); x1 = tsys_time(2)
              y0 = data_l1%Tsys(1,k,j,i); y1 = data_l1%Tsys(2,k,j,i)
-
              interp1d_tsys = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
-             mean_tod = mean(data_l1%tod(:,k,j,i))
-             data_l2_fullres%tod(:,k,j,i)  = interp1d_tsys * mean_tod * data_l2_fullres%tod(:,k,j,i)
-             data_l2_fullres%Tsys(1,k,j,i) = interp1d_tsys * mean_tod
-             data_l2_fullres%Tsys(2,k,j,i) = interp1d_tsys * mean_tod
-
+             if (is_sim) then
+                data_l2_fullres%tod(:,k,j,i)  = sim_tsys * data_l2_fullres%tod(:,k,j,i)
+                data_l2_fullres%Tsys(1,k,j,i) = sim_tsys
+                data_l2_fullres%Tsys(2,k,j,i) = sim_tsys
+             else
+                mean_tod = mean(data_l1%tod(:,k,j,i))
+                data_l2_fullres%tod(:,k,j,i)  = interp1d_tsys * mean_tod * data_l2_fullres%tod(:,k,j,i)
+                data_l2_fullres%Tsys(1,k,j,i) = interp1d_tsys * mean_tod
+                data_l2_fullres%Tsys(2,k,j,i) = interp1d_tsys * mean_tod
+             end if
              !data_l2_fullres%tod(:,k,j,i)  = 40.d0 * data_l2_fullres%tod(:,k,j,i)
              !write(*,*) "----------------"                                                                     
              !write(*,*) data_l1%Tsys(1,k,j,i)                                                                  
