@@ -12,9 +12,10 @@ module comap_map_mod
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
      character(len=512) :: name
-     real(dp), allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
-     real(dp), allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
-     real(dp), allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, nhit, div ! (n_x, n_y, nfreq, nsb, ndet)
+     real(dp),     allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
+     real(dp),     allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
+     real(sp),     allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
+     integer(i4b), allocatable, dimension(:,:,:,:,:) :: nhit
   end type map_type
 
 

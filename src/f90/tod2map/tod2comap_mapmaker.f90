@@ -47,17 +47,25 @@ contains
     x_min = 500.d0; x_max = -500.d0
     y_min = 500.d0; y_max = -500.d0
 
-    if (pinfo%fixed) then
-       x_min = pinfo%pos(1) - pinfo%obj_rad 
-       x_max = pinfo%pos(1) + pinfo%obj_rad 
-       y_min = pinfo%pos(2) - pinfo%obj_rad 
-       y_max = pinfo%pos(2) + pinfo%obj_rad 
+
+    if (coord_system == 'horizontal') then
+       x_min = 0.d0; x_max = 360.d0
+       y_min = 25.d0; y_max = 80.d0
     else
-       x_min = 0.d0 - pinfo%obj_rad 
-       x_max = 0.d0 + pinfo%obj_rad 
-       y_min = 0.d0 - pinfo%obj_rad 
-       y_max = 0.d0 + pinfo%obj_rad 
+       if (pinfo%fixed) then
+          x_min = pinfo%pos(1) - pinfo%obj_rad 
+          x_max = pinfo%pos(1) + pinfo%obj_rad 
+          y_min = pinfo%pos(2) - pinfo%obj_rad 
+          y_max = pinfo%pos(2) + pinfo%obj_rad 
+       else
+          x_min = 0.d0 - pinfo%obj_rad 
+          x_max = 0.d0 + pinfo%obj_rad 
+          y_min = 0.d0 - pinfo%obj_rad 
+          y_max = 0.d0 + pinfo%obj_rad 
+       end if
     end if
+
+    write(*,*) 'max min done'
 
 !!$    write(*,*) x_min, x_max
 !!$    write(*,*) y_min, y_max
@@ -75,6 +83,8 @@ contains
     do i = 1, map%n_y
        map%y(i) = y_min + (i-0.5d0)*map%dthetay
     end do
+
+    write(*,*) 'grid made' 
  
     ! Set up map structures
     allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
@@ -327,7 +337,7 @@ contains
     implicit none
     type(map_type), intent(inout) :: map
 
-    write(*,*) count(map%div > 0)
+   ! write(*,*) count(map%div > 0)
     where(map%div > 0)
        !write(*,*) map%dsum, map%div
        map%m   = map%dsum / map%div
