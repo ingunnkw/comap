@@ -173,6 +173,19 @@ contains
     deallocate(ext_hdf, mext_hdf)
   end subroutine get_size_hdf
 
+
+  subroutine exists_hdf(file, setname, link_exist)
+    implicit none
+    type(hdf_file)                :: file
+    character(len=*), intent(in)  :: setname
+    logical(lgt),     intent(out) :: link_exist
+
+    call h5lexists_f(file%filehandle, setname, link_exist, file%status)
+
+  end subroutine exists_hdf
+
+
+
   ! *****************************************************
   ! Set read operations
   ! *****************************************************
