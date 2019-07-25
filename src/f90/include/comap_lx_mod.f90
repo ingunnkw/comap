@@ -394,6 +394,9 @@ contains
     if(allocated(data%cut_params))    deallocate(data%cut_params)
     if(allocated(data%tod_sim))       deallocate(data%tod_sim)
     if(allocated(data%weather))       deallocate(data%weather)
+    if(allocated(data%t_hot))         deallocate(data%t_hot)
+    if(allocated(data%amb_state))     deallocate(data%amb_state)
+    if(allocated(data%amb_time))      deallocate(data%amb_time)
   end subroutine
 
   subroutine write_l2_file(filename, data)
