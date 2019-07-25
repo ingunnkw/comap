@@ -13,12 +13,15 @@ program l2gen
   use comap_gain_mod
   use comap_patch_mod
   use comap_ephem_mod
+  use cholesky_decomposition_mod
+  use mjd_to_gregorian_mod
   implicit none
 
-  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
+
+  character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile, corrmatrixfile
   character(len=9)     :: id_old
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, n_sim
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, brute_force
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut
@@ -31,6 +34,7 @@ program l2gen
   type(status_file)    :: status
   type(patch_info)     :: pinfo
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
+
 
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
@@ -50,7 +54,9 @@ program l2gen
   call get_parameter(unit, parfile, 'MIN_ACCEPTRATE',            par_dp=min_acceptrate)
   call get_parameter(unit, parfile, 'LEVEL2_DIR',                par_string=l2dir)
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
-    
+  call get_parameter(unit, parfile, 'N_NOISE_SIMULATIONS',       par_int=n_sim)
+  call get_parameter(unit, parfile, 'CORR_MATRIX_LOC',           par_string=corrmatrixfile)
+  call get_parameter(unit, parfile, 'BRUTE_FORCE_SIM',           par_int=brute_force)
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -63,7 +69,6 @@ program l2gen
   call update_status(status, 'init')
   call initialize_comap_patch_mod(parfile)
   !call dset(id=myid,level=debug)
-
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
@@ -263,6 +268,13 @@ program l2gen
         ! Replace TOD with simulated data
         if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
+        ! Simulate data 
+        call simulate_tod(data_l2_decimated)
+
+        ! Load weatherdata 
+        !call load_weather(data_l2_decimated) 
+
+
         ! Write L2 file to disk
         write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
@@ -281,6 +293,303 @@ program l2gen
   call free_status(status)
 
 contains
+
+  subroutine load_weather(data) 
+    implicit none
+    type(Lx_struct),  intent(inout)                  :: data
+    type(hdf_file)                                   :: file
+    character(len=25), allocatable, dimension(:)     :: keywords 
+    real(dp),          allocatable, dimension(:,:)   :: weather
+
+    logical(lgt)       :: link_start_exist, link_end_exist 
+    character(len=8)   :: year_start_str, month_start_str, year_end_str, month_end_str
+    integer(i4b)       :: year_start, year_end, month_start, month_end, day, hour, minute, second
+    real(dp)           :: mjd_start, mjd_end 
+    integer(i4b)       :: n1(7), n2(7), num, i_start, i_end
+
+    character(len=512) :: filename = "/mn/stornext/d16/cmbco/comap/marenras/weatherdata_v2.h5"
+ 
+  
+
+    num = 7 
+    mjd_start = 58681.21877096454d0 !data%mjd_start
+    mjd_end   = 58684.27780110063d0 !data%time(-1)
+
+    allocate(keywords(num))
+    keywords = (/'@mjd', 'symbol/@numberEx', 'precipitation/@value', 'windDirection/@deg', 'windSpeed/@mps', 'temperature/@value', 'pressure/@value'/)
+
+    ! Finding year and month of observations 
+    call mjd_to_gregorian(mjd_start, year_start, month_start, day, hour, minute, second)
+    call mjd_to_gregorian(mjd_end,   year_end,   month_end,   day, hour, minute, second) 
+    
+    write(year_start_str,  "(I4)") year_start
+    write(month_start_str, "(I2)") month_start
+    write(year_end_str,    "(I4)") year_end 
+    write(month_end_str,   "(I2)") month_end
+
+    write(*,*) 
+
+    call open_hdf_file(filename, file, "r") 
+    if (month_start == month_end) then 
+
+       write(*,*) '------------------------------'
+       call exists_hdf(file, trim(year_start_str), link_start_exist)
+       !call exists_hdf(file, trim(year_start_str) // "/" // trim(adjustl(month_start_str)), link_exist)
+       write(*,*) trim(year_start_str), link_start_exist
+       write(*,*) '------------------------------'
+
+       ! Check if year exists 
+       if (link_start_exist) then 
+          link_start_exist = .False.
+          call exists_hdf(file, trim(year_start_str) // "/" // trim(adjustl(month_start_str)), link_start_exist)
+          write(*,*) trim(year_start_str) // "/" // trim(adjustl(month_start_str)), link_start_exist
+          write(*,*) '------------------------------'
+
+          ! Check if month exists 
+          if (link_start_exist) then 
+             
+             ! Read in data
+             call get_size_hdf(file, trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // "/" // trim(keywords(1)), n1)
+             allocate(weather(num,n1(1)))
+
+             do i=1, num 
+                call read_hdf(file,  trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // "/" // trim(keywords(i)), weather(i,:))
+             end do
+             call close_hdf_file(file)
+
+
+
+          else 
+             call close_hdf_file(file)
+             write(*,*) "Could not find weatherdata from observation period (" // trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // ")."
+          end if
+       else 
+          call close_hdf_file(file)
+             write(*,*) "Could not find weatherdata from observation period (" // trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // ")."
+       end if
+
+
+
+    ! Observation is taking between two months, weather data from both months will be read 
+    else 
+       write(*,*) "Observations ends in another month than it begins in"
+       write(*,*) '------------------------------'
+       call exists_hdf(file, trim(year_start_str), link_start_exist)
+       call exists_hdf(file, trim(year_end_str),   link_end_exist)
+       write(*,*) trim(year_start_str), link_start_exist
+       write(*,*) trim(year_end_str), link_end_exist
+       write(*,*) '------------------------------'
+
+       ! Check if year exists 
+       if (link_start_exist .and. link_end_exist) then 
+          link_start_exist = .False.
+          link_end_exist   = .False.
+
+          call exists_hdf(file, trim(year_start_str) // "/" // trim(adjustl(month_start_str)), link_start_exist)
+          call exists_hdf(file, trim(year_end_str) // "/" // trim(adjustl(month_end_str)), link_end_exist)
+
+          write(*,*) trim(year_start_str) // "/" // trim(adjustl(month_start_str)), link_start_exist
+          write(*,*) trim(year_end_str) // "/" // trim(adjustl(month_end_str)), link_end_exist
+          write(*,*) '------------------------------'
+
+          ! Check if month exists 
+          if (link_start_exist .and. link_end_exist) then
+
+             ! Read in data
+             call get_size_hdf(file, trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // "/" // trim(keywords(1)), n1)
+             call get_size_hdf(file, trim(year_end_str) // "/" // trim(adjustl(month_end_str)) // "/" // trim(keywords(1)), n2)
+             allocate(weather(num,n1(1) + n2(1)))
+
+             do i=1, num 
+                call read_hdf(file,  trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // "/" // trim(keywords(i)), weather(i,1:n1(1)))
+                call read_hdf(file, trim(year_end_str) // "/" // trim(adjustl(month_end_str)) // "/" // trim(keywords(i)), weather(i,n1(1)+1:n2(1)))
+             end do
+             call close_hdf_file(file)
+
+ 
+          else 
+             call close_hdf_file(file)
+             write(*,*) "Could not find weatherdata from observation period (" // trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // ")."
+          end if
+       else 
+          call close_hdf_file(file)
+             write(*,*) "Could not find weatherdata from observation period (" // trim(year_start_str) // "/" // trim(adjustl(month_start_str)) // ")."
+       end if
+
+
+    end if
+
+    
+    ! Extracting indices for relevant weatherdata   
+    i_start = 1
+    do while (weather(1,i_start) < mjd_start) 
+       i_start = i_start + 1
+       if (i_start == (size(weather(1,:)) + 1)) then 
+          write(*,*) 'Could not find weatherdata for observation period.' 
+          exit 
+       end if
+    end do
+
+    i_end = 1
+    do while (weather(1,i_end) < mjd_end)
+       i_end = i_end + 1 
+       if (i_end == (size(weather(1,:)) + 1)) then 
+          write(*,*) 'Could not find weatherdata for observation period.' 
+          exit 
+       end if
+    end do
+    i_end = i_end + 1
+
+
+    ! Allocate weatherdata in l2-file 
+    if(.not. allocated(data%weather)) allocate(data%weather(num, i_end-i_start+1))
+
+    ! Save weather to l2-file 
+    data%weather = weather(:, i_start:i_end)
+
+
+  end subroutine load_weather
+
+
+
+
+
+  subroutine simulate_tod(data)
+    implicit none 
+
+    type(Lx_struct),  intent(inout)                 :: data
+    type(hdf_file)                                  :: file
+    type(planck_rng)                                :: rng_handle
+
+    real(dp),     allocatable, dimension(:,:)       :: cholesky
+    real(dp),     allocatable, dimension(:)         :: z
+    real(dp),     allocatable, dimension(:,:)       :: data_current
+    real(dp),     allocatable, dimension(:,:)       :: A
+    real(dp),     allocatable, dimension(:,:)       :: G
+    real(dp),     allocatable, dimension(:,:,:,:)   :: correlations 
+
+    integer(i4b) :: n_freq, n_samples, n_bands, n_feeds, i, j, k, l, m, o, p, x, y
+    real(dp)     :: dnu, tau, s, x_bar, y_bar, x_std, y_std
+
+
+    n_samples    = size(data%tod,1)      ! Number of time samples
+    n_freq       = size(data%freqmask,1) ! Number of frequency channels
+    n_bands      = size(data%tod,3)      ! Number of side-bands
+    n_feeds      = size(data%tod,4)      ! Number of feeds
+
+
+    dnu = (data%nu(2, 1, 1) - data%nu(3, 1, 1)) * 1d9  ! Width of frequency channel [Hz]
+    tau = 1.d0/data%samprate                           ! Sampling time [s]
+
+    allocate(cholesky(n_freq, n_freq))
+    allocate(z(n_freq))
+    if(.not. allocated(data%tod_sim)) allocate(data%tod_sim(n_samples, n_freq, n_bands, n_feeds, n_sim))
+
+    allocate(data_current(n_samples, n_freq))
+    allocate(A(n_freq, n_freq))
+    allocate(G(n_freq, n_freq))
+    allocate(correlations(n_freq, n_freq, n_bands, n_feeds))
+    
+    ! ------------ SIMULATIONS FROM PREDEFINED CORR MATRICES -----------
+    if (brute_force == 0) then 
+       ! Reading in cholesky decomposition 
+       call open_hdf_file(corrmatrixfile, file, "r")
+       if (data%polyorder == 1) then
+          call read_hdf(file, "cholesky1", cholesky)   ! 1. order polynom 
+       else if (data%polyorder == 0) then
+          call read_hdf(file, "cholesky0", cholesky)   ! 0. order polynom
+       else if (data%polyorder == -1) then
+          call read_hdf(file, "cholesky_1", cholesky)   ! Polyfilter turned off 
+       end if
+       call close_hdf_file(file)
+
+       ! Transpose cholesky decomposition because Python and Fortran have opposite array indexing
+       cholesky = transpose(cholesky)
+
+       do m=1, n_sim
+          do k=1, n_feeds
+             do j=1, n_bands
+                do i=1, n_samples
+
+                   do o=1, n_freq
+                      z(o) = rand_gauss(rng_handle)
+                   end do
+
+                   data%tod_sim(i,:,j,k,m) = matmul(cholesky,z) * data%Tsys_lowres(:,j,k)/sqrt(dnu*tau) 
+
+                end do
+             end do
+          end do
+       end do
+      
+
+
+    ! --------- BRUTE-FORCE SIMULATIONS FROM DATA CORR MATRICES ----------
+    else
+
+       ! Calculating correlation matrix for all bands and feeds
+       
+       do j=1, n_feeds
+          if (.not. is_alive(j)) cycle
+          do k=1, n_bands
+             data_current = data%tod(:,:,k,j)
+             do x=1, n_freq
+                if (data%freqmask(x,k,j) == 0.d0) cycle
+                do y=1, n_freq
+                   if (data%freqmask(y,k,j) == 0.d0) cycle
+                   x_bar = sum(data_current(:,x))/n_samples
+                   y_bar = sum(data_current(:,y))/n_samples
+
+                   s = 0.d0
+                   do i=1, n_samples 
+                      s = s + (data_current(i,x) - x_bar)*(data_current(i,y) - y_bar) 
+                   end do
+
+                   x_std = sqrt( sum((data_current(:,x) - x_bar)**2) / (n_samples-1) )
+                   y_std = sqrt( sum((data_current(:,y) - y_bar)**2) / (n_samples-1) )
+
+                   correlations(x,y,k,j) = s/(n_samples - 1) / sqrt( x_std**2 * y_std**2 )
+                end do
+             end do
+          end do
+       end do
+
+
+       ! Calculating cholesky decomposition of the correlation matrix for all bands and feeds
+       do j=1, n_feeds
+          if (.not. is_alive(j)) cycle
+          do k=1, n_bands 
+             A = correlations(:,:,k,j)
+             call cholesky_decomposition(A, n_freq, G)
+             correlations(:,:,k,j) = G
+          end do
+       end do
+
+
+       ! Calculating simulated data using the cholesky decompositions
+       do m=1, n_sim
+          do k=1, n_feeds
+             do j=1, n_bands
+                cholesky = correlations(:,:,j,k)
+                do i=1, n_samples
+
+                   do o=1, n_freq
+                      z(o) = rand_gauss(rng_handle)
+                   end do
+
+                   data%tod_sim(i,:,j,k,m) = matmul(cholesky,z) * data%Tsys_lowres(:,j,k)/sqrt(dnu*tau) 
+
+                end do
+             end do
+          end do
+       end do
+
+
+    end if
+
+  end subroutine simulate_tod
+
+
 
   subroutine transfer_diagnostics(data_l2_in, data_l2_out)
     implicit none
