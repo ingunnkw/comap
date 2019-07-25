@@ -47,6 +47,8 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
+     real(sp),     allocatable, dimension(:,:,:,:,:) :: tod_sim       ! (time, freq, sideband, detector, simulations)
+     real(sp),     allocatable, dimension(:,:)       :: weather       ! Weatherdata at observation
 
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
@@ -197,7 +199,7 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, ext(7), poly
+    integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, nsim, ext(7), poly
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
@@ -228,6 +230,9 @@ contains
     call read_hdf(file, "Tsys_lowres",      data%tsys_lowres)
     allocate(data%n_nan(nfreq_full,nsb,ndet))
     call read_hdf(file, "n_nan",            data%n_nan)    
+    allocate(data%tod_sim(nsamp,nfreq,nsb,ndet,nsim))
+    call read_hdf(file, "tod_sim",         data%tod_sim)
+    call read_hdf(file, "weather",         data%weather)
 
     call read_hdf(file, "polyorder",        data%polyorder)
     !if (data%polyorder >= 0) then
@@ -387,6 +392,8 @@ contains
     if(allocated(data%acceptrate))    deallocate(data%acceptrate)
     if(allocated(data%diagnostics))   deallocate(data%diagnostics)
     if(allocated(data%cut_params))    deallocate(data%cut_params)
+    if(allocated(data%tod_sim))       deallocate(data%tod_sim)
+    if(allocated(data%weather))       deallocate(data%weather)
   end subroutine
 
   subroutine write_l2_file(filename, data)
@@ -415,6 +422,8 @@ contains
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     call write_hdf(file, "freqmask_reason",   data%freqmask_reason)
     call write_hdf(file, "n_nan",             data%n_nan)
+    call write_hdf(file, "tod_sim",           data%tod_sim)
+    if (allocated(data%weather)) call write_hdf(file, "weather",           data%weather)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     call write_hdf(file, "polyorder",         data%polyorder)
     if (data%polyorder >= 0) then
@@ -434,6 +443,7 @@ contains
        call write_hdf(file, "diagnostics",    data%diagnostics)
        call write_hdf(file, "cut_params",     data%cut_params)
     end if
+    !call write_hdf(file, 'weather',           data%weather) 
     call close_hdf_file(file)
   end subroutine
 
@@ -708,6 +718,15 @@ contains
        allocate(lx_out%sec(size(lx_in%sec,1)))
        lx_out%sec = lx_in%sec
     end if
+    if(allocated(lx_in%tod_sim))         then  
+       allocate(lx_out%tod_sim(size(lx_in%tod_sim,1),size(lx_in%tod_sim,2),size(lx_in%tod_sim,3),size(lx_in%tod_sim,4), size(lx_in%tod_sim,5)))
+       lx_out%tod_sim = lx_in%tod_sim
+    end if
+    if(allocated(lx_in%weather))         then  
+       allocate(lx_out%weather(size(lx_in%weather,1),size(lx_in%weather,2)))
+       lx_out%weather = lx_in%weather
+    end if
+
  !   write(*,*) "end"
   end subroutine copy_lx_struct
   
