@@ -98,7 +98,7 @@ program tod2comap
 
      ! Get TOD / read level 2 file
      nsub = scan%nsub
-     do j = 2, nsub-2
+     do j = 2, nsub-1
         write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
         filename = scan%ss(j)%l2file
 
@@ -110,7 +110,6 @@ program tod2comap
 
         call int2string(scan%ss(j)%id, scanid)
         write(*,*) 'scan', scanid
-
         call nullify_map_type(map_scan)
         call time2pix(tod, map_scan, parfile, pinfo)
         call time2pix(tod, map_tot, parfile, pinfo)
