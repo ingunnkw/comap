@@ -272,7 +272,7 @@ program l2gen
         call simulate_tod(data_l2_decimated)
 
         ! Load weatherdata 
-        !call load_weather(data_l2_decimated) 
+        call load_weather(data_l2_decimated) 
 
 
         ! Write L2 file to disk
