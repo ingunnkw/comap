@@ -7,15 +7,16 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet,  n_k, ntheta ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, nsim,  n_k, ntheta ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
      character(len=512) :: name
-     real(dp),     allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
-     real(dp),     allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
-     real(sp),     allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
-     integer(i4b), allocatable, dimension(:,:,:,:,:) :: nhit
+     real(dp),     allocatable, dimension(:)           :: x, y, k ! (n_x or n_y or n_k)
+     real(dp),     allocatable, dimension(:,:)         :: freq    ! (nfreq, nsb)
+     real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim   !(n_x, n_y, nfreq, nsb, ndet, nsim)
+     integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit
   end type map_type
 
 
@@ -41,6 +42,10 @@ contains
        call write_hdf(file, "map", map%m(:,:,:,sb:sb,det:det))
        call write_hdf(file, "rms", map%rms(:,:,:,sb:sb,det:det))
        call write_hdf(file, "nhit", map%nhit(:,:,:,sb:sb,det:det))
+
+       ! For simulated data
+       call write_hdf(file, "map_sim", map%m_sim(:,:,:,sb:sb,det:det,:))
+       call write_hdf(file, "rms_sim", map%rms_sim(:,:,:,sb:sb,det:det,:))
     else
        call write_hdf(file, "map", map%m)
        call write_hdf(file, "rms", map%rms)
@@ -48,6 +53,13 @@ contains
        call write_hdf(file, "map_beam", sum(map%m,dim=5))
        call write_hdf(file, "rms_beam", sum(map%rms,dim=5))
        call write_hdf(file, "nhit_beam", sum(map%nhit,dim=5))
+
+       ! For simulated data
+       call write_hdf(file, "map_sim", map%m_sim) 
+       call write_hdf(file, "rms_sim", map%rms_sim) 
+       call write_hdf(file, "map_sim_beam", sum(map%m_sim, dim=5))
+       call write_hdf(file, "rms_sim_beam", sum(map%rms_sim, dim=5))
+ 
     end if
     call write_hdf(file, "freq", map%freq)
     call write_hdf(file, "mean_az", map%mean_az)
@@ -81,6 +93,12 @@ contains
     call write_hdf(file, "mean_az", map%mean_az)
     call write_hdf(file, "mean_el", map%mean_el)
     call write_hdf(file, "time", map%time)
+    
+    ! For simulated data 
+    call write_hdf(file, "map_sim", map%m_sim(:,:,1,1,1,:)) 
+    call write_hdf(file, "rms_sim", map%rms_sim(:,:,1,1,1,:)) 
+
+
     call close_hdf_file(file)
 
   end subroutine output_submap_h5
@@ -93,18 +111,22 @@ contains
     type(map_type),   intent(out) :: map
 
     type(hdf_file) :: file
-    integer(i4b)   :: nx, ny, nfreq, nsb, ndet, ext(7)
+    integer(i4b)   :: nx, ny, nfreq, nsb, ndet, nsim, ext(7)
 
     call free_map_type(map)
 
     call open_hdf_file(trim(filename), file, "r")
 
-    call get_size_hdf(file, "map", ext)
-    nx = ext(1); ny = ext(2); nfreq = ext(3); nsb = ext(4); ndet = ext(5)
+    call get_size_hdf(file, "map_sim", ext)
+    nx = ext(1); ny = ext(2); nfreq = ext(3); nsb = ext(4); ndet = ext(5); nsim = ext(6)
 
     allocate(map%x(nx), map%y(ny))
     allocate(map%m(nx,ny,nfreq,nsb,ndet), map%rms(nx,ny,nfreq,nsb,ndet), map%nhit(nx,ny,nfreq, nsb,ndet))
     allocate(map%freq(nfreq,nsb))
+
+    ! For simulated data 
+    allocate(map%m_sim(nx,ny,nfreq,nsb,ndet,nsim), map%rms_sim(nx,ny,nfreq,nsb,ndet,nsim)) 
+    
 
     call read_hdf(file, "n_x", map%n_x)
     call read_hdf(file, "n_y", map%n_y)
@@ -117,6 +139,12 @@ contains
     call read_hdf(file, "time", map%time)
     call read_hdf(file, "mean_az", map%mean_az)
     call read_hdf(file, "mean_el", map%mean_el)
+
+    ! Simulated data
+    call read_hdf(file, "map_sim", map%m_sim) 
+    call read_hdf(file, "rms_sim", map%rms_sim)
+
+
     call close_hdf_file(file)
 
   end subroutine read_map_h5
@@ -203,6 +231,12 @@ contains
     map%div  = 0.d0
     map%nhit = 0.d0
 
+    ! Simulated data
+    map%m_sim    = 0.d0
+    map%rms_sim  = 0.d0
+    map%dsum_sim = 0.d0
+    map%div_sim  = 0.d0 
+
   end subroutine nullify_map_type
 
 
@@ -219,6 +253,12 @@ contains
     if (allocated(map%dsum)) deallocate(map%dsum)
     if (allocated(map%nhit)) deallocate(map%nhit)
     if (allocated(map%div))  deallocate(map%div)
+
+    ! Simulated data 
+    if (allocated(map%m_sim))    deallocate(map%m_sim)
+    if (allocated(map%rms_sim))  deallocate(map%rms_sim) 
+    if (allocated(map%dsum_sim)) deallocate(map%dsum_sim) 
+    if (allocated(map%div_sim))  deallocate(map%div_sim) 
 
   end subroutine free_map_type
 
