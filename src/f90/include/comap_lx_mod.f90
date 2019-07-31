@@ -229,9 +229,14 @@ contains
     call read_hdf(file, "Tsys",             data%tsys)
     call read_hdf(file, "Tsys_lowres",      data%tsys_lowres)
     allocate(data%n_nan(nfreq_full,nsb,ndet))
-    call read_hdf(file, "n_nan",            data%n_nan)    
-    allocate(data%tod_sim(nsamp,nfreq,nsb,ndet,nsim))
+    call read_hdf(file, "n_nan",            data%n_nan)
+
+    call get_size_hdf(file,"tod_sim", ext)
+    allocate(data%tod_sim(ext(1),ext(2),ext(3),ext(4),ext(5)))
     call read_hdf(file, "tod_sim",         data%tod_sim)
+
+    call get_size_hdf(file, "weather", ext)
+    allocate(data%weather(ext(1), ext(2)))
     call read_hdf(file, "weather",         data%weather)
 
     call read_hdf(file, "polyorder",        data%polyorder)
