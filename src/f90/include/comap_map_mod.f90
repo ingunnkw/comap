@@ -44,6 +44,9 @@ contains
        call write_hdf(file, "map", map%m)
        call write_hdf(file, "rms", map%rms)
        call write_hdf(file, "nhit", map%nhit)
+       call write_hdf(file, "map_beam", sum(map%m,dim=5))
+       call write_hdf(file, "rms_beam", sum(map%rms,dim=5))
+       call write_hdf(file, "nhit_beam", sum(map%nhit,dim=5))
     end if
     call write_hdf(file, "freq", map%freq)
     call write_hdf(file, "mean_az", map%mean_az)
@@ -56,6 +59,30 @@ contains
   end subroutine output_map_h5
 
 
+  subroutine output_submap_h5(prefix, map)
+    implicit none
+    character(len=*), intent(in) :: prefix
+    type(map_type),   intent(in) :: map
+
+    type(hdf_file)     :: file
+    character(len=512) :: filename
+
+    filename = trim(prefix)//'_'//trim(map%name)//'.h5'
+    call open_hdf_file(trim(filename), file, "w")
+    call write_hdf(file, "n_x", map%n_x)
+    call write_hdf(file, "n_y", map%n_y)
+    call write_hdf(file, "x",   map%x)
+    call write_hdf(file, "y",   map%y)
+    call write_hdf(file, "map", map%m(:,:,1,1,1))
+    call write_hdf(file, "rms", map%rms(:,:,1,1,1))
+    call write_hdf(file, "nhit", map%nhit(:,:,1,1,1))
+    call write_hdf(file, "freq", map%freq)
+    call write_hdf(file, "mean_az", map%mean_az)
+    call write_hdf(file, "mean_el", map%mean_el)
+    call write_hdf(file, "time", map%time)
+    call close_hdf_file(file)
+
+  end subroutine output_submap_h5
 
 
   ! Reads an h5 file
@@ -174,7 +201,6 @@ contains
     map%dsum = 0.d0
     map%div  = 0.d0
     map%nhit = 0.d0
-
 
   end subroutine nullify_map_type
 

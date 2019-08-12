@@ -23,7 +23,7 @@ program l2gen
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-  logical(lgt)         :: process, is_sim
+  logical(lgt)         :: process, is_sim, rem_el
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
@@ -52,6 +52,7 @@ program l2gen
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
   call get_parameter(unit, parfile, 'IS_SIM',                    par_lgt=is_sim)
   call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
+  call get_parameter(unit, parfile, 'REMOVE_ELEVATION_TEMP',     par_lgt=rem_el)
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -78,7 +79,7 @@ program l2gen
         if (reprocess .or. .not. exist) process = .true.
      end do
      if (.not. process) then
-        write(*,fmt="(i3,a,2i5,i8)") myid, " skipping already finished scan:", snum, scan%id
+        write(*,fmt="(i3,a,2i5,i8)") myid, " skipping already finished obsid:", snum, scan%id
         cycle
      end if
 
@@ -113,40 +114,35 @@ program l2gen
      
      n_tsys = 0
      nsamp = size(data_l1%tod,1)
-     !write(*,*) 4                                                                                                                                                                                                                
-     !write(*,*) data_l1%tod(1751:2650,1,1,1)                                                                                                                                                                                     
+     !write(*,*) 4
+     !write(*,*) data_l1%tod(1751:2650,1,1,1)
      do i=1, scan%nsub
         if (scan%ss(i)%scanmode == 'tsys') then
            n_tsys = n_tsys + 1
            if (n_tsys > 2) exit
            tsys_mjd_min     = max(scan%ss(i)%mjd(1), minval(data_l1%time))
            tsys_mjd_max     = min(scan%ss(i)%mjd(2), maxval(data_l1%time))
-           write(*,*) "A", tsys_mjd_min, tsys_mjd_max
-           ! Find start position                                                                                                                                                                                                  
-           !write(*,* ) scan%ss(i)%mjd(1), scan%ss(i)%mjd(2)                                                                                                                                                                      
-           !write(*,*) maxval(data_l1%time), minval(data_l1%time)                                                                                                                                                                 
-           !write(*,*) tsys_mjd_min, tsys_mjd_max                                                                                                                                                                                 
-           !stop                                                                                                                                                                                                                  
+           !write(*,*) "A", tsys_mjd_min, tsys_mjd_max
            tsys_ind(1) = 1
            do while (tsys_ind(1) <= nsamp)
               if (data_l1%time(tsys_ind(1)) > tsys_mjd_min) exit
               tsys_ind(1) = tsys_ind(1) + 1
            end do
 
-
-           ! Find end position                                                                                                                                                                                                    
+           ! Find end position
            tsys_ind(2) = nsamp
            do while (tsys_ind(2) >= 1)
               if (data_l1%time(tsys_ind(2)) < tsys_mjd_max) exit
               tsys_ind(2) = tsys_ind(2) - 1
            end do
-           write(*,*) "B", tsys_ind
-           !stop                                                                                                                                                                                                                  
+           !write(*,*) "B", tsys_ind
+           !stop
 
-           ! Compute absolute calibration                                                                                                                                                                                         
+           ! Compute absolute calibration
+
            call compute_Tsys_per_tp(tsysfile, data_l1, tsys_ind, n_tsys, is_sim)
            tsys_time(n_tsys) = 0.5*(tsys_mjd_min + tsys_mjd_max)
-           end if
+        end if
      end do
      if (n_tsys == 1) tsys_time(2) = data_l1%time(nsamp)
      if (n_tsys == 0) then
@@ -179,24 +175,14 @@ program l2gen
            call update_status(status, 'gain_norm')
         end if
 
-        ! if (scan%ss(k)%id == 626202) then
-        !    open(22, file="tod07.unf", form="unformatted") ! Adjusted open statement
-        !    write(22) data_l2_fullres%tod(:,:,2,7)
-        !    close(22)
-        ! end if
-
-        ! Remove elevation gain
-        !if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
-        !   write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
-        !   call remove_elevation_gain(data_l2_fullres)
-        !   call update_status(status, 'remove_elevation')
-        !end if
-
-        ! if (scan%ss(k)%id == 626202) then
-        !    open(22, file="tod_07_after_elevation.unf", form="unformatted") ! Adjusted open statement
-        !    write(22) data_l2_fullres%tod(:,:,2,7)
-        !    close(22)
-        ! end if
+        if (rem_el) then
+           ! Remove elevation gain
+           if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
+              write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
+              call remove_elevation_gain(data_l2_fullres)
+              call update_status(status, 'remove_elevation')
+           end if
+        end if
 
         if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
            write(*,*) "NaN in tod before filtering!"
@@ -2120,16 +2106,17 @@ contains
 
     allocate(vanemask(nsamp_highres))
     vanemask = -1
-    i = 1 ! Counter for highres grid                                                                                                                                                                                              
-    j = 1 ! Couner for lowres grid                                                                                                                                                                                                
+    i = 1 ! Counter for highres grid
+    j = 1 ! Couner for lowres grid
     do j = 1, nsamp_lowres-1
-       if (data%amb_state(j) == 0 .or. data%amb_state(j) == 1) then
+       if (data%amb_state(j) == 2 .or. data%amb_state(j) == 3) then
           mjd_start = data%amb_time(j)
           mjd_stop  = data%amb_time(j+1)
+          if (mjd_start > data%time(nsamp_highres)) exit
           do while (data%time(i) < mjd_start)
              i = i+1
           end do
-          do while (data%time(i) < mjd_stop)
+          do while (data%time(i) < mjd_stop .and. i <= nsamp_highres)
              if (i > tsys_ind(1) .and. i < tsys_ind(2)) then
                 vanemask(i) = data%amb_state(j)
              end if
@@ -2151,7 +2138,7 @@ contains
     integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys
     integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
     real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
-    real(dp), dimension(:), allocatable           :: time, Y
+    real(dp), dimension(:), allocatable           :: time, Y, tod_hot, tod_cold
     integer(i4b), dimension(:), allocatable       :: vanemask
     
 
@@ -2162,7 +2149,7 @@ contains
 
 
     if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
-    allocate(Y(nfreq_fullres))
+    allocate(Y(nfreq_fullres), tod_hot(nsamp), tod_cold(nsamp))
 
     data%Tsys(n_tsys,:,:,:) = 40.d0
     t_cold = 2.73
@@ -2182,12 +2169,14 @@ contains
              n_hot = 0
              n_cold = 0
              do l = 1, nsamp
-                if (vanemask(l) == 1 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
-                   P_hot = P_hot + data%tod(l,k,j,i)
+                if (vanemask(l) == 2 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+                   !P_hot = P_hot + data%tod(l,k,j,i)
                    n_hot = n_hot + 1
-                else if (vanemask(l) == 0 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
-                   P_cold = P_cold + data%tod(l,k,j,i)
+                   tod_hot(n_hot) = data%tod(l,k,j,i)
+                else if (vanemask(l) == 3 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+                   !P_cold = P_cold + data%tod(l,k,j,i)
                    n_cold = n_cold + 1
+                   tod_cold(n_cold) = data%tod(l,k,j,i)
                 else
                    cycle
                 end if
@@ -2196,8 +2185,8 @@ contains
                 data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
                 write(*,*) "no n_cold", i, j, k
              else
-                P_hot  = P_hot  / n_hot
-                P_cold = P_cold / n_cold
+                P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
+                P_cold = median(tod_cold(1:n_cold)) !P_cold / n_cold
                 Y(k)   = P_hot/P_cold
                 if (is_sim) then 
                    data%Tsys(n_tsys,k,j,i) = 1.d0
@@ -2209,6 +2198,8 @@ contains
           end do
        end do
     end do
+
+    deallocate(vanemask, tod_hot, tod_cold)
 
   end subroutine compute_Tsys_per_tp
 

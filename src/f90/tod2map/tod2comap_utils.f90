@@ -117,19 +117,19 @@ contains
     implicit none
     type(tod_type), intent(inout) :: tod 
 
-    if (allocated(tod%t))      deallocate(tod%t)
-    if (allocated(tod%f))      deallocate(tod%f)
-    if (allocated(tod%d))      deallocate(tod%d)
-    if (allocated(tod%d_raw))  deallocate(tod%d_raw)
-    if (allocated(tod%g))      deallocate(tod%g)
-    if (allocated(tod%rms))    deallocate(tod%rms)
-    if (allocated(tod%point))  deallocate(tod%point)
-    if (allocated(tod%point_tel))  deallocate(tod%point_tel)
-    if (allocated(tod%sigma0)) deallocate(tod%sigma0)
-    if (allocated(tod%fknee))  deallocate(tod%fknee)
-    if (allocated(tod%alpha))  deallocate(tod%alpha)
-    if (allocated(tod%pixels)) deallocate(tod%pixels)
-    if (allocated(tod%freqmask)) deallocate(tod%freqmask)
+    if (allocated(tod%t))         deallocate(tod%t)
+    if (allocated(tod%f))         deallocate(tod%f)
+    if (allocated(tod%d))         deallocate(tod%d)
+    if (allocated(tod%d_raw))     deallocate(tod%d_raw)
+    if (allocated(tod%g))         deallocate(tod%g)
+    if (allocated(tod%rms))       deallocate(tod%rms)
+    if (allocated(tod%point))     deallocate(tod%point)
+    if (allocated(tod%point_tel)) deallocate(tod%point_tel)
+    if (allocated(tod%sigma0))    deallocate(tod%sigma0)
+    if (allocated(tod%fknee))     deallocate(tod%fknee)
+    if (allocated(tod%alpha))     deallocate(tod%alpha)
+    if (allocated(tod%pixels))    deallocate(tod%pixels)
+    if (allocated(tod%freqmask))  deallocate(tod%freqmask)
 
   end subroutine free_tod_type
 

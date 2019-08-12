@@ -111,6 +111,8 @@ contains
     call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
     call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
     call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
+    write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
+    data%amb_time = data%amb_time + 3.d0 /(24.d0*3600.d0)
 
     ! Read feed information
     call read_hdf(file, "spectrometer/feeds",               data%pixels)
@@ -219,7 +221,7 @@ contains
     allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet))
     call read_hdf(file, "freqmask",         data%freqmask)    
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
-    call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
+    !call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
     call read_hdf(file, "mean_tp",          data%mean_tp)
     allocate(data%tsys(2,nfreq_full,nsb,ndet), data%tsys_lowres(nfreq,nsb,ndet))
     call read_hdf(file, "Tsys",             data%tsys)
