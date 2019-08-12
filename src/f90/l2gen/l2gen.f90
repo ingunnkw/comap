@@ -74,7 +74,7 @@ program l2gen
   do snum = myid+1, nscan, nproc
      call get_scan_info(snum, scan)
      process = .false.
-     do k = 1, scan%nsub
+     do k = 2, scan%nsub-1
         inquire(file=scan%ss(k)%l2file,exist=exist)
         if (reprocess .and. exist) call rm(scan%ss(k)%l2file)           
         if (reprocess .or. .not. exist) process = .true.
