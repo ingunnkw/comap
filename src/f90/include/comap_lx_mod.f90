@@ -64,11 +64,12 @@ module comap_lx_mod
 
 contains
 
-  subroutine read_l1_file(filename, data, id, only_point, verb, freqmask, init)
+  subroutine read_l1_file(filename, data, id, verb, only_point, freqmask, init)
     implicit none
     character(len=*), intent(in)           :: filename
     integer(i4b),     intent(in)           :: id
-    logical(lgt),     intent(in), optional :: only_point, init, verb
+    logical(lgt),     intent(in), optional :: only_point, init
+    logical(lgt),     intent(in)           :: verb
     real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
@@ -111,6 +112,7 @@ contains
     call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
     call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
     call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
+
     if (verb) then
        write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
     end if
