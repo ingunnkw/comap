@@ -64,11 +64,11 @@ module comap_lx_mod
 
 contains
 
-  subroutine read_l1_file(filename, data, id, only_point, freqmask, init)
+  subroutine read_l1_file(filename, data, id, only_point, verb, freqmask, init)
     implicit none
     character(len=*), intent(in)           :: filename
     integer(i4b),     intent(in)           :: id
-    logical(lgt),     intent(in), optional :: only_point, init
+    logical(lgt),     intent(in), optional :: only_point, init, verb
     real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
@@ -111,7 +111,9 @@ contains
     call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
     call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
     call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
-    write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
+    if (verb) then
+       write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
+    end if
     data%amb_time = data%amb_time + 3.d0 /(24.d0*3600.d0)
 
     ! Read feed information
@@ -139,7 +141,9 @@ contains
                 numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
                 data%n_nan(k,j,i) = numbad
                 if (numbad > 0.1*nsamp_tot) then
-                   write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
+                   if (verb) then
+                      write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
+                   end if
                    freqmask(k,j,i) = 0.
                 end if
              end do
@@ -170,11 +174,11 @@ contains
     else
        nsamp = nsamp_tot
     end if
-
-    if (nsamp /= nsamp_tot) then
-       write(*,*) '  Number of NaN elements in ', id, ' = ', nsamp_tot-nsamp, ' of ', nsamp_tot
+    if (verb) then
+       if (nsamp /= nsamp_tot) then
+          write(*,*) '  Number of NaN elements in ', id, ' = ', nsamp_tot-nsamp, ' of ', nsamp_tot
+       end if
     end if
-
     allocate(data%time(nsamp))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%tod_mean(nfreq,nsb,ndet))

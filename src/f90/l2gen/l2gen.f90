@@ -23,7 +23,7 @@ program l2gen
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-  logical(lgt)         :: process, is_sim, rem_el
+  logical(lgt)         :: process, is_sim, rem_el, verb
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
@@ -53,6 +53,7 @@ program l2gen
   call get_parameter(unit, parfile, 'IS_SIM',                    par_lgt=is_sim)
   call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
   call get_parameter(unit, parfile, 'REMOVE_ELEVATION_TEMP',     par_lgt=rem_el)
+  call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -83,16 +84,16 @@ program l2gen
         cycle
      end if
 
-     write(*,fmt="(i3,a,i10,a)") myid, " processing scan ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
+     write(*,fmt="(i3,a,i10,a)") myid, " processing obsid ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
      call update_status(status, 'scan_start')
 
      ! Initialize frequency mask
-     call initialize_fullres_frequency_mask(freqmaskfile, data_l1)
+     call initialize_fullres_frequency_mask(freqmaskfile, data_l1, verb)
      call update_status(status, 'freq_mask1')
 
      ! Read in Level 1 file
      call wall_time(t1)
-     call read_l1_file(scan%l1file, data_l1, scan%id, freqmask=data_l1%freqmask_full, init=.false.)
+     call read_l1_file(scan%l1file, data_l1, scan%id, verb, freqmask=data_l1%freqmask_full, init=.false.)
      data_l1%tod(:,:,:,20) = 0.d0
      call update_status(status, 'read_l1')
      if (size(data_l1%tod,1) <100) then
@@ -102,14 +103,15 @@ program l2gen
      !call correct_missing_time_steps(data_l1%time)
      call wall_time(t2)
      todsize = real(size(data_l1%tod,1),dp)*real(size(data_l1%tod(1,:,:,:)),dp)*4.d0/1024.d0**2 ! in MB
-     write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
-
+     if (verb) then
+        write(*,fmt='(i4,a,f10.2,a)') myid, ' -- disk read speed = ', real(todsize,dp)/(t2-t1), ' MB/sec'
+     end if
      ! Interpolate over single NaNs
-     call interpolate_nans(data_l1, scan%id)
+     call interpolate_nans(data_l1, scan%id, verb)
      call update_status(status, 'nan_interp')
 
      ! Finalize frequency mask
-     call postprocess_frequency_mask(numfreq, data_l1, scan%id)
+     call postprocess_frequency_mask(numfreq, data_l1, scan%id, verb)
      call update_status(status, 'freq_mask2')
      
      n_tsys = 0
@@ -140,7 +142,7 @@ program l2gen
 
            ! Compute absolute calibration
 
-           call compute_Tsys_per_tp(tsysfile, data_l1, tsys_ind, n_tsys, is_sim)
+           call compute_Tsys_per_tp(tsysfile, data_l1, tsys_ind, n_tsys, is_sim, verb)
            tsys_time(n_tsys) = 0.5*(tsys_mjd_min + tsys_mjd_max)
         end if
      end do
@@ -164,11 +166,12 @@ program l2gen
         call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
         call update_status(status, 'excise')
         
-        write(*,*) "Starting analysis of scan", scan%ss(k)%id
-        write(*,'(A, F18.7, F9.4)') " Time and duration (in mins) of scan: ", data_l2_fullres%time(1), (data_l2_fullres%time(size(data_l2_fullres%time, 1)) - data_l2_fullres%time(1)) * 24 * 60
-        write(*,'(A, I8, 2A)') " Number of samples, observed patch: ", size(data_l2_fullres%time, 1), "  ", trim(scan%object)
-        write(*,*) "Scan type: ", trim(scan%ss(k)%scanmode)
-
+        if (verb) then
+           write(*,*) "Starting analysis of scan", scan%ss(k)%id
+           write(*,'(A, F18.7, F9.4)') " Time and duration (in mins) of scan: ", data_l2_fullres%time(1), (data_l2_fullres%time(size(data_l2_fullres%time, 1)) - data_l2_fullres%time(1)) * 24 * 60
+           write(*,'(A, I8, 2A)') " Number of samples, observed patch: ", size(data_l2_fullres%time, 1), "  ", trim(scan%object)
+           write(*,*) "Scan type: ", trim(scan%ss(k)%scanmode)
+        end if
         ! Normalize gain
         if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
            call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
@@ -178,16 +181,18 @@ program l2gen
         if (rem_el) then
            ! Remove elevation gain
            if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
-              write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
+              if (verb) then
+                 write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
+              end if
               call remove_elevation_gain(data_l2_fullres)
               call update_status(status, 'remove_elevation')
            end if
         end if
-
-        if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
-           write(*,*) "NaN in tod before filtering!"
+        if (verb) then           
+           if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
+              write(*,*) "NaN in tod before filtering!"
+           end if
         end if
-             
         data_l2_fullres%mask_outliers = mask_outliers
         if (mask_outliers) then
            ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
@@ -200,7 +205,7 @@ program l2gen
 !           write(*,*) sum(data_l2_filter%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
         
            ! pca filter copied data
-           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
+           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter0')
            
            ! flag correlations and variance
@@ -210,20 +215,20 @@ program l2gen
            ! replace freqmask in original tod
            call transfer_diagnostics(data_l2_filter, data_l2_fullres)
 
-           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id)
+           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, verb)
            call update_status(status, 'made_freqmask')
 
            call free_lx_struct(data_l2_filter)
         end if
         !write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
         !'write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
-
-        write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
-        if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
-           write(*,*) "All channels masked! Scan: ", scan%ss(k)%id
-           cycle
+        if (verb) then
+           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
+           if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
+              write(*,*) "All channels masked! Scan: ", scan%ss(k)%id
+              cycle
+           end if
         end if
-        
         
         ! Poly-filter if requested
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
@@ -234,7 +239,7 @@ program l2gen
 
         ! pca filter after polyfilter
         if (trim(pinfo%type) == 'cosmo') then
-           call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
+           call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter')
         end if
 
@@ -244,7 +249,7 @@ program l2gen
            call polyfilter_TOD(data_l2_filter, bp_filter0)
            
            ! pca filter copied data
-           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
+           call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
         
            call remove_pca_components(data_l2_filter, data_l2_fullres, pca_sig_rem)
         end if
@@ -255,10 +260,11 @@ program l2gen
         ! Apply absolute calibration
         call calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys)
         
-        if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
-           write(*,*) "NaN in tod after filtering!"
+        if (verb) then
+           if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
+              write(*,*) "NaN in tod after filtering!"
+           end if
         end if
-
         ! If necessary, decimate L2 file in both time and frequency
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
         call update_status(status, 'decimate')
@@ -271,7 +277,9 @@ program l2gen
         if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
 
         ! Write L2 file to disk
-        write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
+        if (verb) then
+           write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
+        end if
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
         call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
         call update_status(status, 'write_l2')
@@ -314,11 +322,12 @@ contains
   end subroutine transfer_diagnostics
   
   
-  subroutine update_freqmask(data_l2, min_acceptrate, id)
+  subroutine update_freqmask(data_l2, min_acceptrate, id, verb)
     implicit none
     type(Lx_struct),                            intent(inout) :: data_l2
     integer(i4b),                               intent(in)    :: id
     real(dp),                                   intent(in)    :: min_acceptrate
+    logical(lgt),                               intent(in)    :: verb
     integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nfreq_full, nsb, ndet, dfreq
     
     
@@ -337,8 +346,10 @@ contains
           if (data_l2%acceptrate(j,i) < min_acceptrate) then !Mask bad sidebands
              data_l2%freqmask_reason(:,j,i) = data_l2%freqmask_reason(:,j,i) + nint(15.d0 * data_l2%freqmask_full(:,j,i))
              data_l2%freqmask_full(:,j,i) = 0.d0
-             write(*,*) "Rejecting entire sideband (too much was masked) det, sb, acceptrate, scanid:"
-             write(*,*) i, j, data_l2%acceptrate(j,i), id
+             if (verb) then
+                write(*,*) "Rejecting entire sideband (too much was masked) det, sb, acceptrate, scanid:"
+                write(*,*) i, j, data_l2%acceptrate(j,i), id
+             end if
              data_l2%acceptrate(j,i) = 0.d0
           end if
        end do
@@ -369,12 +380,12 @@ contains
     nsamp       = size(data_l2%tod,1)
     
     corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
-    if (.not. (vars(k,j,i) > 0)) then
-       write(*,*) vars(k,j,i), k,j,i
-    end if
-    if (.not. (vars(n,m,l) > 0)) then
-       write(*,*) vars(n,m,l), n,m,l
-    end if
+    ! if (.not. (vars(k,j,i) > 0)) then
+    !    write(*,*) vars(k,j,i), k,j,i
+    ! end if
+    ! if (.not. (vars(n,m,l) > 0)) then
+    !    write(*,*) vars(n,m,l), n,m,l
+    ! end if
     
     corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
     
@@ -408,7 +419,7 @@ contains
     real(dp),     allocatable, dimension(:,:)       :: corrs, corr_prod
     real(sp),     allocatable, dimension(:,:)       :: corr_template
     real(dp),     allocatable, dimension(:,:)       :: outlier_mask
-    logical(lgt) :: mask_edge_corrs, rm_outliers
+    logical(lgt) :: mask_edge_corrs, rm_outliers, verb
     character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
     character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str
     real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe
@@ -441,6 +452,7 @@ contains
     call get_parameter(unit, parfile, 'PROD_OFFSET',               par_int=prod_offset)
     call get_parameter(unit, parfile, 'NSIGMA_CHI2_BOX',           par_dp=nsigma_chi2_box)
     call get_parameter(unit, parfile, 'NSIGMA_CHI2_STRIPE',        par_dp=nsigma_chi2_stripe)
+    call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
 
     read(box_offset_str,*) box_offsets
     read(stripe_offset_str,*) stripe_offsets
@@ -767,7 +779,9 @@ contains
        end do
     end do
     if (sum(data_l2%freqmask_full) == 0.0) then
-       write(*,*) "All frequencies masked after hard cut, id: ", id
+       if (verb) then
+          write(*,*) "All frequencies masked after hard cut, id: ", id
+       end if
        stop  ! fix this to "stop working on this file"
     end if
 
@@ -805,7 +819,9 @@ contains
           subt = (meanabscorr(2:nfreq,j,i) - meanabscorr(1:nfreq-1,j,i)) / sqrt(2.d0)
           var_0 = sum(merge(subt ** 2, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
           if (sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1)))) == 0.d0) then
-             write(*,*) "OVERFLOW AVERTED", i, j, id
+             if (verb) then
+                write(*,*) "OVERFLOW AVERTED", i, j, id
+             end if
              var_0 = 0.d0
           else 
              var_0 = var_0 / sum(merge(1.d0, 0.d0, ((data_l2%freqmask_full(2:nfreq,j,i) == 1) .and. (data_l2%freqmask_full(1:nfreq-1,j,i) == 1))))
@@ -920,10 +936,11 @@ contains
     end if
   end subroutine get_mean_and_sigma
   
-  subroutine interpolate_nans(data, id)
+  subroutine interpolate_nans(data, id, verb)
     implicit none
     type(Lx_struct),  intent(inout) :: data
     integer(i4b),     intent(in)    :: id
+    logical(lgt),     intent(in)    :: verb
 
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, n, ntot
 
@@ -957,8 +974,9 @@ contains
     !$OMP ATOMIC
     ntot = ntot + n
     !$OMP END PARALLEL
-    if (ntot > 0) write(*,*) '  Interpolated over NaN samples in ', id, ', n_tot = ', ntot
-
+    if (verb) then
+       if (ntot > 0) write(*,*) '  Interpolated over NaN samples in ', id, ', n_tot = ', ntot
+    end if
   end subroutine interpolate_nans
 
   subroutine normalize_gain(data_l2, nu_gain, alpha_gain, id)
@@ -1082,17 +1100,19 @@ contains
     
   end subroutine remove_pca_components
   
-  subroutine pca_filter_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem)
+  subroutine pca_filter_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
     implicit none
     type(Lx_struct),           intent(inout) :: data_l2
     integer(i4b),              intent(in)    :: n_pca_comp, pca_max_iter
     real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
+    logical(lgt),              intent(in)    :: verb
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
     real(dp)     :: eigenv, dotsum, amp, err 
     real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
     real(dp),     allocatable, dimension(:)   :: r, s, mys
     CHARACTER(LEN=128) :: number
     
+
     data_l2%n_pca_comp = n_pca_comp
     if (n_pca_comp == 0) return
 
@@ -1116,11 +1136,13 @@ contains
     do l = 1, n_pca_comp 
        err = 1.d0
        r(:) = sum(sum(sum(data_l2%tod, 2), 2), 2) !sum of all freqs
-       if (sum(r) == 0.d0) then
-          write(*,*) "PCA initialized with zero vector"
-       end if
-       if (sum(r) .ne. sum(r)) then
-          write(*,*) "NaN in initial PCA vector"
+       if (verb) then
+          if (sum(r) == 0.d0) then
+             write(*,*) "PCA initialized with zero vector"
+          end if
+          if (sum(r) .ne. sum(r)) then
+             write(*,*) "NaN in initial PCA vector"
+          end if
        end if
        iters = 0
        do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
@@ -1909,11 +1931,11 @@ contains
 
   end subroutine correct_missing_time_steps
 
-  subroutine initialize_fullres_frequency_mask(freqmaskfile, data)
+  subroutine initialize_fullres_frequency_mask(freqmaskfile, data, verb)
     implicit none
     character(len=*),                                intent(in)    :: freqmaskfile
     type(Lx_struct),                                 intent(inout) :: data
-
+    logical(lgt),                                    intent(in)    :: verb
     integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
     logical(lgt) :: first
     character(len=1024) :: line, val, equal
@@ -1937,7 +1959,9 @@ contains
        else
           read(line,*) freq, sb, det
           if (det == 0 .and. sb == 0 .and. freq == 0) then
-             write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             if (verb) then
+                write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             end if
              stop
           else if (det == 0 .and. sb == 0) then
              data%freqmask_full(freq,:,:) = 0.d0
@@ -1955,7 +1979,9 @@ contains
              data%freqmask_full(freq,sb,det) = 0.d0
           end if
           if (all(data%freqmask_full == 0)) then
-             write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             if (verb) then
+                write(*,*) 'ERROR: All frequencies removed by freqmask!'
+             end if
              stop
           end if
        end if
@@ -1969,12 +1995,12 @@ contains
     data%freqmask_reason = nint(1.d0 - data%freqmask_full)  ! give all masked frequency reason = 1
   end subroutine initialize_fullres_frequency_mask
 
-  subroutine postprocess_frequency_mask(nfreq, data, sid)
+  subroutine postprocess_frequency_mask(nfreq, data, sid, verb)
     implicit none
     integer(i4b),                                    intent(in)    :: sid, nfreq
     type(Lx_struct),                                 intent(inout) :: data
-
-
+    logical(lgt),                                    intent(in)    :: verb
+    
     integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
     logical(lgt) :: first
     character(len=1024) :: line, val, equal
@@ -1989,7 +2015,9 @@ contains
           do i = 1, nfreq_full
              if (data%freqmask_full(i,j,k) == 0.d0) cycle
              if (any(data%tod(:,i,j,k) .ne. data%tod(:,i,j,k))) then
-                write(*,fmt='(a,i8,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
+                if (verb) then
+                   write(*,fmt='(a,i8,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
+                end if
                 data%freqmask_full(i,j,k) = 0.d0
                 data%freqmask_reason(i,j,k) = 2
              end if
@@ -2064,7 +2092,7 @@ contains
                    tmax = size(data%time)
                 end if
                 el  = data%point_tel(2,tmin:tmax,k)
-                if (any(el == 0.d0)) write(*,*) k, l, j, i
+                if (any(el == 0.d0)) write(*,*) "El is zero!!!", k, l, j, i
                 dat = data%tod(tmin:tmax,j,l,k)
                 !write(*,*) tmin, tmax, 'min max'
                 call estimate_gain(el,dat,g)
@@ -2126,11 +2154,11 @@ contains
     end do
   end subroutine init_vanemask
 
-  subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys, is_sim)
+  subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys, is_sim, verb)
     implicit none
     character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
-    logical(lgt),                intent(in)       :: is_sim 
+    logical(lgt),                intent(in)       :: is_sim, verb 
     type(hdf_file)                                :: file
     real(dp)                                      :: mean_tod, P_hot, P_cold
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
@@ -2183,7 +2211,9 @@ contains
              end do
              if ((n_hot == 0) .or. (n_cold == 0)) then
                 data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
-                write(*,*) "no n_cold", i, j, k
+                if (verb) then
+                   write(*,*) "no n_cold", i, j, k
+                end if
              else
                 P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
                 P_cold = median(tod_cold(1:n_cold)) !P_cold / n_cold
