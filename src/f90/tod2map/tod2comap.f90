@@ -71,7 +71,7 @@ program tod2comap
      stop
   end if
   nscan = get_num_scans()
-  write(*,*) nscan
+  if (myid == 0) write(*,*) nscan
   !stop
   !allocate(tod(nscan))
   !nscan = 1
@@ -82,7 +82,7 @@ program tod2comap
   !alist%status = 0
 
   !if (myid==0) then
-     write(*,*) "Initialising mapmaker"
+     if (myid==0) write(*,*) "Initialising mapmaker"
      call initialize_mapmaker(map_scan, parfile, pinfo)
      call initialize_mapmaker(map_tot,  parfile, pinfo)
      call initialize_mapmaker(buffer,   parfile, pinfo)
@@ -127,10 +127,10 @@ program tod2comap
   end do
 
   !call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%nhit, buffer%nhit, size(map_tot%nhit), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%div, buffer%div, size(map_tot%div), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit, buffer%nhit, size(map_tot%nhit), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
 
   if (myid == 0) then
      map_tot%div  = buffer%div
