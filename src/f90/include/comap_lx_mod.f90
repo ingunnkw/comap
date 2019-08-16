@@ -113,10 +113,10 @@ contains
     call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
     call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
 
-    if (verb) then
-       write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
-    end if
-    data%amb_time = data%amb_time + 3.d0 /(24.d0*3600.d0)
+    ! if (verb) then
+    !    write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
+    ! end if
+    ! data%amb_time = data%amb_time + 3.d0 /(24.d0*3600.d0)
 
     ! Read feed information
     call read_hdf(file, "spectrometer/feeds",               data%pixels)
