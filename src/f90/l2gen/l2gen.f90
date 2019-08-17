@@ -220,8 +220,8 @@ program l2gen
 
            call free_lx_struct(data_l2_filter)
         end if
-        !write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
-        !'write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
+        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
+        write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
         if (verb) then
            write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
            if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
@@ -1690,6 +1690,7 @@ contains
     end if
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
+    data_out%freqmask_reason = data_in%freqmask_reason
     data_out%pixels        = data_in%pixels
     data_out%Tsys          = data_in%Tsys
     
@@ -2137,7 +2138,7 @@ contains
     i = 1 ! Counter for highres grid
     j = 1 ! Couner for lowres grid
     do j = 1, nsamp_lowres-1
-       if (data%amb_state(j) == 2 .or. data%amb_state(j) == 3) then
+       if (data%amb_state(j) == 1) then ! .or. data%amb_state(j) == 3) then
           mjd_start = data%amb_time(j)
           mjd_stop  = data%amb_time(j+1)
           if (mjd_start > data%time(nsamp_highres)) exit
@@ -2344,8 +2345,8 @@ contains
              interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
              if (is_sim) then
                 data_l2_fullres%tod(:,k,j,i)  = sim_tsys * data_l2_fullres%tod(:,k,j,i)
-                data_l2_fullres%Tsys(1,k,j,i) = sim_tsys
-                data_l2_fullres%Tsys(2,k,j,i) = sim_tsys
+                !data_l2_fullres%Tsys(1,k,j,i) = sim_tsys
+                !data_l2_fullres%Tsys(2,k,j,i) = sim_tsys
              else
                 mean_tod = mean(data_l1%tod(:,k,j,i))
                 tsys = (t_hot-t_cold)/(interp1d_P_hot/mean_tod-1.d0)
