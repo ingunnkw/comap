@@ -220,8 +220,8 @@ program l2gen
 
            call free_lx_struct(data_l2_filter)
         end if
-        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
-        write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
+!        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
+ !       write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
         if (verb) then
            write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
            if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
