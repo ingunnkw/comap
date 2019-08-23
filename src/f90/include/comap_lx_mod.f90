@@ -16,6 +16,7 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:)     :: nu          ! (freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod         ! (time, freq, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: tod_mean    ! (freq, sideband, detector)
+     real(sp),     allocatable, dimension(:,:,:)     :: sb_mean     ! (time, sideband, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: point_cel   ! Celestial; (RA/dec/psi, time, det)
      real(sp),     allocatable, dimension(:,:,:)     :: point_tel   ! Horizon; (az/el/dk, time, det)
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
@@ -43,6 +44,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:)         :: pca_eigv      ! eigenvalues of pca components (comp)
      real(sp),     allocatable, dimension(:,:)       :: acceptrate    ! fraction of freqs not masked (sb,det)
      real(sp),     allocatable, dimension(:,:,:,:)   :: diagnostics   ! various diagnostics used to make freqmask
+     real(dp),     allocatable, dimension(:,:,:,:,:) :: spike_data    ! spike and jump data (n_spikes,spike/jump,info) info = (amp,mjd,samp,sb,feed)
      real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
@@ -73,11 +75,13 @@ contains
     real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
-    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, npoint, nsb, ext4(4), ext1(1), numbad, temp_samp
+    integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, num_masked
+    integer(i4b)                           :: npoint, nsb, ext4(4), ext1(1), numbad, temp_samp
     logical(lgt)                           :: all, ok, init_
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
     real(dp),     allocatable, dimension(:)       :: buffer_1d
+    real(sp),     allocatable, dimension(:,:,:)   :: buffer_3d
     real(sp),     allocatable, dimension(:,:,:,:) :: buffer_4d
     all = .true.; if (present(only_point)) all = .not. only_point
     init_ = .true.; if (present(init)) init_ = init
@@ -86,13 +90,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "spectrometer/tod", ext4)
     nsamp_tot = ext4(1); nfreq = ext4(2) ; nsb = ext4(3); ndet = ext4(4)
-
-    call get_size_hdf(file, "hk/antenna0/env/ambientLoadTemp", ext1)
-    temp_samp = ext1(1)
-
-    allocate(data%t_hot(temp_samp))
-    allocate(data%amb_state(temp_samp))
-    allocate(data%amb_time(temp_samp))
+    
     allocate(data%point_tel(3,nsamp_tot,ndet))
     allocate(data%point_cel(3,nsamp_tot,ndet))
     allocate(data%pixels(ndet))
@@ -108,11 +106,7 @@ contains
     call read_hdf(file, "spectrometer/pixel_pointing/pixel_dec",           data%point_cel(2,:,:))
     data%point_cel(3,:,:) = 0.d0
 
-    ! Read ambient temp
-    call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
-    call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
-    call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
-
+    
     ! if (verb) then
     !    write(*,*) 'Warning: Adding 3 sec delay to amb_time!'
     ! end if
@@ -129,7 +123,7 @@ contains
     allocate(buffer_1d(nsamp_tot))
     if (all) allocate(buffer_int(nsamp_tot))
     if (all) allocate(buffer_4d(nsamp_tot,nfreq,nsb,ndet))
-
+    if (all) allocate(buffer_3d(nsamp_tot,nsb,ndet))
     ! Find number of samples at end of file with NaNs
     if (all) call read_hdf(file, "spectrometer/tod",  buffer_4d)
     if (present(freqmask)) then
@@ -137,14 +131,20 @@ contains
        ! Update frequency mask with channels that are all NaNs
        do i = 1, ndet
           do j = 1, nsb
+             num_masked = 0
              do k = 1, nfreq
-                !write(*,*) "hei", freqmask(k,j,i), k, j, i
                 if (freqmask(k,j,i) == 0.) cycle
                 numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
                 data%n_nan(k,j,i) = numbad
                 if (numbad > 0.1*nsamp_tot) then
+                   num_masked = num_masked + 1
                    if (verb) then
-                      write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
+                      if (num_masked < 5) then
+                         write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
+                      end if
+                      if (num_masked == 4) then
+                         write(*,*) "Suppressing NaN warnings for the rest of this sideband"
+                      end if
                    end if
                    freqmask(k,j,i) = 0.
                 end if
@@ -184,14 +184,40 @@ contains
     allocate(data%time(nsamp))
     if (all) allocate(data%tod(nsamp,nfreq,nsb,ndet))
     if (all) allocate(data%tod_mean(nfreq,nsb,ndet))
+    if (all) allocate(data%sb_mean(nsamp,nsb,ndet))
     if (all) allocate(data%flag(nsamp))
-
+    
+    call read_hdf(file, "spectrometer/band_average",  buffer_3d)
+    data%sb_mean      = buffer_3d(1:nsamp,:,:)
     call read_hdf(file, "spectrometer/MJD",           buffer_1d)
     data%time         = buffer_1d(1:nsamp)
     if (all) data%tod = buffer_4d(1:nsamp,:,:,:)
     data%mjd_start    = minval(data%time)
     data%samprate     = 1.d0 / (3600.d0*24.d0*(data%time(2)-data%time(1)))
     data%flag         = 0
+
+    ! tsys_stuff,  registers changed at time: 58712.03706
+    
+    if (data%time(1) > 58712.03706) then
+       call get_size_hdf(file, "hk/antenna0/vane/Tvane", ext1)
+    else
+       call get_size_hdf(file, "hk/antenna0/env/ambientLoadTemp", ext1)
+    end if
+    temp_samp = ext1(1)
+
+    allocate(data%t_hot(temp_samp))
+    allocate(data%amb_state(temp_samp))
+    allocate(data%amb_time(temp_samp))
+  
+    ! Read ambient temp
+    if (data%time(1) > 58712.0370603) then
+       call read_hdf(file, "hk/antenna0/vane/Tvane", data%t_hot)
+    else
+       call read_hdf(file, "hk/antenna0/env/ambientLoadTemp", data%t_hot)
+    end if
+    call read_hdf(file, "hk/antenna0/vane/state",          data%amb_state)
+    call read_hdf(file, "hk/antenna0/vane/utc",            data%amb_time)
+
     call close_hdf_file(file)
     deallocate(buffer_1d)
     if (all) deallocate(buffer_4d,buffer_int)
@@ -385,6 +411,7 @@ contains
     if(allocated(data%n_nan))         deallocate(data%n_nan)
     if(allocated(data%tod_poly))      deallocate(data%tod_poly)
     if(allocated(data%tod_mean))      deallocate(data%tod_mean)
+    if(allocated(data%sb_mean))       deallocate(data%sb_mean)
     if(allocated(data%pixels))        deallocate(data%pixels)
     if(allocated(data%var_fullres))   deallocate(data%var_fullres)
     if(allocated(data%pca_ampl))      deallocate(data%pca_ampl)
@@ -392,6 +419,7 @@ contains
     if(allocated(data%pca_eigv))      deallocate(data%pca_eigv)
     if(allocated(data%acceptrate))    deallocate(data%acceptrate)
     if(allocated(data%diagnostics))   deallocate(data%diagnostics)
+    if(allocated(data%spike_data))    deallocate(data%spike_data)
     if(allocated(data%cut_params))    deallocate(data%cut_params)
     if(allocated(data%t_hot))         deallocate(data%t_hot)
     if(allocated(data%amb_state))     deallocate(data%amb_state)
@@ -413,6 +441,7 @@ contains
     call write_hdf(file, "tod",               data%tod)
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point_tel",         data%point_tel)
+    call write_hdf(file, "sb_mean",           data%sb_mean)
     !call write_hdf(file, "flag",              data%flag)
     !write(*,*) "right before", data%Tsys(1, 1, 1, 1)
     call write_hdf(file, "Tsys",              data%Tsys)
@@ -437,6 +466,7 @@ contains
        call write_hdf(file, "pca_comp",       data%pca_comp)
        call write_hdf(file, "pca_eigv",       data%pca_eigv)
     end if
+    call write_hdf(file, "spike_data",        data%spike_data)
     call write_hdf(file, "mask_outliers",     data%mask_outliers)
     if (data%mask_outliers == 1) then
        call write_hdf(file, "acceptrate",     data%acceptrate)
@@ -613,6 +643,11 @@ contains
        allocate(lx_out%tod(size(lx_in%tod,1),size(lx_in%tod,2),size(lx_in%tod,3),size(lx_in%tod,4)))
        lx_out%tod = lx_in%tod
     end if
+
+    if(allocated(lx_in%sb_mean))         then  
+       allocate(lx_out%sb_mean(size(lx_in%sb_mean,1),size(lx_in%sb_mean,2),size(lx_in%sb_mean,3)))
+       lx_out%sb_mean = lx_in%sb_mean
+    end if
 !    write(*,*) "after tod"
     if(allocated(lx_in%point_tel))   then 
        allocate(lx_out%point_tel(size(lx_in%point_tel,1),size(lx_in%point_tel,2),size(lx_in%point_tel,3)))
@@ -687,6 +722,11 @@ contains
     if(allocated(lx_in%var_fullres))   then
        allocate(lx_out%var_fullres(size(lx_in%var_fullres,1),size(lx_in%var_fullres,2),size(lx_in%var_fullres,3)))
        lx_out%var_fullres = lx_in%var_fullres
+    end if
+
+    if(allocated(lx_in%spike_data))   then
+       allocate(lx_out%spike_data(size(lx_in%spike_data,1),size(lx_in%spike_data,2),size(lx_in%spike_data,3),size(lx_in%spike_data,4),size(lx_in%spike_data,5)))
+       lx_out%spike_data = lx_in%spike_data
     end if
     
     if(allocated(lx_in%pca_ampl))   then

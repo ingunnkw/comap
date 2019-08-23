@@ -172,6 +172,7 @@ program l2gen
            write(*,'(A, I8, 2A)') " Number of samples, observed patch: ", size(data_l2_fullres%time, 1), "  ", trim(scan%object)
            write(*,*) "Scan type: ", trim(scan%ss(k)%scanmode)
         end if
+        
         ! Normalize gain
         if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
            call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
@@ -203,6 +204,9 @@ program l2gen
            call polyfilter_TOD(data_l2_filter, bp_filter0)
            call update_status(status, 'polyfilter0')
 !           write(*,*) sum(data_l2_filter%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
+           
+           call find_spikes(data_l2_filter, verb)
+           call update_status(status, 'find_spikes')
         
            ! pca filter copied data
            call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
@@ -234,7 +238,11 @@ program l2gen
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
         call polyfilter_TOD(data_l2_fullres, bp_filter)
         call update_status(status, 'polyfilter')
-        
+
+        if (mask_outliers == 0) then
+           call find_spikes(data_l2_fullres, verb)
+           call update_status(status, 'find_spikes')
+        end if
         !call freq_filter_TOD(data_l2_fullres)
 
         ! pca filter after polyfilter
@@ -297,6 +305,131 @@ program l2gen
 
 contains
 
+  subroutine find_spikes(data_l2, verb)
+    implicit none
+    type(Lx_struct),     intent(inout) :: data_l2
+    logical(lgt),        intent(in)    :: verb
+    real(dp)        :: gamma, cutoff
+    integer(i4b)    :: i, j, k, nsamp, nfreq, nsb, ndet, is_spike, n_spikes(4)
+    real(dp), allocatable, dimension(:,:) :: ampsum
+    
+    nsamp       = size(data_l2%tod,1)
+    nfreq       = size(data_l2%freqmask_full,1)
+    nsb         = size(data_l2%tod,3)
+    ndet        = size(data_l2%tod,4)
+    
+    if (.not. allocated(data_l2%spike_data)) allocate(data_l2%spike_data(1000,4,nsb,ndet,3))
+    allocate(ampsum(nsb,ndet))
+    data_l2%spike_data(:,:,:,:,:) = 0.d0
+
+    n_spikes(:) = 0
+    gamma = 0.7d0
+    cutoff = 0.0015d0 * 8.d0
+    ampsum(:,:) = 0.d0
+
+    i = 0
+    do 
+       i = i+1
+       if (i > nsamp - 1) exit
+       do k = 1, ndet
+          if (.not. is_alive(k)) cycle
+          do j = 1, nsb
+             
+             ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
+                              
+             if (abs(ampsum(j,k)) > cutoff) then
+                ! write(*,*) "Spike at:", ampsum(j,k), j, k, i + 1, data_l2%tod_poly(i+1,0,j,k), data_l2%tod_poly(i,0,j,k)
+                call get_spike_data(data_l2,k,j,i+1,n_spikes)
+                ampsum(:,:) = 0.d0
+                i = i + 10
+             end if
+          end do
+       end do
+    end do
+    if (verb) then
+       write(*,*) "Found ", n_spikes(1), " spikes"
+       write(*,*) "Found ", n_spikes(2), " jumps"
+       write(*,*) "Found ", n_spikes(3), " anomalies"
+       write(*,*) "Found ", n_spikes(4), " edge spikes"
+    end if
+    deallocate(ampsum)
+  end subroutine find_spikes
+  
+  subroutine get_spike_data(data, k, j, i, n_spikes)
+    implicit none
+    type(Lx_struct),       intent(inout)     :: data
+    integer(i4b),          intent(in)        :: i, j, k
+    integer(i4b),          intent(inout)     :: n_spikes(4)
+    real(dp), allocatable, dimension(:,:,:)  :: fwd
+    real(dp)        :: gamma, cutoff
+    integer(i4b)    :: m, n, l, nsamp, nfreq, nsb, ndet, spike_type, max_ind,indices(3)
+    integer(i4b)    :: jump_mean_dur
+
+    nsamp       = size(data%tod,1)
+    nfreq       = size(data%freqmask_full,1)
+    nsb         = size(data%tod,3)
+    ndet        = size(data%tod,4)
+    
+    if ((i < 61) .or. (i > nsamp - 61)) then
+       spike_type = 4
+       n_spikes(spike_type) = n_spikes(spike_type) + 1
+       if (n_spikes(spike_type) .le. 1000) then
+!          write(*,*) n_spikes(spike_type), spike_type, j, k, i
+          data%spike_data(n_spikes(spike_type), spike_type, j, k, 1) = 1
+          data%spike_data(n_spikes(spike_type), spike_type, j, k, 2) = i
+          data%spike_data(n_spikes(spike_type), spike_type, j, k, 3) = data%time(i)
+       end if
+       return
+    end if
+    
+    gamma = 0.7d0
+    jump_mean_dur = 20
+    allocate(fwd(41,nsb,ndet))
+    
+    fwd(:,:,:) = 0.d0
+          
+    do n = 1, ndet
+       if (.not. is_alive(n)) cycle
+       do l = 1, nsb
+          do m = -20, 19
+             fwd(21 + m + 1,l,n) = fwd(21 + m,l,n) * gamma + data%tod_poly(i + m + 1,0,l,n) - data%tod_poly(i + m,0,l,n)
+          end do
+       end do
+    end do
+    indices = maxloc(abs(fwd(15:25,:,:)))
+    max_ind = i + indices(1) - 7
+    l = indices(2)
+    n = indices(3)
+    write(*,*) max_ind, l, n, fwd(max_ind - i + 21,l,n)
+
+    if (any(fwd(max_ind - i + 21:max_ind - i + 7 + 21,l,n) * sign(1.d0,fwd(max_ind - i + 21,l,n)) < -0.0015d0 * 2)) then
+       spike_type = 1
+    else if (abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
+         - mean(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
+         / abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind -10,l,n))) > 0.010d0) then
+       spike_type = 2                 
+    else    
+       spike_type = 3               
+    end if
+    n_spikes(spike_type) = n_spikes(spike_type) + 1
+          
+    do n = 1, ndet
+       if (.not. is_alive(n)) cycle
+       do l = 1, nsb
+          max_ind = i + maxloc(abs(fwd(15:25,l,n)), dim=1) - 7
+          !write(*,*) max_ind
+          if (n_spikes(spike_type) .le. 1000) then
+             data%spike_data(n_spikes(spike_type), spike_type, l, n, 1) = fwd(max_ind - i + 21,l,n)
+             data%spike_data(n_spikes(spike_type), spike_type, l, n, 2) = max_ind
+             data%spike_data(n_spikes(spike_type), spike_type, l, n, 3) = data%time(max_ind)
+          end if
+       end do
+    end do
+    
+
+    deallocate(fwd)
+  end subroutine get_spike_data
+
   subroutine transfer_diagnostics(data_l2_in, data_l2_out)
     implicit none
     type(Lx_struct),                            intent(in) :: data_l2_in
@@ -316,6 +449,9 @@ contains
     data_l2_out%diagnostics = data_l2_in%diagnostics
     if (.not. allocated(data_l2_out%cut_params)) allocate(data_l2_out%cut_params(size(data_l2_in%cut_params,1),size(data_l2_in%cut_params,2)))
     data_l2_out%cut_params = data_l2_in%cut_params
+    if (.not. allocated(data_l2_out%spike_data)) allocate(data_l2_out%spike_data(size(data_l2_in%spike_data,1),size(data_l2_in%spike_data,2),&
+            &size(data_l2_in%spike_data,3),size(data_l2_in%spike_data,4),size(data_l2_in%spike_data,5)))
+    data_l2_out%spike_data = data_l2_in%spike_data
     
     call free_lx_struct(data_l2_in)
 
@@ -1598,6 +1734,7 @@ contains
     allocate(data_l2%point_cel(3,nsamp_tot,ndet))
     allocate(data_l2%pixels(ndet))
     allocate(data_l2%tod_mean(nfreq, nsb, ndet))
+    allocate(data_l2%sb_mean(nsamp_tot, nsb, ndet))
     allocate(data_l2%freqmask(nfreq,nsb,ndet))
     allocate(data_l2%freqmask_full(size(data_l1%nu,1,1),nsb,ndet))
     allocate(data_l2%freqmask_reason(size(data_l1%nu,1,1),nsb,ndet))
@@ -1617,10 +1754,11 @@ contains
     data_l2%freqmask_full   = data_l1%freqmask_full
     data_l2%freqmask_reason = data_l1%freqmask_reason
     data_l2%Tsys            = 0.d0 !data_l1%Tsys
-    
+
     do j = 1, ndet
        if (.not. is_alive(j)) cycle
        do m = 1, nsb
+          data_l2%sb_mean(:,m,j) = data_l1%sb_mean(ind(1):ind(2),m,j)
           do n = 1, nfreq
              if (data_l2%freqmask_full(n,m,j) == 0) cycle
              data_l2%tod(:,n,m,j)    = data_l1%tod(ind(1):ind(2),n,m,j)
@@ -1662,6 +1800,7 @@ contains
     allocate(data_out%nu(numfreq_out,nsb,ndet))
     allocate(data_out%tod(nsamp_out, numfreq_out, nsb, ndet))
     allocate(data_out%tod_mean(numfreq_in, nsb, ndet))
+    allocate(data_out%sb_mean(size(data_in%time), nsb, ndet))
     allocate(data_out%point_tel(3,nsamp_out,ndet))
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
@@ -1688,11 +1827,21 @@ contains
     else
        data_out%mean_tp = 0.d0
     end if
+    if(allocated(data_in%spike_data))   then
+       allocate(data_out%spike_data(size(data_in%spike_data,1),&
+            &size(data_in%spike_data,2),size(data_in%spike_data,3),&
+            &size(data_in%spike_data,4),size(data_in%spike_data,5)))
+       data_out%spike_data = data_in%spike_data
+    end if
+    
+
     data_out%freqmask      = data_in%freqmask
     data_out%freqmask_full = data_in%freqmask_full
     data_out%freqmask_reason = data_in%freqmask_reason
     data_out%pixels        = data_in%pixels
     data_out%Tsys          = data_in%Tsys
+    data_out%sb_mean       = data_in%sb_mean
+!    data_out%spike_data    = data_in%spike_data
     
     data_out%n_pca_comp    = data_in%n_pca_comp
     if (data_in%n_pca_comp > 0) then
