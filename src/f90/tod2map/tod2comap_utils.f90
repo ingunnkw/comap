@@ -6,6 +6,7 @@ module tod2comap_utils
      real(dp)     :: samprate, Tsys
      integer(i4b) :: nsamp, ndet, nfreq, nsb
      real(dp)     :: fmin, fmax, df, mean_el, mean_az
+     integer(i4b), allocatable, dimension(:)   :: feeds                ! active feeds
      real(sp), allocatable, dimension(:,:,:)   :: freqmask             ! (freq, sb, det)
      real(dp), allocatable, dimension(:)       :: t                    ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
@@ -48,7 +49,8 @@ contains
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet))!, &
+         & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%feeds(tod%ndet) )
 
     allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
@@ -59,6 +61,7 @@ contains
     tod%point = data%point_cel ! call make_angles_safe(tod%point(1,:),maxang)
     tod%point_tel = data%point_tel
     !tod%g     = data%gain
+    tod%feeds  = data%pixels
     tod%sigma0 = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
@@ -130,6 +133,7 @@ contains
     if (allocated(tod%alpha))     deallocate(tod%alpha)
     if (allocated(tod%pixels))    deallocate(tod%pixels)
     if (allocated(tod%freqmask))  deallocate(tod%freqmask)
+    if (allocated(tod%feeds))     deallocate(tod%feeds)
 
   end subroutine free_tod_type
 

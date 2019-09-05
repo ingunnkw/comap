@@ -30,8 +30,8 @@ program tod2comap
   type(patch_info)      :: pinfo
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
-  character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system
-  character(len=8)      :: scanid
+  character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
+  character(len=6)      :: obsid
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq
 
   integer(i4b)          :: myid, nproc, ierr, root
@@ -60,9 +60,9 @@ program tod2comap
   binning_split = .true.
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
   !call get_parameter()
-  call initialize_scan_mod(parfile, object)
   call initialize_comap_patch_mod(parfile)
   call initialize_detector_mod(parfile)
+  call initialize_scan_mod(parfile, object)
   !call initialize_accept_list(trim(acceptfile), alist)
   found = get_patch_info(object, pinfo)
   if (.not. found) then
@@ -82,12 +82,23 @@ program tod2comap
   !alist%status = 0
 
   !if (myid==0) then
-     if (myid==0) write(*,*) "Initialising mapmaker"
-     call initialize_mapmaker(map_scan, parfile, pinfo)
-     call initialize_mapmaker(map_tot,  parfile, pinfo)
-     call initialize_mapmaker(buffer,   parfile, pinfo)
-     call nullify_map_type(map_tot)
+  if (myid==0) write(*,*) "Initialising mapmaker"
+  call initialize_mapmaker(map_scan, parfile, pinfo)
+  call initialize_mapmaker(map_tot,  parfile, pinfo)
+  call initialize_mapmaker(buffer,   parfile, pinfo)
+  call nullify_map_type(map_tot)
   !end if
+
+
+  !write(*,*) 'Making hitmap'
+  !prefix = trim(pre) // trim(object)
+  !l1file = '/mn/stornext/d16/cmbco/comap/pathfinder/ovro/2019-07/comap-0006973-2019-07-19-001914.hd5'
+  !call l12hitmap(trim(l1file), map_tot, parfile, pinfo)
+  !write(*,*) 'writing map', trim(prefix)
+  !call output_map_h5(trim(prefix), map_tot)
+  !call mpi_finalize(ierr)
+  !stop
+
 
 
   ! This loop currently requiers that all scans are of the same patch
@@ -96,10 +107,12 @@ program tod2comap
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
 
+     call nullify_map_type(map_scan)
+
      ! Get TOD / read level 2 file
      nsub = scan%nsub
-     do j = 2, nsub-2
-        write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
+     do j = 2, nsub-1
+        !write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
         filename = scan%ss(j)%l2file
 
         !write(*,*) trim(filename)
@@ -108,20 +121,29 @@ program tod2comap
 
         call get_tod(trim(filename), tod, parfile)
 
-        call int2string(scan%ss(j)%id, scanid)
-        write(*,*) 'scan', scanid
+        !call int2string(scan%ss(j)%id, scanid)
+        !write(*,*) 'scan', scanid
 
-        call nullify_map_type(map_scan)
+        !call nullify_map_type(map_scan)
         call time2pix(tod, map_scan, parfile, pinfo)
         call time2pix(tod, map_tot, parfile, pinfo)
-        write(*,*) myid, "making maps, scan", i
+        write(*,*) myid, "making maps, scan", i, 'subscan', j
         call binning(map_tot, map_scan, tod, i, parfile, pinfo)
-        call finalize_scan_binning(map_scan)
-        prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
-        call output_submap_h5(trim(prefix), map_scan)
-        !call free_map_type(map_scan)
-        call free_tod_type(tod)
+        !call finalize_scan_binning(map_scan)
+        !prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
+        !call output_submap_h5(trim(prefix), map_scan)
+        !!call free_map_type(map_scan)
+        !call free_tod_type(tod)
      end do
+
+     call int2string(scan%id, obsid)
+     call finalize_scan_binning(map_scan)
+     prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
+     call output_submap_h5(trim(prefix), map_scan)
+     !call free_map_type(map_scan)
+     call free_tod_type(tod)
+
+     
 
 
   end do
