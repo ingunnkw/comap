@@ -317,6 +317,8 @@ contains
     !   allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
     !   call read_hdf(file, "tod_poly",         data%tod_poly)
     !end if
+    call get_size_hdf(file, "pix2ind", ext)
+    allocate(data%pixels(ndet), data%pix2ind(ext(1)))
     call read_hdf(file, "pixels",           data%pixels)
     call read_hdf(file, "pix2ind",          data%pix2ind)
     allocate(data%var_fullres(nfreq_full,nsb,ndet))
