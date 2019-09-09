@@ -31,7 +31,6 @@ program l2gen
   type(status_file)    :: status
   type(patch_info)     :: pinfo
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
-
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
@@ -87,14 +86,14 @@ program l2gen
      write(*,fmt="(i3,a,i10,a)") myid, " processing obsid ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
      call update_status(status, 'scan_start')
 
+     ! Read in Level 1 file
+     call wall_time(t1)
+     call read_l1_file(scan%l1file, data_l1, scan%id, verb, init=.false.)
+
      ! Initialize frequency mask
      call initialize_fullres_frequency_mask(freqmaskfile, data_l1, verb)
      call update_status(status, 'freq_mask1')
-
-     ! Read in Level 1 file
-     call wall_time(t1)
-     call read_l1_file(scan%l1file, data_l1, scan%id, verb, freqmask=data_l1%freqmask_full, init=.false.)
-     data_l1%tod(:,:,:,20) = 0.d0
+     
      call update_status(status, 'read_l1')
      if (size(data_l1%tod,1) <100) then
         write(*,*) 'Too few samples in ', scan%id
@@ -181,7 +180,8 @@ program l2gen
 
         if (rem_el) then
            ! Remove elevation gain
-           if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster')) then 
+           if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster') &
+                .or. (scan%ss(k)%scanmode == 'liss')) then 
               if (verb) then
                  write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
               end if
@@ -227,7 +227,10 @@ program l2gen
 !        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
  !       write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
         if (verb) then
-           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, sum(data_l2_fullres%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
+           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, &
+                & sum(data_l2_fullres%freqmask_full) &
+                & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
+                & / 4.d0 / 1024.d0 
            if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
               write(*,*) "All channels masked! Scan: ", scan%ss(k)%id
               cycle
@@ -266,7 +269,7 @@ program l2gen
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
         ! Apply absolute calibration
-        call calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys)
+        call calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys, verb)
         
         if (verb) then
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
@@ -305,6 +308,52 @@ program l2gen
 
 contains
 
+
+  ! subroutine test_fft()
+  !   implicit none
+    
+  !   integer(i4b) :: i, j, k, l, nomp, nsamp, nfreq, nsb, ndet, err
+  !   integer*8    :: plan_fwd, plan_back
+  !   real(dp)     :: samprate, nu
+  !   real(sp),     allocatable, dimension(:) :: dt, tod
+  !   complex(spc), allocatable, dimension(:) :: dv
+
+  !   nsamp       = 1000
+  !   samprate    = 50.d0    
+  !   n           = nsamp+1
+
+  !   ! Set up OpenMP environment and FFTW plans
+  !   nomp = 1
+  !   call sfftw_init_threads(err)
+  !   call sfftw_plan_with_nthreads(nomp)
+
+  !   allocate(dt(2*nsamp), dv(0:n-1))
+  !   call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
+  !   call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
+  !   deallocate(dt, dv)
+
+  !   allocate(dt(2*nsamp), dv(0:n-1), tod(nsamp))
+  !   tod = 0.d0
+  !   dt(1:nsamp)            = tod(:)
+  !   dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+  !   call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+  !   ! Apply lowpass filter
+  !   do l = 0, n-1
+  !      nu = ind2freq(l+1, samprate, n)
+  !      dv(l) = sqrt(2.d0 * nsamp) * rand_gauss(rng_handle) !dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
+  !   end do
+    
+  !   call sfftw_execute_dft_c2r(plan_back, dv, dt)
+  !   dt = dt / (2*nsamp)
+  !   write(*,*) variance(dt), sqrt(variance(dt)), variance(dt) 
+  !   deallocate(dt, dv)
+    
+  !   call sfftw_destroy_plan(plan_fwd)
+  !   call sfftw_destroy_plan(plan_back)
+
+  ! end subroutine test_fft
+
+
   subroutine find_spikes(data_l2, verb)
     implicit none
     type(Lx_struct),     intent(inout) :: data_l2
@@ -332,9 +381,9 @@ contains
        i = i+1
        if (i > nsamp - 1) exit
        do k = 1, ndet
-          if (.not. is_alive(k)) cycle
+          if (.not. is_alive(data_l2%pixels(k))) cycle
           do j = 1, nsb
-             
+             if ((isnan(data_l2%tod_poly(i+1,0,j,k))) .or. (isnan(data_l2%tod_poly(i,0,j,k)))) cycle
              ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
                               
              if (abs(ampsum(j,k)) > cutoff) then
@@ -389,7 +438,7 @@ contains
     fwd(:,:,:) = 0.d0
           
     do n = 1, ndet
-       if (.not. is_alive(n)) cycle
+       if (.not. is_alive(data%pixels(n))) cycle
        do l = 1, nsb
           do m = -20, 19
              fwd(21 + m + 1,l,n) = fwd(21 + m,l,n) * gamma + data%tod_poly(i + m + 1,0,l,n) - data%tod_poly(i + m,0,l,n)
@@ -404,17 +453,23 @@ contains
 
     if (any(fwd(max_ind - i + 21:max_ind - i + 7 + 21,l,n) * sign(1.d0,fwd(max_ind - i + 21,l,n)) < -0.0015d0 * 2)) then
        spike_type = 1
-    else if (abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
-         - mean(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
-         / abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind -10,l,n))) > 0.010d0) then
-       spike_type = 2                 
+    else if (.not. any(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n) &
+         /= data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))) then 
+       if (abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
+            - mean(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
+            / max(abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))), 1.d-6) > 0.010d0) then
+          spike_type = 2                 
+       else
+          spike_type = 3
+       end if
+       
     else    
        spike_type = 3               
     end if
     n_spikes(spike_type) = n_spikes(spike_type) + 1
           
     do n = 1, ndet
-       if (.not. is_alive(n)) cycle
+       if (.not. is_alive(data%pixels(n))) cycle
        do l = 1, nsb
           max_ind = i + maxloc(abs(fwd(15:25,l,n)), dim=1) - 7
           !write(*,*) max_ind
@@ -622,7 +677,7 @@ contains
     end if
 
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -668,7 +723,7 @@ contains
     if (mask_edge_corrs) then
        edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
        do i = 1, ndet
-          if (.not. is_alive(i)) cycle
+          if (.not. is_alive(data_l2%pixels(i))) cycle
           do k = 1, nfreq
              reason = 40
              j = 1
@@ -723,7 +778,7 @@ contains
 !    allocate(box_offsets(3), prod_offsets(3))
     
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do o = 1, nsb / 2
           corrs = 0.d0
           !$OMP PARALLEL PRIVATE(k,l,p,q,j,m,n,corr)
@@ -900,7 +955,7 @@ contains
 
     ! Hard cuts
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -923,7 +978,7 @@ contains
 
     ! convert to relative variance
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -946,7 +1001,7 @@ contains
     allocate(subt(nfreq-1))
   
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -968,7 +1023,7 @@ contains
 !    write(*,*) std_median, median
     ! Mask outlier frequencies
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              ! cut on neighbours
@@ -1013,7 +1068,7 @@ contains
        end do
     end do
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
@@ -1152,7 +1207,7 @@ contains
 
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        !write(*,*) '    Normalizing gains for det = ', i
        do j = 1, nsb
           !$OMP PARALLEL PRIVATE(k,l,dt,dv,nu)
@@ -1224,7 +1279,7 @@ contains
        comp_std = sqrt(sum(data_l2_out%pca_comp(:,l) ** 2) / nsamp - (sum(data_l2_out%pca_comp(:,l)) / nsamp) ** 2)
        
        do i = 1, ndet
-          if (.not. is_alive(i)) cycle
+          if (.not. is_alive(data_l2_out%pixels(i))) cycle
           do j = 1, nsb
              do k = 1, nfreq
                 if (data_l2_out%freqmask_full(k,j,i) == 0.d0) cycle
@@ -1289,7 +1344,7 @@ contains
           !$OMP DO SCHEDULE(guided)
           do k = 1, nfreq
              do i = 1, ndet
-                if (.not. is_alive(i)) cycle
+                if (.not. is_alive(data_l2%pixels(i))) cycle
                 do j = 1, nsb
                    if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle   
                    dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
@@ -1321,7 +1376,7 @@ contains
        !$OMP DO SCHEDULE(guided)
        do k = 1, nfreq
           do i = 1, ndet
-             if (.not. is_alive(i)) cycle
+             if (.not. is_alive(data_l2%pixels(i))) cycle
              do j = 1, nsb
                 if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
                 data_l2%pca_ampl(k,j,i,l) = sum(r(:) * data_l2%tod(:,k,j,i))
@@ -1375,7 +1430,7 @@ contains
     end do
 
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           !write(*,*) 'Polyfiltering det, sb = ', i, j
 
@@ -1465,7 +1520,7 @@ contains
     nu_knee   = 1 / 4.d9    ! 1 / Hz
     alpha     = -4.d0
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2%pixels(i))) cycle
        do j = 1, nsb
           !!$OMP PARALLEL PRIVATE(k,l,m,mean_val,dt,dv,nu)
           allocate(dt(2*nfreq), dv(0:n-1))
@@ -1733,6 +1788,7 @@ contains
     allocate(data_l2%point_tel(3,nsamp_tot,ndet))
     allocate(data_l2%point_cel(3,nsamp_tot,ndet))
     allocate(data_l2%pixels(ndet))
+    allocate(data_l2%pix2ind(size(data_l1%pix2ind,1)))
     allocate(data_l2%tod_mean(nfreq, nsb, ndet))
     allocate(data_l2%sb_mean(nsamp_tot, nsb, ndet))
     allocate(data_l2%freqmask(nfreq,nsb,ndet))
@@ -1747,6 +1803,7 @@ contains
     data_l2%samprate        = data_l1%samprate
     data_l2%nu              = data_l1%nu
     data_l2%pixels          = data_l1%pixels
+    data_l2%pix2ind         = data_l1%pix2ind
     data_l2%point_tel       = data_l1%point_tel(:,ind(1):ind(2),:)
     data_l2%point_cel       = data_l1%point_cel(:,ind(1):ind(2),:)
     data_l2%time            = data_l1%time(ind(1):ind(2))
@@ -1756,7 +1813,7 @@ contains
     data_l2%Tsys            = 0.d0 !data_l1%Tsys
 
     do j = 1, ndet
-       if (.not. is_alive(j)) cycle
+       if (.not. is_alive(data_l2%pixels(j))) cycle
        do m = 1, nsb
           data_l2%sb_mean(:,m,j) = data_l1%sb_mean(ind(1):ind(2),m,j)
           do n = 1, nfreq
@@ -1822,6 +1879,7 @@ contains
        data_out%cut_params    = data_in%cut_params
     end if
     allocate(data_out%pixels(ndet))
+    allocate(data_out%pix2ind(size(data_in%pix2ind,1)))
     if (allocated(data_in%mean_tp)) then
        data_out%mean_tp = data_in%mean_tp
     else
@@ -1839,6 +1897,7 @@ contains
     data_out%freqmask_full = data_in%freqmask_full
     data_out%freqmask_reason = data_in%freqmask_reason
     data_out%pixels        = data_in%pixels
+    data_out%pix2ind       = data_in%pix2ind
     data_out%Tsys          = data_in%Tsys
     data_out%sb_mean       = data_in%sb_mean
 !    data_out%spike_data    = data_in%spike_data
@@ -1855,7 +1914,7 @@ contains
     end if
     ! Make angles safe for averaging
     do j = 1, ndet
-       if (.not. is_alive(j)) cycle
+       if (.not. is_alive(data_in%pixels(j))) cycle
        call make_angles_safe(data_in%point_tel(1,:,j), real(360.d0,sp)) ! Phi
        call make_angles_safe(data_in%point_tel(3,:,j), real(360.d0,sp)) ! Psi
        call make_angles_safe(data_in%point_cel(1,:,j), real(360.d0,sp)) ! Phi
@@ -1867,7 +1926,7 @@ contains
 !    open(58,file='freqmask_2036.dat')
     do k = 1, ndet
        if (nsamp_out == 0) cycle
-       if (.not. is_alive(k)) cycle
+       if (.not. is_alive(data_out%pixels(k))) cycle
        do j = 1, nsb
           data_out%tod_mean(:,j,k) = data_in%tod_mean(:,j,k)
           do i = 1, size(data_in%nu,1)
@@ -1906,7 +1965,7 @@ contains
        do j = 1, nsb
           do k = 1, numfreq_out
              do l = 1, ndet           ! Time-ordered data
-                if (.not. is_alive(l)) cycle
+                if (.not. is_alive(data_out%pixels(l))) cycle
                 data_out%nu(k,j,l)    = mean(data_in%nu((k-1)*dnu+1:k*dnu,j,l)) ! Frequency
                 data_out%tod(i,k,j,l) = 0.d0
                 weight                = 0.d0
@@ -1938,7 +1997,7 @@ contains
     data_out%Tsys_lowres = 0.d0
     ! Calculate properly weighted lowres tsys
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_out%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, numfreq_out
              weight = 0.d0
@@ -1969,7 +2028,7 @@ contains
     if (data_out%polyorder >= 0) then
        allocate(data_out%tod_poly(nsamp_out, 0:data_out%polyorder, nsb, ndet))
        do l = 1, ndet           
-          if (.not. is_alive(l)) then
+          if (.not. is_alive(data_out%pixels(l))) then
              data_out%tod_poly(:,:,:,l) = 0.d0
              cycle
           end if
@@ -2086,11 +2145,12 @@ contains
     character(len=*),                                intent(in)    :: freqmaskfile
     type(Lx_struct),                                 intent(inout) :: data
     logical(lgt),                                    intent(in)    :: verb
-    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
+    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr, max_det
     logical(lgt) :: first
     character(len=1024) :: line, val, equal
 
-    ndet = get_num_dets()
+    max_det = get_num_dets()
+    ndet = size(data%tod,4)
     nsb  = get_num_sideband()
     unit = getlun()
     open(unit, file=trim(freqmaskfile), recl=1024)
@@ -2118,15 +2178,15 @@ contains
           else if (det == 0 .and. freq == 0) then
              data%freqmask_full(:,sb,:) = 0.d0
           else if (sb == 0 .and. freq == 0) then
-             data%freqmask_full(:,:,det) = 0.d0
+             data%freqmask_full(:,:,data%pix2ind(det)) = 0.d0
           else if (det == 0) then
              data%freqmask_full(freq,sb,:) = 0.d0
           else if (sb == 0) then
-             data%freqmask_full(freq,:,det) = 0.d0
+             data%freqmask_full(freq,:,data%pix2ind(det)) = 0.d0
           else if (freq == 0) then
-             data%freqmask_full(:,sb,det) = 0.d0
+             data%freqmask_full(:,sb,data%pix2ind(det)) = 0.d0
           else 
-             data%freqmask_full(freq,sb,det) = 0.d0
+             data%freqmask_full(freq,sb,data%pix2ind(det)) = 0.d0
           end if
           if (all(data%freqmask_full == 0)) then
              if (verb) then
@@ -2140,7 +2200,7 @@ contains
 99  close(unit)
 
     do k = 1, ndet
-       if (.not. is_alive(k)) data%freqmask_full(:,:,k) = 0.d0
+       if (.not. is_alive(data%pixels(k))) data%freqmask_full(:,:,k) = 0.d0
     end do
     data%freqmask_reason = nint(1.d0 - data%freqmask_full)  ! give all masked frequency reason = 1
   end subroutine initialize_fullres_frequency_mask
@@ -2155,7 +2215,7 @@ contains
     logical(lgt) :: first
     character(len=1024) :: line, val, equal
 
-    ndet       = get_num_dets()
+    ndet       = size(data%tod,4) !get_num_dets()
     nsb        = get_num_sideband()
     nfreq_full = size(data%freqmask_full,1)
 
@@ -2175,7 +2235,7 @@ contains
        end do
     end do
 
-    ! Downgrade mask                                                                                                                                                                                                              
+    ! Downgrade mask                      
     allocate(data%freqmask(nfreq,nsb,ndet))
     dfreq = nfreq_full/nfreq
     if (dfreq == 1) then
@@ -2190,6 +2250,12 @@ contains
           end do
        end do
     end if
+    
+    do i = 1, ndet
+       if (.not. is_alive(data%pixels(i))) then
+          data%tod(:,:,:,i) = 0.d0
+       end if
+    end do
 
   end subroutine postprocess_frequency_mask
 
@@ -2232,7 +2298,7 @@ contains
     !$OMP DO SCHEDULE(guided)    
     do j = 1, nfreq
        do k = 1, ndet
-          if (.not. is_alive(k)) cycle
+          if (.not. is_alive(data%pixels(k))) cycle
           do l = 1, nsb
              if (data%freqmask_full(j,l,k) == 0.d0) cycle
              do i = 1, n
@@ -2335,7 +2401,7 @@ contains
     call init_vanemask(data, vanemask, tsys_ind)
 
     do i=1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data%pixels(i))) cycle
        do j=1, nsb
           do k=1, nfreq_fullres
              if (data%freqmask_full(k,j,i) == 0.d0) cycle
@@ -2413,7 +2479,7 @@ contains
     call init_vanemask(data, vanemask, tsys_ind)
 
     do i=1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data%pixels(i))) cycle
        do j=1, nsb
           do k=1, nfreq_fullres
              if (data%freqmask_full(k,j,i) == 0.d0) cycle
@@ -2465,26 +2531,27 @@ contains
   end subroutine compute_Tsys_per_tp
 
 
-  subroutine calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys)
+  subroutine calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys, verb)
     implicit none
     type(lx_struct), intent(in)    :: data_l1
     type(lx_struct), intent(inout) :: data_l2_fullres
     real(dp),        intent(in)    :: sim_tsys
     real(dp),    intent(in)        :: tsys_time(2)
-    logical(lgt), intent(in)       :: is_sim 
+    logical(lgt), intent(in)       :: is_sim, verb
     real(dp)                       :: interp1d_P_hot, mean_tod, y0, y1, x0, x1, x, scan_time
     real(dp)                       :: t_cold, t_hot, tsys
-    integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp
+    integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp, n_print
     l2_nsamp = size(data_l2_fullres%tod, 1)
     nfreq    = size(data_l1%tod,2)
     nsb      = size(data_l1%tod,3)
     ndet     = size(data_l1%tod,4)
     t_cold = 2.73
     t_hot = mean(data_l1%t_hot)/100 + 273.15
-
+    
+    n_print = 0
     ! Interpolate Tsys to current time for each detector                                                        
     do i = 1, ndet
-       if (.not. is_alive(i)) cycle
+       if (.not. is_alive(data_l2_fullres%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2_fullres%freqmask_full(k,j,i) == 0.d0) cycle
@@ -2492,10 +2559,20 @@ contains
              x0 = tsys_time(1); x1 = tsys_time(2)
              y0 = data_l1%Tsys(1,k,j,i); y1 = data_l1%Tsys(2,k,j,i)
              interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
+             mean_tod = mean(data_l1%tod(:,k,j,i))  !!!! should be mean over scan, not obsid ???
              if (is_sim) then
                 data_l2_fullres%tod(:,k,j,i)  = sim_tsys * data_l2_fullres%tod(:,k,j,i)
                 !data_l2_fullres%Tsys(1,k,j,i) = sim_tsys
                 !data_l2_fullres%Tsys(2,k,j,i) = sim_tsys
+             else if (interp1d_P_hot == mean_tod) then
+                if ((verb) .and. (n_print < 4)) then
+                   n_print = n_print + 1
+                   write(*,*) "P_hot = P_cold !!", interp1d_P_hot == mean_tod, i, j, k
+                end if
+                tsys = 100.d0 ! (t_hot-t_cold)/(interp1d_P_hot/mean_tod-1.d0)
+                data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
+                data_l2_fullres%Tsys(1,k,j,i) = tsys
+                data_l2_fullres%Tsys(2,k,j,i) = tsys
              else
                 mean_tod = mean(data_l1%tod(:,k,j,i))
                 tsys = (t_hot-t_cold)/(interp1d_P_hot/mean_tod-1.d0)

@@ -20,7 +20,8 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: point_cel   ! Celestial; (RA/dec/psi, time, det)
      real(sp),     allocatable, dimension(:,:,:)     :: point_tel   ! Horizon; (az/el/dk, time, det)
      integer(i4b), allocatable, dimension(:)         :: flag        ! Status flag per time sample
-     integer(i4b), allocatable, dimension(:)         :: pixels      ! Active pixels/detectors
+     integer(i4b), allocatable, dimension(:)         :: pixels      ! Active pixels/detectors (i.e. ind2pix)
+     integer(i4b), allocatable, dimension(:)         :: pix2ind     ! Which pixel does ind corresp. to
      integer(i4b), allocatable, dimension(:,:,:)     :: n_nan       ! number of nan values for each frequency
      real(dp),     allocatable, dimension(:,:,:,:)   :: Tsys        ! (start/stop or middle, freq, sb,detector)
      real(dp),     allocatable, dimension(:)         :: t_hot       ! Ambient temperature in K
@@ -72,11 +73,11 @@ contains
     integer(i4b),     intent(in)           :: id
     logical(lgt),     intent(in), optional :: only_point, init
     logical(lgt),     intent(in)           :: verb
-    real(sp), dimension(:,:,:), intent(inout), optional :: freqmask
+    real(sp), dimension(:,:,:), intent(inout), optional :: freqmask  ! should not be used
     type(lx_struct)                        :: data
     type(hdf_file)                         :: file
     integer(i4b)                           :: i, j, k, l, nsamp, nsamp_tot, nfreq, ndet, num_masked
-    integer(i4b)                           :: npoint, nsb, ext4(4), ext1(1), numbad, temp_samp
+    integer(i4b)                           :: npoint, nsb, ext4(4), ext1(1), numbad, temp_samp, maxdet
     logical(lgt)                           :: all, ok, init_
     real(dp)                               :: t1, t2
     integer(i4b), allocatable, dimension(:)       :: buffer_int
@@ -118,6 +119,12 @@ contains
     do i = 2, ndet
        data%nu(:,:,i) = data%nu(:,:,1)
     end do
+    maxdet = maxval(data%pixels(:))
+    allocate(data%pix2ind(maxdet))
+    data%pix2ind(:) = 0
+    do i = 1, ndet
+       data%pix2ind(data%pixels(i)) = i
+    end do
 
     ! Do elements that may have NaNs
     allocate(buffer_1d(nsamp_tot))
@@ -126,56 +133,100 @@ contains
     if (all) allocate(buffer_3d(nsamp_tot,nsb,ndet))
     ! Find number of samples at end of file with NaNs
     if (all) call read_hdf(file, "spectrometer/tod",  buffer_4d)
-    if (present(freqmask)) then
-       allocate(data%n_nan(nfreq,nsb,ndet))
-       ! Update frequency mask with channels that are all NaNs
+    ! if (present(freqmask)) then
+    !    allocate(data%n_nan(nfreq,nsb,ndet))
+    !    ! Update frequency mask with channels that are all NaNs
+    !    do i = 1, ndet
+    !       do j = 1, nsb
+    !          num_masked = 0
+    !          do k = 1, nfreq
+    !             if (freqmask(k,j,i) == 0.) cycle
+    !             numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
+    !             data%n_nan(k,j,i) = numbad
+    !             if (numbad > 0.1*nsamp_tot) then
+    !                num_masked = num_masked + 1
+    !                if (verb) then
+    !                   if (num_masked < 5) then
+    !                      write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, data%pixels(i), j, k
+    !                   end if
+    !                   if (num_masked == 4) then
+    !                      write(*,*) "Suppressing NaN warnings for the rest of this sideband"
+    !                   end if
+    !                end if
+    !                freqmask(k,j,i) = 0.
+    !             end if
+    !          end do
+    !       end do
+    !    end do
+
+    !    ! Trim end for NaNs
+    !    nsamp = nsamp_tot
+    !    do while (nsamp > 0)
+    !       ok = .true.
+    !       do i = 1, ndet
+    !          do j = 1, nsb
+    !             do k = 1, nfreq
+    !                if (freqmask(k,j,i) == 0.) cycle
+    !                if (buffer_4d(nsamp,k,j,i) .ne. buffer_4d(nsamp,k,j,i)) then
+    !                   ok = .false.
+    !                   exit
+    !                end if
+    !             end do
+    !          end do
+    !       end do
+    !       if (ok) then
+    !          exit
+    !       else
+    !          nsamp = nsamp-1
+    !       end if
+    !    end do
+    ! else
+    !    nsamp = nsamp_tot
+    ! end if
+    allocate(data%n_nan(nfreq,nsb,ndet))
+    ! Update frequency mask with channels that are all NaNs
+    do i = 1, ndet
+       do j = 1, nsb
+          num_masked = 0
+          do k = 1, nfreq
+             numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
+             data%n_nan(k,j,i) = numbad
+             ! if (numbad > 0.1*nsamp_tot) then
+             !    num_masked = num_masked + 1
+             !    if (verb) then
+             !       if (num_masked < 5) then
+             !          write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, data%pixels(i), j, k
+             !       end if
+             !       if (num_masked == 4) then
+             !          write(*,*) "Suppressing NaN warnings for the rest of this sideband"
+             !       end if
+             !    end if
+             ! end if
+          end do
+       end do
+    end do
+
+    ! Trim end for NaNs
+    nsamp = nsamp_tot
+    do while (nsamp > nsamp_tot - 5)
+       ok = .true.
        do i = 1, ndet
           do j = 1, nsb
-             num_masked = 0
              do k = 1, nfreq
-                if (freqmask(k,j,i) == 0.) cycle
-                numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
-                data%n_nan(k,j,i) = numbad
-                if (numbad > 0.1*nsamp_tot) then
-                   num_masked = num_masked + 1
-                   if (verb) then
-                      if (num_masked < 5) then
-                         write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, i, j, k
-                      end if
-                      if (num_masked == 4) then
-                         write(*,*) "Suppressing NaN warnings for the rest of this sideband"
-                      end if
-                   end if
-                   freqmask(k,j,i) = 0.
+                if (buffer_4d(nsamp,k,j,i) .ne. buffer_4d(nsamp,k,j,i)) then
+                   ok = .false.
+                   exit
                 end if
              end do
           end do
        end do
+       if (ok) then
+          exit
+       else
+          nsamp = nsamp-1
+       end if
+    end do
 
-       ! Trim end for NaNs
-       nsamp = nsamp_tot
-       do while (nsamp > 0)
-          ok = .true.
-          do i = 1, ndet
-             do j = 1, nsb
-                do k = 1, nfreq
-                   if (freqmask(k,j,i) == 0.) cycle
-                   if (buffer_4d(nsamp,k,j,i) .ne. buffer_4d(nsamp,k,j,i)) then
-                      ok = .false.
-                      exit
-                   end if
-                end do
-             end do
-          end do
-          if (ok) then
-             exit
-          else
-             nsamp = nsamp-1
-          end if
-       end do
-    else
-       nsamp = nsamp_tot
-    end if
     if (verb) then
        if (nsamp /= nsamp_tot) then
           write(*,*) '  Number of NaN elements in ', id, ' = ', nsamp_tot-nsamp, ' of ', nsamp_tot
@@ -195,7 +246,7 @@ contains
     data%mjd_start    = minval(data%time)
     data%samprate     = 1.d0 / (3600.d0*24.d0*(data%time(2)-data%time(1)))
     data%flag         = 0
-
+    
     ! tsys_stuff,  registers changed at time: 58712.03706
     
     if (data%time(1) > 58712.03706) then
@@ -267,6 +318,7 @@ contains
     !   call read_hdf(file, "tod_poly",         data%tod_poly)
     !end if
     call read_hdf(file, "pixels",           data%pixels)
+    call read_hdf(file, "pix2ind",          data%pix2ind)
     allocate(data%var_fullres(nfreq_full,nsb,ndet))
     call read_hdf(file, "var_fullres",      data%var_fullres)
     call read_hdf(file, "n_pca_comp",         data%n_pca_comp)
@@ -413,6 +465,7 @@ contains
     if(allocated(data%tod_mean))      deallocate(data%tod_mean)
     if(allocated(data%sb_mean))       deallocate(data%sb_mean)
     if(allocated(data%pixels))        deallocate(data%pixels)
+    if(allocated(data%pix2ind))       deallocate(data%pix2ind)
     if(allocated(data%var_fullres))   deallocate(data%var_fullres)
     if(allocated(data%pca_ampl))      deallocate(data%pca_ampl)
     if(allocated(data%pca_comp))      deallocate(data%pca_comp)
@@ -459,6 +512,7 @@ contains
        call write_hdf(file, "tod_poly",         data%tod_poly)
     end if
     call write_hdf(file, "pixels",            data%pixels)
+    call write_hdf(file, "pix2ind",           data%pix2ind)
     call write_hdf(file, "var_fullres",       data%var_fullres)
     call write_hdf(file, "n_pca_comp",        data%n_pca_comp)
     if (data%n_pca_comp > 0) then
@@ -718,6 +772,10 @@ contains
     if(allocated(lx_in%pixels))        then
        allocate(lx_out%pixels(size(lx_in%pixels,1)))
        lx_out%pixels = lx_in%pixels
+    end if
+    if(allocated(lx_in%pix2ind))        then
+       allocate(lx_out%pix2ind(size(lx_in%pix2ind,1)))
+       lx_out%pix2ind = lx_in%pix2ind
     end if
     if(allocated(lx_in%var_fullres))   then
        allocate(lx_out%var_fullres(size(lx_in%var_fullres,1),size(lx_in%var_fullres,2),size(lx_in%var_fullres,3)))
