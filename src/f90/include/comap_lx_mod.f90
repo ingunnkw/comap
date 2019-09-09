@@ -285,7 +285,7 @@ contains
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
     nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
-    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%pixels(ndet), data%tod_mean(1024, nsb, ndet))
+    allocate(data%time(nsamp), data%tod(nsamp,nfreq,nsb,ndet), data%tod_mean(1024, nsb, ndet))
     allocate(data%flag(nsamp))
     call get_size_hdf(file, "point_tel", ext)
     npoint = ext(1); nsamp = ext(2)
