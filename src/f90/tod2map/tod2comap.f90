@@ -89,7 +89,6 @@ program tod2comap
   call nullify_map_type(map_tot)
   !end if
 
-
   !write(*,*) 'Making hitmap'
   !prefix = trim(pre) // trim(object)
   !l1file = '/mn/stornext/d16/cmbco/comap/pathfinder/ovro/2019-07/comap-0006973-2019-07-19-001914.hd5'
@@ -120,7 +119,7 @@ program tod2comap
         !stop
 
         call get_tod(trim(filename), tod, parfile)
-
+     
         !call int2string(scan%ss(j)%id, scanid)
         !write(*,*) 'scan', scanid
 
@@ -138,13 +137,11 @@ program tod2comap
 
      call int2string(scan%id, obsid)
      call finalize_scan_binning(map_scan)
+
      prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
      call output_submap_h5(trim(prefix), map_scan)
      !call free_map_type(map_scan)
      call free_tod_type(tod)
-
-     
-
 
   end do
 
