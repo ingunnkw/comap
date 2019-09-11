@@ -449,7 +449,7 @@ contains
     max_ind = i + indices(1) - 7
     l = indices(2)
     n = indices(3)
-    write(*,*) max_ind, l, n, fwd(max_ind - i + 21,l,n)
+!    write(*,*) max_ind, l, n, fwd(max_ind - i + 21,l,n)
 
     if (any(fwd(max_ind - i + 21:max_ind - i + 7 + 21,l,n) * sign(1.d0,fwd(max_ind - i + 21,l,n)) < -0.0015d0 * 2)) then
        spike_type = 1
@@ -1298,7 +1298,7 @@ contains
     real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
     logical(lgt),              intent(in)    :: verb
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
-    real(dp)     :: eigenv, dotsum, amp, err 
+    real(dp)     :: eigenv, dotsum, amp, err, ssum 
     real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
     real(dp),     allocatable, dimension(:)   :: r, s, mys
     CHARACTER(LEN=128) :: number
@@ -1363,7 +1363,15 @@ contains
           eigenv = sum(s(:) * r(:))
           err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
           !write(*,*) sum(s(:) ** 2)
-          r(:) = s(:)/sqrt(sum(s(:) ** 2))
+          ssum = sqrt(sum(s(:) ** 2))
+          if (ssum == 0.d0) then
+             if (verb) then
+                write(*,*) "Weird stuff happening in PCA-filter"
+             end if
+             r(:) = 1.d0 / sqrt(1.d0 * nsamp)
+          else
+             r(:) = s(:)/sqrt(ssum)
+          end if
           iters = iters + 1
        end do
        data_l2%pca_eigv(l) = eigenv
