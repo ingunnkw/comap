@@ -84,7 +84,7 @@ contains
        map%y(i) = y_min + (i-0.5d0)*map%dthetay
     end do
 
-    !write(*,*) 'grid made' 
+    !write(*,*) 'grid made'
  
     ! Set up map structures
     allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
@@ -99,7 +99,7 @@ contains
     map%m    = 0.d0
     map%rms  = 0.d0
     map%freq = 0.d0
-    
+
   end subroutine initialize_mapmaker
 
 
@@ -143,28 +143,30 @@ contains
     do j = 1, tod%ndet
        det = tod%feeds(j)
        if (.not. is_alive(det)) cycle
+       !write(*,*) j, det
        do i = 1, tod%nsamp
           if (trim(coord_system) .eq. 'horizontal') then
-             p = nint((tod%point_tel(1,i,det)-x_min)/map%dthetax)
-             q = nint((tod%point_tel(2,i,det)-y_min)/map%dthetay)
+             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
+             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
           else
-             p = nint((tod%point(1,i,det)-pos(1)-x_min)/map%dthetax)
-             q = nint((tod%point(2,i,det)-pos(2)-y_min)/map%dthetay)
+             !if (i .eq. 1) write(*,*) det, tod%point(1,i,det)
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
              !p = min(max(nint((tod%point(1,i,det)-x_min)/map%dthetax),1),map%n_x)
              !q = min(max(nint((tod%point(2,i,det)-y_min)/map%dthetay),1),map%n_y)
           end if
           if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
-             tod%pixels(i,det) = (q-1)*map%n_x + p
+             tod%pixel(i,det) = (q-1)*map%n_x + p
              do sb = 1, tod%nsb
                 do freq = 1, tod%nfreq
-                   if (tod%freqmask(freq,sb,det) == 0) cycle
+                   if (tod%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
                    map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1.d0
                    sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,det)
                 end do
              end do
           else
-             tod%pixels(i,det) = -200
+             tod%pixel(i,det) = -200
           end if
        end do
     end do
@@ -279,34 +281,36 @@ contains
        do j = 1, ndet
           det = tod%feeds(j)
           if (.not. is_alive(det)) cycle
-          if (tod%pixels(i,det) .lt. 0) cycle
+          if (tod%pixel(i,det) .lt. 0) cycle
           !if (tod%point_tel(2,i,det) > 30.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
-             p = nint((tod%point_tel(1,i,det)-x_min)/map_tot%dthetax)
-             q = nint((tod%point_tel(2,i,det)-y_min)/map_tot%dthetay)
+             p = nint((tod%point_tel(1,i,j)-x_min)/map_tot%dthetax)
+             q = nint((tod%point_tel(2,i,j)-y_min)/map_tot%dthetay)
           else
-             p = nint((tod%point(1,i,det)-pos(1)-x_min)/map_tot%dthetax)
-             q = nint((tod%point(2,i,det)-pos(2)-y_min)/map_tot%dthetay)
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map_tot%dthetax)
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map_tot%dthetay)
              !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
              !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
           end if
           do sb = 1, nsb
              do freq = 1, nfreq
                 !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
-                if (tod%freqmask(freq,sb,det) == 0) cycle
-                if (tod%rms(i,freq,sb,det) == 0.d0) cycle
+                if (tod%freqmask(freq,sb,j) == 0) cycle
+                if (tod%rms(i,freq,sb,j) == 0.d0) cycle
                 !write(*,*) i, det, sb, freq
                 !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                 !write(*,*) tod%rms(i,freq,sb,det)
-                map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
-                map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,det)**2
+                map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2
                 !end if
              end do
           end do
        end do
     end do
+    
     map_tot%dsum = map_tot%dsum + map_scan%dsum
     map_tot%div  = map_tot%div  + map_scan%div
+
 
     !write(*,*) 'Ending coadding'
 
@@ -443,8 +447,8 @@ contains
         !stop
 
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           !rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
-           rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + Nt(i)
+           !rhs(tod(scan)%pixel(i,det)) = rhs(tod(scan)%pixel(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           rhs(tod(scan)%pixel(i,det)) = rhs(tod(scan)%pixel(i,det)) + Nt(i)
         end do
 
         !open(75,file='rhs.dat',recl=1024)
@@ -502,10 +506,10 @@ contains
         !$OMP PARALLEL PRIVATE(i)
         !$OMP DO SCHEDULE(guided)
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           !xt(i) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
-           !xt(long_samp-i+1) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
-           xt(i) = x(tod(scan)%pixels(i,det))
-           xt(long_samp-i+1) = x(tod(scan)%pixels(i,det))
+           !xt(i) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixel(i,det))
+           !xt(long_samp-i+1) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixel(i,det))
+           xt(i) = x(tod(scan)%pixel(i,det))
+           xt(long_samp-i+1) = x(tod(scan)%pixel(i,det))
         end do
         !$OMP END DO
         !$OMP END PARALLEL
@@ -525,8 +529,8 @@ contains
         Nt = Nt - mean(Nt)
 
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           !Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
-           Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + Nt(i)
+           !Ax(tod(scan)%pixel(i,det)) = Ax(tod(scan)%pixel(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           Ax(tod(scan)%pixel(i,det)) = Ax(tod(scan)%pixel(i,det)) + Nt(i)
         end do
 
         deallocate(xt, xv)
@@ -622,7 +626,7 @@ contains
     ! !$OMP PARALLEL PRIVATE(i)
     ! !$OMP DO SCHEDULE(guided)
     ! do i = 1, tod(1)%nsamp
-    !    debug(i) = mp(tod(1)%pixels(i,det))
+    !    debug(i) = mp(tod(1)%pixel(i,det))
     ! end do
     ! !$OMP END DO
     ! !$OMP END PARALLEL
@@ -630,7 +634,7 @@ contains
     ! write(*,*) 'wall time debug = ', t2-t1
     ! open(75,file='map_time.dat',recl=1024)
     ! do i = 1, tod(1)%nsamp
-    !    write(75,*) i, debug(i), tod(1)%pixels(i,det), tod(1)%point_tel(1,i,det), tod(1)%point_tel(2,i,det)
+    !    write(75,*) i, debug(i), tod(1)%pixel(i,det), tod(1)%point_tel(1,i,det), tod(1)%point_tel(2,i,det)
     ! end do
     ! close(75)
     ! call mpi_finalize(i)
@@ -743,7 +747,7 @@ contains
 !          p = nint((data%point_cel(1,i,j)-pos(1)-x_min)/map%dthetax)
 !          q = nint((data%point_cel(2,i,j)-pos(2)-y_min)/map%dthetay)
 !          if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then
-!             !tod%pixels(i,j) = (q-1)*map%n_x + p
+!             !tod%pixel(i,j) = (q-1)*map%n_x + p
 !             do sb = 1, nsb
 !                do freq = 1, nfreq
 !                   !if (tod%freqmask(freq,sb,j) == 0) cycle
@@ -751,7 +755,7 @@ contains
 !                end do
 !             end do
 !          !else
-!          !   tod%pixels(i,j) = -200
+!          !   tod%pixel(i,j) = -200
 !          end if
 !       end do
 !    end do

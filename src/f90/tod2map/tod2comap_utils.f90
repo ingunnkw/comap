@@ -11,7 +11,7 @@ module tod2comap_utils
      real(dp), allocatable, dimension(:)       :: t                    ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
      real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
-     real(dp), allocatable, dimension(:,:)     :: pixels               ! (sb, freq) or (time, det)
+     real(dp), allocatable, dimension(:,:) :: pixel               ! (sb, freq) or (time, det)
      real(dp), allocatable, dimension(:,:,:)   :: point, point_tel     ! (det, 3, time)
   end type tod_type
 
@@ -42,16 +42,14 @@ contains
     tod%ndet  = size(data%tod,4)
 
     !write(*,*) tod%nsamp, tod%nfreq, tod%nsb, tod%ndet
-
     allocate( tod%t(tod%nsamp), tod%f(tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%point(3,tod%nsamp,tod%ndet), tod%pixels(tod%nsamp, tod%ndet), &
+         & tod%point(3,tod%nsamp,tod%ndet), tod%pixel(tod%nsamp, 19), &
          & tod%point_tel(3,tod%nsamp, tod%ndet), &
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%feeds(tod%ndet) )
-
     allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%alpha(tod%nfreq, tod%nsb, tod%ndet), &
@@ -69,6 +67,7 @@ contains
     tod%mean_el = mean(data%point_tel(2,:,1)) ! Mean boresight
     tod%mean_az = mean(data%point_tel(1,:,1)) ! Mean boresight
     !write(*,*) shape(data%point), tod%nsamp
+    tod%pixel = -200
 
     do k = 1, tod%ndet
        do l = 1, tod%nsb
@@ -119,7 +118,6 @@ contains
   subroutine free_tod_type(tod)
     implicit none
     type(tod_type), intent(inout) :: tod 
-
     if (allocated(tod%t))         deallocate(tod%t)
     if (allocated(tod%f))         deallocate(tod%f)
     if (allocated(tod%d))         deallocate(tod%d)
@@ -131,7 +129,7 @@ contains
     if (allocated(tod%sigma0))    deallocate(tod%sigma0)
     if (allocated(tod%fknee))     deallocate(tod%fknee)
     if (allocated(tod%alpha))     deallocate(tod%alpha)
-    if (allocated(tod%pixels))    deallocate(tod%pixels)
+    if (allocated(tod%pixel))     deallocate(tod%pixel)
     if (allocated(tod%freqmask))  deallocate(tod%freqmask)
     if (allocated(tod%feeds))     deallocate(tod%feeds)
 
