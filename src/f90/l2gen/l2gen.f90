@@ -212,11 +212,11 @@ program l2gen
            
            call find_spikes(data_l2_filter, verb)
            call update_status(status, 'find_spikes')
-        
+
            ! pca filter copied data
            call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter0')
-           
+
            ! flag correlations and variance
            call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
            call update_status(status, 'flag_corr')
@@ -550,6 +550,7 @@ contains
        write(*,*) "Found ", n_spikes(4), " edge spikes"
     end if
     deallocate(ampsum)
+
   end subroutine find_spikes
   
   subroutine get_spike_data(data, k, j, i, n_spikes)
@@ -597,7 +598,8 @@ contains
     max_ind = i + indices(1) - 7
     l = indices(2)
     n = indices(3)
-    write(*,*) max_ind, l, n, fwd(max_ind - i + 21,l,n)
+
+!    write(*,*) max_ind, l, n, fwd(max_ind - i + 21,l,n)
 
     if (any(fwd(max_ind - i + 21:max_ind - i + 7 + 21,l,n) * sign(1.d0,fwd(max_ind - i + 21,l,n)) < -0.0015d0 * 2)) then
        spike_type = 1
@@ -1446,7 +1448,7 @@ contains
     real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
     logical(lgt),              intent(in)    :: verb
     integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
-    real(dp)     :: eigenv, dotsum, amp, err 
+    real(dp)     :: eigenv, dotsum, amp, err, ssum 
     real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
     real(dp),     allocatable, dimension(:)   :: r, s, mys
     CHARACTER(LEN=128) :: number
@@ -1468,6 +1470,7 @@ contains
 !    write(*,*) dnu
     allocate(r(nsamp), s(nsamp))
             
+    
     if(.not. allocated(data_l2%pca_ampl)) allocate(data_l2%pca_ampl(nfreq,nsb,ndet,n_pca_comp)) 
     if(.not. allocated(data_l2%pca_comp)) allocate(data_l2%pca_comp(nsamp,n_pca_comp))
     if(.not. allocated(data_l2%pca_eigv)) allocate(data_l2%pca_eigv(n_pca_comp))
@@ -1482,7 +1485,7 @@ contains
           if (sum(r) .ne. sum(r)) then
              write(*,*) "NaN in initial PCA vector"
           end if
-       end if
+       end if       
        iters = 0
        do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
           s = 0.d0
@@ -1511,7 +1514,15 @@ contains
           eigenv = sum(s(:) * r(:))
           err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
           !write(*,*) sum(s(:) ** 2)
-          r(:) = s(:)/sqrt(sum(s(:) ** 2))
+          ssum = sqrt(sum(s(:) ** 2))
+          if (ssum == 0.d0) then
+             if (verb) then
+                write(*,*) "Weird stuff happening in PCA-filter"
+             end if
+             r(:) = 1.d0 / sqrt(1.d0 * nsamp)
+          else
+             r(:) = s(:)/sqrt(ssum)
+          end if
           iters = iters + 1
        end do
        data_l2%pca_eigv(l) = eigenv
@@ -1540,7 +1551,7 @@ contains
        if (.not. (any(sum(abs(data_l2%pca_ampl(:, :, :, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
     end do
     deallocate(r, s)
-
+    
   end subroutine pca_filter_TOD
 
   subroutine polyfilter_TOD(data_l2, bp_filter)

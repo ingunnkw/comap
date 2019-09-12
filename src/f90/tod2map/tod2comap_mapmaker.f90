@@ -30,7 +30,7 @@ contains
     call get_parameter(0, parfile, 'MAP_NAME', par_string=map%name)
     call get_parameter(0, parfile, 'NUMFREQ', par_int=map%nfreq)
     call get_parameter(0, parfile, 'NUM_SIDEBAND', par_int=map%nsb)
-    call get_parameter(0, parfile, 'NUM_DET', par_int=map%ndet)
+    call get_parameter(0, parfile, 'NUM_DET', par_int=map%ndet_tot)
     call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=map%nsim)
     call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
     
@@ -66,7 +66,7 @@ contains
        end if
     end if
 
-    write(*,*) 'max min done'
+    !write(*,*) 'max min done'
 
 !!$    write(*,*) x_min, x_max
 !!$    write(*,*) y_min, y_max
@@ -85,19 +85,19 @@ contains
        map%y(i) = y_min + (i-0.5d0)*map%dthetay
     end do
 
-    write(*,*) 'grid made' 
+    !write(*,*) 'grid made'
  
     ! Set up map structures
-    allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
-         & map%dsum(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
-         & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
-         & map%div(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
-         & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet), &
-         & map%freq(map%nfreq, map%nsb), & 
-         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet, map%nsim), & 
-         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet, map%nsim), & 
-         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet, map%nsim), &
-         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet, map%nsim))
+    allocate(map%m(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%dsum(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%div(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%freq(map%nfreq, map%nsb), &
+         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
+         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
+         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
+         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim))
 
     map%dsum = 0.d0
     map%nhit = 0.d0
@@ -111,7 +111,6 @@ contains
     map%div_sim  = 0.d0 
     map%m_sim    = 0.d0
     map%rms_sim  = 0.d0 
-
   end subroutine initialize_mapmaker
 
 
@@ -122,7 +121,7 @@ contains
     character(len=*)                :: parfile
     type(patch_info), intent(in)    :: pinfo
 
-    integer(i4b) :: scan, i, j, p, q, sb, freq, sim
+    integer(i4b) :: scan, i, j, p, q, sb, freq, det, sim
     real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
     character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:,:) :: sigma0
@@ -137,6 +136,10 @@ contains
     allocate(sigma0(tod%nfreq,tod%nsb))
     sigma0 = 0.d0
 
+    map%ndet = tod%ndet
+    if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
+    map%feeds = tod%feeds
+
     
     !call wall_time(t1)
     !!$OMP PARALLEL PRIVATE(scan,j,i,p,q,sb,freq)
@@ -149,29 +152,32 @@ contains
     !write(*,*) pos
 
     do j = 1, tod%ndet
-       if (.not. is_alive(j)) cycle
+       det = tod%feeds(j)
+       if (.not. is_alive(det)) cycle
+       !write(*,*) j, det
        do i = 1, tod%nsamp
           if (trim(coord_system) .eq. 'horizontal') then
              p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
              q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
           else
+             !if (i .eq. 1) write(*,*) det, tod%point(1,i,det)
              p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
              q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
-             !p = min(max(nint((tod%point(1,i,j)-x_min)/map%dthetax),1),map%n_x)
-             !q = min(max(nint((tod%point(2,i,j)-y_min)/map%dthetay),1),map%n_y)
+             !p = min(max(nint((tod%point(1,i,det)-x_min)/map%dthetax),1),map%n_x)
+             !q = min(max(nint((tod%point(2,i,det)-y_min)/map%dthetay),1),map%n_y)
           end if
           if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
-             tod%pixels(i,j) = (q-1)*map%n_x + p
+             tod%pixel(i,det) = (q-1)*map%n_x + p
              do sb = 1, tod%nsb
                 do freq = 1, tod%nfreq
                    if (tod%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
-                   map%nhit(p,q,freq,sb,j) = map%nhit(p,q,freq,sb,j) + 1.d0
-                   sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,j)
+                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1.d0
+                   sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,det)
                 end do
              end do
           else
-             tod%pixels(i,j) = -200
+             tod%pixel(i,det) = -200
           end if
        end do
     end do
@@ -229,25 +235,25 @@ contains
 
 
 
-  subroutine lambert(ra, dec, ra_center, dec_center)
+  subroutine gnomonic(ra, dec, ra_center, dec_center)
     implicit none
     real(dp) :: ra, dec, ra_center, dec_center
-    real(dp) :: ra_new, dec_new, x, y
+    real(dp) :: ra_c, dec_c, x, y, cosc, cosd
     real(8), parameter :: PI = 4*atan(1.d0)
 
-    dec = (90.d0 - dec) * PI/180.d0
-    ra  = ra * PI/180.d0
+    dec = (90.d0 - dec) * PI/180.d0; ra  = ra * PI/180.d0
+    dec_c = (90.d0 - dec_center) * PI/180.d0
+    ra_c = ra_center * PI/180.d0
+
+    cosd = cos(dec)
+
+    cosc = sin(dec_c)*sin(dec) + cos(dec_c)*cosd*cos(ra-ra_c)
+
+    x = (cosd * sin(ra-ra_c)) / cosc
+    y = (cos(dec_c)*sin(dec) - sin(dec_c)*cosd*cos(ra-ra_c)) / cosc
 
    
-    ! rotation equations here!!
-    !ra_new  = cos(ra_center) * cos(dec_center) * x - sin(ra_center) * y
-    !dec_new = sin(ra_center) * cos(dec_center) * x + cos(ra_center) * y
-
-
-    x = 2.d0 * cos(dec_new/2.d0) * cos(ra_new)
-    y = 2.d0 * cos(dec_new/2.d0) * sin(ra_new)
-
-  end subroutine lambert
+  end subroutine gnomonic
 
 
 
@@ -289,43 +295,44 @@ contains
 
     !fs = 200 ! starting point
     !st = tod(scan)%nsamp - 200 ! ending point
+
     do sim = 1, tod%nsim
        do i = 1, tod%nsamp
-          do det = 1, ndet
+          do j = 1, ndet
+             det = tod%feeds(j)
              if (.not. is_alive(det)) cycle
-             if (tod%pixels(i,det) .lt. 0) cycle
+             if (tod%pixel(i,det) .lt. 0) cycle
              !if (tod%point_tel(2,i,det) > 30.d0) cycle
              if (trim(coord_system) .eq. 'horizontal') then
-                p = nint((tod%point_tel(1,i,det)-x_min)/map_tot%dthetax)
-                q = nint((tod%point_tel(2,i,det)-y_min)/map_tot%dthetay)
+                p = nint((tod%point_tel(1,i,j)-x_min)/map_tot%dthetax)
+                q = nint((tod%point_tel(2,i,j)-y_min)/map_tot%dthetay)
              else
-                p = nint((tod%point(1,i,det)-pos(1)-x_min)/map_tot%dthetax)
-                q = nint((tod%point(2,i,det)-pos(2)-y_min)/map_tot%dthetay)
+                p = nint((tod%point(1,i,j)-pos(1)-x_min)/map_tot%dthetax)
+                q = nint((tod%point(2,i,j)-pos(2)-y_min)/map_tot%dthetay)
                 !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
                 !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
              end if
              do sb = 1, nsb
                 do freq = 1, nfreq
                    !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
-                   if (tod%freqmask(freq,sb,det) == 0) cycle
-                   if (tod%rms(i,freq,sb,det) == 0.d0) cycle
+                   if (tod%freqmask(freq,sb,j) == 0) cycle
+                   if (tod%rms(i,freq,sb,j) == 0.d0) cycle
                    !write(*,*) i, det, sb, freq
                    !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                    !write(*,*) tod%rms(i,freq,sb,det)
-                   map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,det)**2 * tod%d(i,freq,sb,det)
-                   map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,det)**2
+                   map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2
 
                    ! Simulated data 
                    map_scan%dsum_sim(p,q,freq,sb,det,sim) = map_scan%dsum_sim(p,q,freq,sb,det,sim) + 1.d0 / tod%rms_sim(i,freq,sb,det,sim)**2 * tod%d_sim(i,freq,sb,det,sim) 
                    map_scan%div_sim(p,q,freq,sb,det,sim) = map_scan%div_sim(p,q,freq,sb,det,sim) + 1.d0 / tod%rms_sim(i,freq,sb,det,sim)**2
-
 
                    !end if
                 end do
              end do
           end do
        end do
-    end do 
+    end do
 
     map_tot%dsum = map_tot%dsum + map_scan%dsum
     map_tot%div  = map_tot%div  + map_scan%div
@@ -345,19 +352,19 @@ contains
     
     integer(i4b) :: p, q, sim
 
-    do p = 1, map%n_x
-       do q = 1, map%n_y
-          map%dsum(p,q,1,1,1) = sum(map%dsum(p,q,:,:,:))
-          map%div(p,q,1,1,1)  = sum(map%div(p,q,:,:,:))
-          map%nhit(p,q,1,1,1) = sum(map%nhit(p,q,:,:,:))
+   ! do p = 1, map%n_x
+   !    do q = 1, map%n_y
+   !       map%dsum(p,q,1,1,1) = sum(map%dsum(p,q,:,:,:))
+   !       map%div(p,q,1,1,1)  = sum(map%div(p,q,:,:,:))
+   !       map%nhit(p,q,1,1,1) = sum(map%nhit(p,q,:,:,:))
 
-          do sim = 1, map%nsim
-             ! Simulated data
-             map%dsum_sim(p,q,1,1,1,sim) = sum(map%dsum_sim(p,q,:,:,:,sim)) 
-             map%div_sim(p,q,1,1,1,sim)  = sum(map%div_sim(p,q,:,:,:,sim)) 
-          end do 
-       end do
-    end do
+   !       do sim = 1, map%nsim
+   !          ! Simulated data
+   !          map%dsum_sim(p,q,1,1,1,sim) = sum(map%dsum_sim(p,q,:,:,:,sim)) 
+   !          map%div_sim(p,q,1,1,1,sim)  = sum(map%div_sim(p,q,:,:,:,sim)) 
+   !       end do 
+   !    end do
+   ! end do
 
     where(map%div > 0)
        map%m   = map%dsum / map%div
@@ -366,8 +373,6 @@ contains
        map%m   = 0.d0
        map%rms = 0.d0
     end where
-
-
 
     ! Simulated data
     where(map%div_sim > 0) 
@@ -503,8 +508,8 @@ contains
         !stop
 
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           !rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
-           rhs(tod(scan)%pixels(i,det)) = rhs(tod(scan)%pixels(i,det)) + Nt(i)
+           !rhs(tod(scan)%pixel(i,det)) = rhs(tod(scan)%pixel(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           rhs(tod(scan)%pixel(i,det)) = rhs(tod(scan)%pixel(i,det)) + Nt(i)
         end do
 
         !open(75,file='rhs.dat',recl=1024)
@@ -562,10 +567,10 @@ contains
         !$OMP PARALLEL PRIVATE(i)
         !$OMP DO SCHEDULE(guided)
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           !xt(i) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
-           !xt(long_samp-i+1) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixels(i,det))
-           xt(i) = x(tod(scan)%pixels(i,det))
-           xt(long_samp-i+1) = x(tod(scan)%pixels(i,det))
+           !xt(i) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixel(i,det))
+           !xt(long_samp-i+1) = tod(scan)%g(1,freq,sb,det)*x(tod(scan)%pixel(i,det))
+           xt(i) = x(tod(scan)%pixel(i,det))
+           xt(long_samp-i+1) = x(tod(scan)%pixel(i,det))
         end do
         !$OMP END DO
         !$OMP END PARALLEL
@@ -585,8 +590,8 @@ contains
         Nt = Nt - mean(Nt)
 
         do i = 1 + buffer, tod(scan)%nsamp - buffer
-           !Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
-           Ax(tod(scan)%pixels(i,det)) = Ax(tod(scan)%pixels(i,det)) + Nt(i)
+           !Ax(tod(scan)%pixel(i,det)) = Ax(tod(scan)%pixel(i,det)) + tod(scan)%g(1,freq,sb,det)*Nt(i)
+           Ax(tod(scan)%pixel(i,det)) = Ax(tod(scan)%pixel(i,det)) + Nt(i)
         end do
 
         deallocate(xt, xv)
@@ -682,7 +687,7 @@ contains
     ! !$OMP PARALLEL PRIVATE(i)
     ! !$OMP DO SCHEDULE(guided)
     ! do i = 1, tod(1)%nsamp
-    !    debug(i) = mp(tod(1)%pixels(i,det))
+    !    debug(i) = mp(tod(1)%pixel(i,det))
     ! end do
     ! !$OMP END DO
     ! !$OMP END PARALLEL
@@ -690,7 +695,7 @@ contains
     ! write(*,*) 'wall time debug = ', t2-t1
     ! open(75,file='map_time.dat',recl=1024)
     ! do i = 1, tod(1)%nsamp
-    !    write(75,*) i, debug(i), tod(1)%pixels(i,det), tod(1)%point_tel(1,i,det), tod(1)%point_tel(2,i,det)
+    !    write(75,*) i, debug(i), tod(1)%pixel(i,det), tod(1)%point_tel(1,i,det), tod(1)%point_tel(2,i,det)
     ! end do
     ! close(75)
     ! call mpi_finalize(i)
@@ -749,11 +754,6 @@ contains
 
 
 
-
-
-
-
-
   !!!!!!!!!!!!!!!!!!
   ! Gibbs sampling !
   !!!!!!!!!!!!!!!!!!
@@ -767,7 +767,63 @@ contains
 
 
 
-
+!  subroutine l12hitmap(l1file, map, parfile, pinfo)
+!    implicit none
+!    type(map_type), intent(inout)   :: map
+!    character(len=*)                :: parfile, l1file
+!    type(patch_info), intent(in)    :: pinfo
+!
+!
+!    type(lx_struct) :: data
+!    real(dp) :: x_min, x_max, y_min, y_max, pos(3)
+!    integer(i4b):: i, j, k, l, p, q, sb, freq, ndet, nsb, nfreq, nsamp
+!    character(len=512) :: object
+!
+!
+!    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+!    call initialize_comap_ephem_mod(parfile)
+!
+!    ! Read the l1 file
+!    write(*,*) 'reading file'
+!    call read_l1_file(l1file, data, 0)
+!
+!    nsamp = size(data%time)
+!    nfreq = size(data%nu,1)
+!    nsb   = size(data%tod,3)
+!    ndet  = size(data%tod,4)
+!
+!
+!    ! Get pointing info
+!    write(*,*) 'getting pointing info'
+!
+!    if (.not. pinfo%fixed) pos = get_obj_info(object,data%time(1))
+!
+!    x_min = map%x(1); x_max = map%x(map%n_x)
+!    y_min = map%y(1); y_max = map%y(map%n_y)
+!
+!
+!    do j = 1, ndet
+!       if (.not. is_alive(j)) cycle
+!       do i = 1, nsamp
+!          p = nint((data%point_cel(1,i,j)-pos(1)-x_min)/map%dthetax)
+!          q = nint((data%point_cel(2,i,j)-pos(2)-y_min)/map%dthetay)
+!          if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then
+!             !tod%pixel(i,j) = (q-1)*map%n_x + p
+!             do sb = 1, nsb
+!                do freq = 1, nfreq
+!                   !if (tod%freqmask(freq,sb,j) == 0) cycle
+!                   map%nhit(p,q,freq,sb,j) = map%nhit(p,q,freq,sb,j) + 1.d0
+!                end do
+!             end do
+!          !else
+!          !   tod%pixel(i,j) = -200
+!          end if
+!       end do
+!    end do
+!
+!    call free_lx_struct(data)
+!
+!  end subroutine l12hitmap
 
 
 

@@ -7,16 +7,17 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, nsim,  n_k, ntheta ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, nsim,  n_k, ntheta ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
      character(len=512) :: name
-     real(dp),     allocatable, dimension(:)           :: x, y, k ! (n_x or n_y or n_k)
-     real(dp),     allocatable, dimension(:,:)         :: freq    ! (nfreq, nsb)
-     real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
+     integer(i4b), allocatable, dimension(:)       :: feeds
+     real(dp),     allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
+     real(dp),     allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
+     real(sp),     allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim   !(n_x, n_y, nfreq, nsb, ndet, nsim)
-     integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit
+     integer(i4b), allocatable, dimension(:,:,:,:,:) :: nhit
   end type map_type
 
 
@@ -65,6 +66,7 @@ contains
     call write_hdf(file, "mean_az", map%mean_az)
     call write_hdf(file, "mean_el", map%mean_el)
     call write_hdf(file, "time", map%time)
+    call write_hdf(file, "feeds", map%feeds)
     call close_hdf_file(file)
 
     !call free_map_type(map)
@@ -86,18 +88,18 @@ contains
     call write_hdf(file, "n_y", map%n_y)
     call write_hdf(file, "x",   map%x)
     call write_hdf(file, "y",   map%y)
-    call write_hdf(file, "map", map%m(:,:,1,1,1))
-    call write_hdf(file, "rms", map%rms(:,:,1,1,1))
-    call write_hdf(file, "nhit", map%nhit(:,:,1,1,1))
+    call write_hdf(file, "map", map%m)!(:,:,1,1,1))
+    call write_hdf(file, "rms", map%rms)!(:,:,1,1,1))
+    call write_hdf(file, "nhit", map%nhit)!(:,:,1,1,1))
     call write_hdf(file, "freq", map%freq)
     call write_hdf(file, "mean_az", map%mean_az)
     call write_hdf(file, "mean_el", map%mean_el)
     call write_hdf(file, "time", map%time)
-    
+    call write_hdf(file, "feeds", map%feeds)
+
     ! For simulated data 
     call write_hdf(file, "map_sim", map%m_sim(:,:,1,1,1,:)) 
     call write_hdf(file, "rms_sim", map%rms_sim(:,:,1,1,1,:)) 
-
 
     call close_hdf_file(file)
 
@@ -139,11 +141,11 @@ contains
     call read_hdf(file, "time", map%time)
     call read_hdf(file, "mean_az", map%mean_az)
     call read_hdf(file, "mean_el", map%mean_el)
+    call read_hdf(file, "feeds", map%feeds)
 
     ! Simulated data
     call read_hdf(file, "map_sim", map%m_sim) 
     call read_hdf(file, "rms_sim", map%rms_sim)
-
 
     call close_hdf_file(file)
 
@@ -244,15 +246,16 @@ contains
     implicit none
     type(map_type), intent(inout) :: map
 
-    if (allocated(map%x))    deallocate(map%x) 
-    if (allocated(map%y))    deallocate(map%y)
-    if (allocated(map%freq)) deallocate(map%freq)
-    if (allocated(map%k))    deallocate(map%k)
-    if (allocated(map%m))    deallocate(map%m)
-    if (allocated(map%rms))  deallocate(map%rms)
-    if (allocated(map%dsum)) deallocate(map%dsum)
-    if (allocated(map%nhit)) deallocate(map%nhit)
-    if (allocated(map%div))  deallocate(map%div)
+    if (allocated(map%x))     deallocate(map%x) 
+    if (allocated(map%y))     deallocate(map%y)
+    if (allocated(map%freq))  deallocate(map%freq)
+    if (allocated(map%k))     deallocate(map%k)
+    if (allocated(map%m))     deallocate(map%m)
+    if (allocated(map%rms))   deallocate(map%rms)
+    if (allocated(map%dsum))  deallocate(map%dsum)
+    if (allocated(map%nhit))  deallocate(map%nhit)
+    if (allocated(map%div))   deallocate(map%div)
+    if (allocated(map%feeds)) deallocate(map%feeds)
 
     ! Simulated data 
     if (allocated(map%m_sim))    deallocate(map%m_sim)

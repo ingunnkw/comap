@@ -159,6 +159,8 @@ contains
                 scan%ss(k)%scanmode = 'raster'
              else if (feature == 8192) then
                 scan%ss(k)%scanmode = 'tsys'
+             else if (feature == 32768) then
+                scan%ss(k)%scanmode = 'liss'
              else
                 scan%ss(k)%scanmode = 'none'
              end if
