@@ -1370,7 +1370,7 @@ contains
              end if
              r(:) = 1.d0 / sqrt(1.d0 * nsamp)
           else
-             r(:) = s(:)/sqrt(ssum)
+             r(:) = s(:)/ssum
           end if
           iters = iters + 1
        end do
