@@ -209,7 +209,7 @@ contains
 
     ! Trim end for NaNs
     nsamp = nsamp_tot
-    do while (nsamp > nsamp_tot - 5)
+    do while (nsamp > nsamp_tot - 10)
        ok = .true.
        do i = 1, ndet
           do j = 1, nsb
