@@ -605,9 +605,9 @@ contains
        spike_type = 1
     else if (.not. any(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n) &
          /= data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))) then 
-       if (abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
-            - mean(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
-            / max(abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))), 1.d-6) > 0.010d0) then
+       if (abs(sum(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
+            - sum(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
+            / max(abs(sum(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))), 1.d-4) > 0.010d0) then
           spike_type = 2                 
        else
           spike_type = 3
