@@ -605,9 +605,9 @@ contains
        spike_type = 1
     else if (.not. any(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n) &
          /= data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))) then 
-       if (abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
-            - mean(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
-            / max(abs(mean(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))), 1.d-6) > 0.010d0) then
+       if (abs(sum(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n)) &
+            - sum(data%sb_mean(max_ind + 10:max_ind + jump_mean_dur,l,n))) &
+            / max(abs(sum(data%sb_mean(max_ind - jump_mean_dur:max_ind - 10,l,n))), 1.d-4) > 0.010d0) then
           spike_type = 2                 
        else
           spike_type = 3
@@ -2370,7 +2370,7 @@ contains
     type(Lx_struct),                                 intent(inout) :: data
     logical(lgt),                                    intent(in)    :: verb
     
-    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr
+    integer(i4b) :: i, j, k, nfreq_full, nsb, ndet, unit, det, sb, freq, dfreq, ierr, n_print
     logical(lgt) :: first
     character(len=1024) :: line, val, equal
 
@@ -2380,12 +2380,19 @@ contains
 
     ! Exclude frequencies with any NaNs                                                                                                                                                                                           
     do k = 1, ndet
+       if (.not. is_alive(data%pixels(k))) cycle
        do j = 1, nsb
+          n_print = 0
           do i = 1, nfreq_full
              if (data%freqmask_full(i,j,k) == 0.d0) cycle
              if (any(data%tod(:,i,j,k) .ne. data%tod(:,i,j,k))) then
                 if (verb) then
-                   write(*,fmt='(a,i8,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
+                   if (n_print < 5) then
+                      write(*,fmt='(a,i8,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
+                      n_print = n_print + 1
+                   else
+                      write(*,*) "Suppressing further NaN print from this sideband"
+                   end if
                 end if
                 data%freqmask_full(i,j,k) = 0.d0
                 data%freqmask_reason(i,j,k) = 2
