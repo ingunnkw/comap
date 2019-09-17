@@ -16,8 +16,7 @@ program l2gen
   use cholesky_decomposition_mod
   use mjd_to_gregorian_mod
   implicit none
-
-
+  
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile, corrmatrixfile
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, n_sim
@@ -34,6 +33,9 @@ program l2gen
   type(status_file)    :: status
   type(patch_info)     :: pinfo
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
+  
+  ! call test_fft()
+  ! stop  
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
@@ -236,10 +238,30 @@ program l2gen
                 & sum(data_l2_fullres%freqmask_full) &
                 & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
                 & / 4.d0 / 1024.d0 
-           if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
+        end if
+
+        !!! All channels masked!!
+        if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
+           if (verb) then
               write(*,*) "All channels masked! Scan: ", scan%ss(k)%id
-              cycle
            end if
+           data_l2_fullres%polyorder = -1
+           data_l2_fullres%n_pca_comp = 0
+           
+           ! If necessary, decimate L2 file in both time and frequency
+           call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+           call update_status(status, 'decimate')
+        
+
+           ! Write L2 file to disk
+           if (verb) then
+              write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
+           end if
+           
+           call mkdirs(trim(scan%ss(k)%l2file), .true.)
+           call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
+           call update_status(status, 'write_l2')
+           cycle
         end if
         
         ! Poly-filter if requested
@@ -281,6 +303,7 @@ program l2gen
               write(*,*) "NaN in tod after filtering!"
            end if
         end if
+        
         ! If necessary, decimate L2 file in both time and frequency
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
         call update_status(status, 'decimate')
@@ -465,39 +488,53 @@ contains
   !   real(dp)     :: samprate, nu
   !   real(sp),     allocatable, dimension(:) :: dt, tod
   !   complex(spc), allocatable, dimension(:) :: dv
-
-  !   nsamp       = 1000
-  !   samprate    = 50.d0    
-  !   n           = nsamp+1
-
-  !   ! Set up OpenMP environment and FFTW plans
-  !   nomp = 1
-  !   call sfftw_init_threads(err)
-  !   call sfftw_plan_with_nthreads(nomp)
-
-  !   allocate(dt(2*nsamp), dv(0:n-1))
-  !   call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
-  !   call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
-  !   deallocate(dt, dv)
-
-  !   allocate(dt(2*nsamp), dv(0:n-1), tod(nsamp))
-  !   tod = 0.d0
-  !   dt(1:nsamp)            = tod(:)
-  !   dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
-  !   call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
-  !   ! Apply lowpass filter
-  !   do l = 0, n-1
-  !      nu = ind2freq(l+1, samprate, n)
-  !      dv(l) = sqrt(2.d0 * nsamp) * rand_gauss(rng_handle) !dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
-  !   end do
     
-  !   call sfftw_execute_dft_c2r(plan_back, dv, dt)
-  !   dt = dt / (2*nsamp)
-  !   write(*,*) variance(dt), sqrt(variance(dt)), variance(dt) 
-  !   deallocate(dt, dv)
+  !   nsamp = 10
     
-  !   call sfftw_destroy_plan(plan_fwd)
-  !   call sfftw_destroy_plan(plan_back)
+  !   i = 0
+  !   ts:do 
+  !      i = i+1
+  !      if (i > nsamp - 1) exit
+  !      do j = 1, 5
+  !         !do k = 1, 5
+  !         write(*,*) i, j, k
+  !         i = i + 2
+  !         cycle ts
+  !         !end do
+  !      end do
+  !   end do ts
+  !   ! nsamp       = 1000
+  !   ! samprate    = 50.d0    
+  !   ! n           = nsamp+1
+
+  !   ! ! Set up OpenMP environment and FFTW plans
+  !   ! nomp = 1
+  !   ! call sfftw_init_threads(err)
+  !   ! call sfftw_plan_with_nthreads(nomp)
+
+  !   ! allocate(dt(2*nsamp), dv(0:n-1))
+  !   ! call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
+  !   ! call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
+  !   ! deallocate(dt, dv)
+
+  !   ! allocate(dt(2*nsamp), dv(0:n-1), tod(nsamp))
+  !   ! tod = 0.d0
+  !   ! dt(1:nsamp)            = tod(:)
+  !   ! dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+  !   ! call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+  !   ! ! Apply lowpass filter
+  !   ! do l = 0, n-1
+  !   !    nu = ind2freq(l+1, samprate, n)
+  !   !    dv(l) = sqrt(2.d0 * nsamp) * rand_gauss(rng_handle) !dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
+  !   ! end do
+    
+  !   ! call sfftw_execute_dft_c2r(plan_back, dv, dt)
+  !   ! dt = dt / (2*nsamp)
+  !   ! write(*,*) variance(dt), sqrt(variance(dt)), variance(dt) 
+  !   ! deallocate(dt, dv)
+    
+  !   ! call sfftw_destroy_plan(plan_fwd)
+  !   ! call sfftw_destroy_plan(plan_back)
 
   ! end subroutine test_fft
 
@@ -525,7 +562,7 @@ contains
     ampsum(:,:) = 0.d0
 
     i = 0
-    do 
+    outer:do 
        i = i+1
        if (i > nsamp - 1) exit
        do k = 1, ndet
@@ -539,10 +576,11 @@ contains
                 call get_spike_data(data_l2,k,j,i+1,n_spikes)
                 ampsum(:,:) = 0.d0
                 i = i + 10
+                cycle outer
              end if
           end do
        end do
-    end do
+    end do outer
     if (verb) then
        write(*,*) "Found ", n_spikes(1), " spikes"
        write(*,*) "Found ", n_spikes(2), " jumps"
@@ -1475,6 +1513,9 @@ contains
     if(.not. allocated(data_l2%pca_comp)) allocate(data_l2%pca_comp(nsamp,n_pca_comp))
     if(.not. allocated(data_l2%pca_eigv)) allocate(data_l2%pca_eigv(n_pca_comp))
     data_l2%pca_ampl = 0.d0
+    data_l2%pca_comp = 0.d0
+    data_l2%pca_eigv = 0.d0
+    
     do l = 1, n_pca_comp 
        err = 1.d0
        r(:) = sum(sum(sum(data_l2%tod, 2), 2), 2) !sum of all freqs
@@ -1499,6 +1540,7 @@ contains
                 do j = 1, nsb
                    if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle   
                    dotsum = sum(data_l2%tod(:,k,j,i) * r(:))
+                   !write(*,*) "yo", k, i, j
           !         write(*,*) sum(data_l2%tod(:,k,j,i))
                    !dotsum = sdot(nfreq,data_l2%tod(:,k,j,i), 1, r(:), 1)
                    mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
@@ -1513,12 +1555,12 @@ contains
           !$OMP END PARALLEL
           eigenv = sum(s(:) * r(:))
           err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
-          !write(*,*) sum(s(:) ** 2)
+          ! write(*,*) sum(s(:) ** 2)
+          ! write(*,*) s(1), s(170)
+          ! write(*,*) iters, l
           ssum = sqrt(sum(s(:) ** 2))
           if (ssum == 0.d0) then
-             if (verb) then
-                write(*,*) "Weird stuff happening in PCA-filter"
-             end if
+             write(*,*) "Weird stuff happening in PCA-filter"
              r(:) = 1.d0 / sqrt(1.d0 * nsamp)
           else
              r(:) = s(:)/ssum
@@ -2390,8 +2432,9 @@ contains
                    if (n_print < 5) then
                       write(*,fmt='(a,i8,3i6)') '   Rejecting NaNs, (sid,det,sb,freq) = ', sid, k,j,i
                       n_print = n_print + 1
-                   else
-                      write(*,*) "Suppressing further NaN print from this sideband"
+                      if (n_print == 5) then
+                         write(*,fmt='(a,i8,2i6)') "Suppressing further NaN print from this sideband", sid, k, j
+                      end if
                    end if
                 end if
                 data%freqmask_full(i,j,k) = 0.d0

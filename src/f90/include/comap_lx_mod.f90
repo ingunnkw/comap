@@ -1,6 +1,7 @@
 module comap_lx_mod
   use healpix_types
   use comap_defs
+  use comap_detector_mod
   use quiet_mpi_mod
   use quiet_hdf_mod
   use quiet_fft_mod
@@ -192,6 +193,7 @@ contains
           do k = 1, nfreq
              numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
              data%n_nan(k,j,i) = numbad
+             
              ! if (numbad > 0.1*nsamp_tot) then
              !    num_masked = num_masked + 1
              !    if (verb) then
@@ -209,9 +211,10 @@ contains
 
     ! Trim end for NaNs
     nsamp = nsamp_tot
-    do while (nsamp > nsamp_tot - 10)
+    do while (nsamp > nsamp_tot - 100)
        ok = .true.
        do i = 1, ndet
+          if (.not. is_alive(data%pixels(i))) cycle
           do j = 1, nsb
              do k = 1, nfreq
                 if (buffer_4d(nsamp,k,j,i) .ne. buffer_4d(nsamp,k,j,i)) then
