@@ -1530,7 +1530,7 @@ contains
        !means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
        !vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
 
-       comp_std = sqrt(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2)
+       comp_std = sqrt(abs(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2))
        !$OMP PARALLEL PRIVATE(k,i,j,dotsum,mys)
        !$OMP DO SCHEDULE(guided)
        do k = 1, nfreq
