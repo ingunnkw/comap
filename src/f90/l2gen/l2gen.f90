@@ -269,7 +269,7 @@ program l2gen
         call polyfilter_TOD(data_l2_fullres, bp_filter)
         call update_status(status, 'polyfilter')
 
-        if (mask_outliers == 0) then
+        if ((mask_outliers == 0) .and. (bp_filter > -1)) then
            call find_spikes(data_l2_fullres, verb)
            call update_status(status, 'find_spikes')
         end if
