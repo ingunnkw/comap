@@ -49,6 +49,7 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:,:,:) :: spike_data    ! spike and jump data (n_spikes,spike/jump,info) info = (amp,mjd,samp,sb,feed)
      real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: chi2          ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
      real(sp),     allocatable, dimension(:,:,:,:,:) :: tod_sim       ! (time, freq, sideband, detector, simulations)
@@ -211,7 +212,7 @@ contains
 
     ! Trim end for NaNs
     nsamp = nsamp_tot
-    do while (nsamp > nsamp_tot - 100)
+    do while (nsamp > nsamp_tot - 10)
        ok = .true.
        do i = 1, ndet
           if (.not. is_alive(data%pixels(i))) cycle
@@ -467,6 +468,7 @@ contains
     if(allocated(data%Tsys_lowres))   deallocate(data%Tsys_lowres)
     if(allocated(data%fknee))         deallocate(data%fknee)
     if(allocated(data%freqmask))      deallocate(data%freqmask)
+    if(allocated(data%chi2))          deallocate(data%chi2)
     if(allocated(data%freqmask_full)) deallocate(data%freqmask_full)
     if(allocated(data%freqmask_reason)) deallocate(data%freqmask_reason)
     if(allocated(data%mean_tp))       deallocate(data%mean_tp)
@@ -519,6 +521,7 @@ contains
     call write_hdf(file, "n_nan",             data%n_nan)
     call write_hdf(file, "tod_sim",           data%tod_sim)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
+    if (allocated(data%chi2)) call write_hdf(file, "chi2",           data%chi2)
     call write_hdf(file, "polyorder",         data%polyorder)
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",         data%tod_poly)
@@ -752,6 +755,10 @@ contains
     if(allocated(lx_in%freqmask))      then
        allocate(lx_out%freqmask(size(lx_in%freqmask,1),size(lx_in%freqmask,2),size(lx_in%freqmask,3)))
        lx_out%freqmask = lx_in%freqmask
+    end if
+    if(allocated(lx_in%chi2))      then
+       allocate(lx_out%chi2(size(lx_in%chi2,1),size(lx_in%chi2,2),size(lx_in%chi2,3)))
+       lx_out%chi2 = lx_in%chi2
     end if
     if(allocated(lx_in%Tsys_lowres))      then
        allocate(lx_out%Tsys_lowres(size(lx_in%Tsys_lowres,1),size(lx_in%Tsys_lowres,2),size(lx_in%Tsys_lowres,3)))

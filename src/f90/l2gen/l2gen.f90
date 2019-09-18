@@ -2037,7 +2037,7 @@ contains
     type(Lx_struct),                   intent(out) :: data_out
 
     integer(i4b) :: i, j, k, l, m, n, nsamp_in, nsamp_out, ndet, dt, dnu, nsb, numfreq_in, nw
-    real(dp)     :: w, weight
+    real(dp)     :: w, weight, var
     real(dp), allocatable, dimension(:,:,:) :: sigmasq
 
     nsb                      = size(data_in%tod,3)
@@ -2063,6 +2063,7 @@ contains
     allocate(data_out%point_cel(3,nsamp_out,ndet))
     allocate(data_out%flag(nsamp_out))
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
+    allocate(data_out%chi2(numfreq_out,nsb,ndet))
     allocate(data_out%Tsys(2,numfreq_in,nsb,ndet))
     allocate(data_out%Tsys_lowres(numfreq_out,nsb,ndet))
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
@@ -2223,7 +2224,22 @@ contains
           end do
        end do
     end do
-  
+
+
+    data_out%chi2 = 0.d0
+    ! calculate chisquared statistics on decimated data
+    do i = 1, ndet
+       if (.not. is_alive(data_out%pixels(i))) cycle
+       do j = 1, nsb
+          do k = 1, numfreq_out
+             if (data_out%freqmask(k,j,i) == 0) cycle
+             var = variance(data_out%tod(2:,k,j,i) - data_out%tod(:nsamp_out-1,k,j,i)) / 2
+             data_out%chi2(k,j,i) = (sum(data_out%tod(:,k,j,i) ** 2) / var - nsamp_out) / sqrt(2.d0*nsamp_out)
+          end do
+       end do
+    end do
+
+
     ! Polyfiltered TOD
     data_out%polyorder = data_in%polyorder
     if (data_out%polyorder >= 0) then
