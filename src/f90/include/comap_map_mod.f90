@@ -98,8 +98,8 @@ contains
     call write_hdf(file, "feeds", map%feeds)
 
     ! For simulated data 
-    call write_hdf(file, "map_sim", map%m_sim(:,:,1,1,1,:)) 
-    call write_hdf(file, "rms_sim", map%rms_sim(:,:,1,1,1,:)) 
+    call write_hdf(file, "map_sim", map%m_sim)!(:,:,1,1,1,:)) 
+    call write_hdf(file, "rms_sim", map%rms_sim)!(:,:,1,1,1,:)) 
 
     call close_hdf_file(file)
 

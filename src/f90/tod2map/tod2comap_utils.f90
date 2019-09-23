@@ -77,30 +77,38 @@ contains
     !write(*,*) shape(data%point), tod%nsamp
     tod%pixel = -200
 
+    do k = 1, tod%ndet
+       do l = 1, tod%nsb
+          do j = 1, tod%nfreq
+             if (tod%freqmask(j,l,k) == 0) cycle
+             !do j = 6, 6
+             do i = 1, tod%nsamp
+                tod%d_raw(i,j,l,k) = data%tod(i,j,l,k)
+             end do
+             ! Apply high pass filter
+             tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) !- 1.d0 ! remove at some point
+             !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
+             if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
-    do h = 1, tod%nsim
-       do k = 1, tod%ndet
-          do l = 1, tod%nsb
-             do j = 1, tod%nfreq
-                if (tod%freqmask(j,l,k) == 0) cycle
-                !do j = 6, 6
+             ! Estimate RMS
+             tod%rms(:,j,l,k) = 1.d0! sqrt(variance(tod%d(:,j,l,k)))
+
+             do h=1, tod%nsim
                 do i = 1, tod%nsamp
-                   tod%d_raw(i,j,l,k) = data%tod(i,j,l,k)
                    tod%d_raw_sim(i,j,l,k,h) = data%tod_sim(i,j,l,k,h)
                 end do
                 ! Apply high pass filter
-                tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) !- 1.d0 ! remove at some point
                 tod%d_sim(:,j,l,k,h) = tod%d_raw_sim(:,j,l,k,h)
                 !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
-                if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
+                if (hifreq) call hp_filter(nu_cut, tod%d_sim(:,j,l,k,h),tod%samprate)
 
                 ! Estimate RMS
-                tod%rms(:,j,l,k) = sqrt(variance(tod%d(:,j,l,k)))
                 tod%rms_sim(:,j,l,k,h) = sqrt(variance(tod%d_sim(:,j,l,k,h)))
              end do
           end do
        end do
     end do
+
 
     call free_lx_struct(data)
 
