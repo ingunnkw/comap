@@ -339,7 +339,6 @@ contains
        end do
     end do
 
-
     map_tot%dsum = map_tot%dsum + map_scan%dsum
     map_tot%div  = map_tot%div  + map_scan%div
 

@@ -52,7 +52,6 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:)     :: chi2          ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
-     real(sp),     allocatable, dimension(:,:,:,:,:) :: tod_sim       ! (time, freq, sideband, detector, simulations)
 
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
@@ -318,10 +317,6 @@ contains
     allocate(data%n_nan(nfreq_full,nsb,ndet))
     call read_hdf(file, "n_nan",            data%n_nan)
 
-    call get_size_hdf(file,"tod_sim", ext)
-    allocate(data%tod_sim(ext(1),ext(2),ext(3),ext(4),ext(5)))
-    call read_hdf(file, "tod_sim",         data%tod_sim)
-
     call read_hdf(file, "polyorder",        data%polyorder)
     !if (data%polyorder >= 0) then
     !   allocate(data%tod_poly(nsamp,0:data%polyorder,nsb,ndet))
@@ -487,7 +482,6 @@ contains
     if(allocated(data%diagnostics))   deallocate(data%diagnostics)
     if(allocated(data%spike_data))    deallocate(data%spike_data)
     if(allocated(data%cut_params))    deallocate(data%cut_params)
-    if(allocated(data%tod_sim))       deallocate(data%tod_sim)
     if(allocated(data%t_hot))         deallocate(data%t_hot)
     if(allocated(data%amb_state))     deallocate(data%amb_state)
     if(allocated(data%amb_time))      deallocate(data%amb_time)
@@ -520,7 +514,6 @@ contains
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     call write_hdf(file, "freqmask_reason",   data%freqmask_reason)
     call write_hdf(file, "n_nan",             data%n_nan)
-    call write_hdf(file, "tod_sim",           data%tod_sim)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     if (allocated(data%chi2)) call write_hdf(file, "chi2",           data%chi2)
     call write_hdf(file, "polyorder",         data%polyorder)
@@ -835,11 +828,6 @@ contains
        allocate(lx_out%sec(size(lx_in%sec,1)))
        lx_out%sec = lx_in%sec
     end if
-    if(allocated(lx_in%tod_sim))         then  
-       allocate(lx_out%tod_sim(size(lx_in%tod_sim,1),size(lx_in%tod_sim,2),size(lx_in%tod_sim,3),size(lx_in%tod_sim,4), size(lx_in%tod_sim,5)))
-       lx_out%tod_sim = lx_in%tod_sim
-    end if
-   
 
  !   write(*,*) "end"
   end subroutine copy_lx_struct

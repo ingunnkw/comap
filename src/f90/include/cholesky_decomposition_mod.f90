@@ -12,10 +12,10 @@ module cholesky_decomposition_mod
 
       integer(i4b) :: i,j  
 
-
       G(:,:)=0.0d0
       do j = 1, n
          if (A(j,j) == 0.d0) cycle
+         if (A(j,j) < dot_product(G(j,1:j-1),G(j,1:j-1))) cycle
          G(j,j) = sqrt( A(j,j) - dot_product(G(j,1:j-1),G(j,1:j-1)) )
          do i = j+1, n
             G(i,j)  = ( A(i,j) - dot_product(G(i,1:j-1),G(j,1:j-1)) ) / G(j,j)
