@@ -486,23 +486,72 @@ contains
   !   integer(i4b) :: i, j, k, l, nomp, nsamp, nfreq, nsb, ndet, err
   !   integer*8    :: plan_fwd, plan_back
   !   real(dp)     :: samprate, nu
-  !   real(sp),     allocatable, dimension(:) :: dt, tod
+  !   real(dp),     allocatable, dimension(:) :: dt, dt2, tod, x, v
   !   complex(spc), allocatable, dimension(:) :: dv
     
-  !   nsamp = 10
+  !   nsamp = 11
     
-  !   i = 0
-  !   ts:do 
-  !      i = i+1
-  !      if (i > nsamp - 1) exit
-  !      do j = 1, 5
-  !         !do k = 1, 5
-  !         write(*,*) i, j, k
-  !         i = i + 2
-  !         cycle ts
-  !         !end do
-  !      end do
-  !   end do ts
+    
+  !   allocate(dt(nsamp), dt2(nsamp), tod(nsamp), x(nsamp), v(nsamp))
+    
+  !   do i = 1, nsamp
+  !      v(i) =  (i - nsamp/2.d0) ** 4
+  !      tod(i) = sqrt(v(i)) * rand_gauss(rng_handle)
+  !      x(i) = (i-1) * 1.d0 / (nsamp-1.d0)
+  !   end do
+  !   dt(:) = tod(:)
+    
+  !   call smooth_spline('inv_var', 1.d-1, x, dt, 1.d30, 1.d30, dt2, v)
+
+  !   open(58,file='test.dat')
+  !   do i = 1, nsamp
+  !      write(58,*) x(i), tod(i), dt(i)
+  !   end do
+  !   close(58)
+
+  !   nsb = 1000
+  !   open(58,file='test2.dat')
+  !   do i = 1, nsb
+  !      write(58,*) (i-1) * 1.d0 / (nsb-1.d0), splint(x, dt, dt2, (i-1) * 1.d0 / (nsb-1.d0))
+  !   end do
+  !   close(58)
+
+
+  !   !   subroutine smooth_spline(weight, alpha, x, y, yp1, ypn, y2, variance)
+  !   ! implicit none
+
+  !   ! character(len=*),       intent(in)    :: weight
+  !   ! real(dp),               intent(in)    :: alpha, yp1, ypn
+  !   ! real(dp), dimension(:), intent(in)    :: x
+  !   ! real(dp), dimension(:), intent(in), optional    :: variance
+  !   ! real(dp), dimension(:), intent(inout) :: y
+  !   ! real(dp), dimension(:), intent(out)   :: y2
+
+
+  ! ! ! Routines from Numerical Recipes
+  ! ! subroutine spline_plain(x, y, yp1, ypn, y2)
+  ! !   implicit none
+
+  ! !   real(dp),               intent(in)  :: yp1, ypn
+  ! !   real(dp), dimension(:), intent(in)  :: x, y
+  ! !   real(dp), dimension(:), intent(out) :: y2
+
+    
+
+  !   ! nsamp = 10
+    
+  !   ! i = 0
+  !   ! ts:do 
+  !   !    i = i+1
+  !   !    if (i > nsamp - 1) exit
+  !   !    do j = 1, 5
+  !   !       !do k = 1, 5
+  !   !       write(*,*) i, j, k
+  !   !       i = i + 2
+  !   !       cycle ts
+  !   !       !end do
+  !   !    end do
+  !   ! end do ts
   !   ! nsamp       = 1000
   !   ! samprate    = 50.d0    
   !   ! n           = nsamp+1
@@ -628,6 +677,7 @@ contains
        if (.not. is_alive(data%pixels(n))) cycle
        do l = 1, nsb
           do m = -20, 19
+             if ((isnan(data%tod_poly(i+m+1,0,l,n))) .or. (isnan(data%tod_poly(i+m,0,l,n)))) cycle
              fwd(21 + m + 1,l,n) = fwd(21 + m,l,n) * gamma + data%tod_poly(i + m + 1,0,l,n) - data%tod_poly(i + m,0,l,n)
           end do
        end do
@@ -727,7 +777,7 @@ contains
              data_l2%freqmask_full(:,j,i) = 0.d0
              if (verb) then
                 write(*,*) "Rejecting entire sideband (too much was masked) det, sb, acceptrate, scanid:"
-                write(*,*) i, j, data_l2%acceptrate(j,i), id
+                write(*,*) data_l2%pixels(i), j, data_l2%acceptrate(j,i), id
              end if
              data_l2%acceptrate(j,i) = 0.d0
           end if
@@ -2455,6 +2505,9 @@ contains
                 end if
                 data%freqmask_full(i,j,k) = 0.d0
                 data%freqmask_reason(i,j,k) = 2
+             end if
+             if (all(data%tod(:,i,j,k) == 0.d0)) then
+                data%freqmask_full(i,j,k) = 0.d0
              end if
           end do
        end do

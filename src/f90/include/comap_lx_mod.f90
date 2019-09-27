@@ -195,24 +195,25 @@ contains
              numbad = count(buffer_4d(:,k,j,i) .ne. buffer_4d(:,k,j,i))
              data%n_nan(k,j,i) = numbad
              
-             ! if (numbad > 0.1*nsamp_tot) then
-             !    num_masked = num_masked + 1
-             !    if (verb) then
-             !       if (num_masked < 5) then
-             !          write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, data%pixels(i), j, k
-             !       end if
-             !       if (num_masked == 4) then
-             !          write(*,*) "Suppressing NaN warnings for the rest of this sideband"
-             !       end if
-             !    end if
-             ! end if
+             if (numbad > 0.1*nsamp_tot) then
+                buffer_4d(:,k,j,i) = 0.d0
+                num_masked = num_masked + 1
+                if (verb) then
+                   if (num_masked < 5) then
+                      write(*,fmt='(a,i8,i6,i4,i8)') '  Removing frequency with >10% NaNs -- ', id, data%pixels(i), j, k
+                   end if
+                   if (num_masked == 4) then
+                      write(*,*) "Suppressing NaN warnings for the rest of this sideband"
+                   end if
+                end if
+             end if
           end do
        end do
     end do
 
     ! Trim end for NaNs
     nsamp = nsamp_tot
-    do while (nsamp > nsamp_tot - 10)
+    do while (nsamp > nsamp_tot - 500)
        ok = .true.
        do i = 1, ndet
           if (.not. is_alive(data%pixels(i))) cycle
