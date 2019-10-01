@@ -247,6 +247,8 @@ program l2gen
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
            call update_status(status, 'decimate')
         
+           ! Fit noise
+           call fit_noise(data_l2_decimated)
 
            ! Write L2 file to disk
            if (verb) then
