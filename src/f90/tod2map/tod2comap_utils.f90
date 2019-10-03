@@ -159,7 +159,7 @@ contains
     character(len=512)   :: corrmatrixfile
 
     integer(i4b) :: n_freq, n_samples, n_bands, n_feeds, i, j, k, l, m, o, p, x, y, n_sim, brute_force
-    real(dp)     :: dnu, tau, s, x_bar, y_bar, x_std, y_std
+    real(dp)     :: s, x_bar, y_bar, x_std, y_std
 
     call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS',       par_int=n_sim) 
     call get_parameter(0, parfile, 'CORR_MATRIX_LOC',           par_string=corrmatrixfile)
@@ -169,10 +169,6 @@ contains
     n_freq       = size(data%freqmask,1) ! Number of frequency channels                                                    
     n_bands      = size(data%tod,3)      ! Number of side-bands                                                            
     n_feeds      = size(data%tod,4)      ! Number of feeds                                                                 
-
-
-    dnu = (data%nu(2, 1, 1) - data%nu(3, 1, 1)) * 1d9  ! Width of frequency channel [Hz]                                   
-    tau = 1.d0/data%samprate                           ! Sampling time [s]                                                 
 
     allocate(cholesky_of_corr(n_freq, n_freq))
     allocate(z(n_freq))
@@ -209,7 +205,7 @@ contains
                       z(o) = rand_gauss(rng_handle)
                    end do
 
-                   tod_sim(i,:,j,k,m) = matmul(cholesky_of_corr,z) * data%Tsys_lowres(:,j,k)/sqrt(dnu*tau)
+                   tod_sim(i,:,j,k,m) = matmul(cholesky_of_corr,z) * data%sigma0(:,j,k) 
 
                 end do
              end do
@@ -265,7 +261,7 @@ contains
                       z(o) = rand_gauss(rng_handle)
                    end do
 
-                   tod_sim(i,:,j,k,m) = matmul(cholesky_of_data_corr(:,:,j,k), z) * data%Tsys_lowres(:,j,k)/sqrt(dnu*tau)
+                   tod_sim(i,:,j,k,m) = matmul(cholesky_of_data_corr(:,:,j,k), z) * data%sigma0(:,j,k)
 
                 end do
              end do
