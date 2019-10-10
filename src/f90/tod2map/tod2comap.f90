@@ -150,12 +150,20 @@ program tod2comap
   call mpi_allreduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit, buffer%nhit, size(map_tot%nhit), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%div_co, buffer%div_co, size(map_tot%div_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum_co, buffer%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit_co, buffer%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%rms_co, buffer%rms_co, size(map_tot%rms_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
 
   if (myid == 0) then
      map_tot%div  = buffer%div
      map_tot%dsum = buffer%dsum
      map_tot%nhit = buffer%nhit
      map_tot%rms  = buffer%rms
+     map_tot%div_co  = buffer%div_co
+     map_tot%dsum_co = buffer%dsum_co
+     map_tot%nhit_co = buffer%nhit_co
+     map_tot%rms_co  = buffer%rms_co
      write(*,*) 'sum', sum(abs(map_tot%dsum)), sum(abs(map_tot%div))
      write(*,*) "Finalising"
      call finalize_binning(map_tot)
