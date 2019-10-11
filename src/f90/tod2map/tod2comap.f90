@@ -136,7 +136,7 @@ program tod2comap
         !call nullify_map_type(map_scan)
         call time2pix(tod, map_scan, parfile, pinfo)
         call time2pix(tod, map_tot, parfile, pinfo)
-        write(*,*) myid, "making maps, scan", i, 'subscan', j
+        write(*,*) myid, "making maps, obsID", i, 'scan', j
         call binning(map_tot, map_scan, tod, i, parfile, pinfo)
         !call finalize_scan_binning(map_scan)
         !prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
@@ -150,7 +150,7 @@ program tod2comap
 
      prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
      map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
-     call output_submap_h5(map_filename, map_scan)
+     call output_map_h5(map_filename, map_scan)
      !call free_map_type(map_scan)
      call free_tod_type(tod)
 
