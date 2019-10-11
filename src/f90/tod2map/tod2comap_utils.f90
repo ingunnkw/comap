@@ -12,10 +12,12 @@ module tod2comap_utils
      integer(i4b), allocatable, dimension(:)   :: feeds                ! active feeds
      real(sp), allocatable, dimension(:,:,:)   :: freqmask             ! (freq, sb, det)
      real(dp), allocatable, dimension(:)       :: t                    ! (time) 
-     real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
-     real(dp), allocatable, dimension(:,:,:,:) :: d_sim, d_raw_sim, rms_sim ! (time, freq,  sb, det, sim)   
+     real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g  ! (time, freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:,:) :: d_sim, d_raw_sim    ! (time, freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:)   :: rms                    ! (freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:)   :: rms_sim                ! (freq,  sb, det)   
      real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
-     real(dp), allocatable, dimension(:,:) :: pixel               ! (sb, freq) or (time, det)
+     real(dp), allocatable, dimension(:,:)     :: pixel               ! (sb, freq) or (time, det)
      real(dp), allocatable, dimension(:,:,:)   :: point, point_tel     ! (det, 3, time)
 
   end type tod_type
@@ -53,7 +55,7 @@ contains
          & tod%d_raw(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%rms(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%feeds(tod%ndet) )
 
     allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
@@ -89,7 +91,7 @@ contains
              if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
              ! Estimate RMS
-             tod%rms(:,j,l,k) = sqrt(variance(tod%d(:,j,l,k)))
+             tod%rms(j,l,k) = sqrt(variance(tod%d(:,j,l,k)))
           end do
        end do
     end do
@@ -130,7 +132,7 @@ contains
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d_raw_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%d_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%rms_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%rms_sim(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%feeds(tod%ndet) )
 
     allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
@@ -165,8 +167,8 @@ contains
              if (hifreq) call hp_filter(nu_cut, tod%d_sim(:,j,l,k),tod%samprate)
              
              ! Estimate RMS
-             tod%rms_sim(:,j,l,k) = sqrt(variance(tod%d_sim(:,j,l,k)))
-             
+             tod%rms_sim(j,l,k) = sqrt(variance(tod%d_sim(:,j,l,k)))
+
           end do
        end do
     end do

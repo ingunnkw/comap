@@ -91,24 +91,35 @@ contains
          & map%nhit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%div(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%dsum_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%nhit_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%div_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%rms_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%m_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
          & map%freq(map%nfreq, map%nsb), &
          & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot))
 
-    map%dsum = 0.d0
-    map%nhit = 0.d0
-    map%div  = 0.d0
-    map%m    = 0.d0
-    map%rms  = 0.d0
-    map%freq = 0.d0
+    map%dsum    = 0.0
+    map%nhit    = 0
+    map%div     = 0.0
+    map%m       = 0.0
+    map%rms     = 0.0
+    map%freq    = 0.d0    
+    map%dsum_co = 0.0
+    map%nhit_co = 0
+    map%div_co  = 0.0
+    map%m_co    = 0.0
+    map%rms_co  = 0.0
+
     
     ! Simulated data
-    map%dsum_sim = 0.d0
-    map%div_sim  = 0.d0 
-    map%m_sim    = 0.d0
-    map%rms_sim  = 0.d0 
+    map%dsum_sim = 0.0
+    map%div_sim  = 0.0 
+    map%m_sim    = 0.0
+    map%rms_sim  = 0.0 
   end subroutine initialize_mapmaker
 
 
@@ -151,6 +162,7 @@ contains
     do j = 1, tod%ndet
        det = tod%feeds(j)
        if (.not. is_alive(det)) cycle
+       !sigma0(:,:) = sigma0(:,:) + tod%sigma0(:,:,det)
        !write(*,*) j, det
        do i = 1, tod%nsamp
           if (trim(coord_system) .eq. 'horizontal') then
@@ -169,9 +181,9 @@ contains
                 do freq = 1, tod%nfreq
                    if (tod%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
-                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1.d0
-                   sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,det)
-                end do
+                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1
+                   map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
+                 end do
              end do
           else
              tod%pixel(i,det) = -200
@@ -184,17 +196,16 @@ contains
     !write(*,*) 'Wall time time2pix = ', t2-t1
     !sigma0 = sigma0/size(tod)
     
-
-    do sb = 1, tod%nsb
-       do freq = 1, tod%nfreq
-          if (sigma0(freq,sb) == 0) cycle
-          where(map%nhit(:,:,freq,sb,:) > 0)
-             map%rms(:,:,freq,sb,:) = map%rms(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2 
-          elsewhere
-             map%rms(:,:,freq,sb,:) = 0.d0
-          end where
-       end do
-    end do
+    !do sb = 1, tod%nsb
+    !   do freq = 1, tod%nfreq
+    !      if (sigma0(freq,sb) == 0) cycle
+    !      where(map%nhit(:,:,freq,sb,:) > 0)
+    !         map%rms(:,:,freq,sb,:) = map%rms(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2 
+    !      elsewhere
+    !         map%rms(:,:,freq,sb,:) = 0.d0
+    !      end where
+    !   end do
+    !end do
 
     !call mpi_finalize(i)
     !stop
@@ -266,17 +277,16 @@ contains
        end do
     end do
 
-    do sb = 1, tod%nsb
-       do freq = 1, tod%nfreq
-          if (sigma0(freq,sb) == 0) cycle
-          where(map%nhit(:,:,freq,sb,:) > 0)
-             map%rms_sim(:,:,freq,sb,:) = map%rms_sim(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2 
-          elsewhere
-             map%rms_sim(:,:,freq,sb,:) = 0.d0
-          end where
-       end do
-    end do
-
+    ! do sb = 1, tod%nsb
+    !    do freq = 1, tod%nfreq
+    !       if (sigma0(freq,sb) == 0) cycle
+    !       where(map%nhit(:,:,freq,sb,:) > 0)
+    !          map%rms_sim(:,:,freq,sb,:) = map%rms_sim(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2 
+    !       elsewhere
+    !          map%rms_sim(:,:,freq,sb,:) = 0.d0
+    !       end where
+    !    end do
+    ! end do
 
     deallocate(sigma0)
 
@@ -388,20 +398,27 @@ contains
              do freq = 1, nfreq
                 !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
                 if (tod%freqmask(freq,sb,j) == 0) cycle
-                if (tod%rms(i,freq,sb,j) == 0.d0) cycle
+                if (tod%rms(freq,sb,j) == 0.d0) cycle
                 !write(*,*) i, det, sb, freq
                 !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                 !write(*,*) tod%rms(i,freq,sb,det)
-                map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2
+
+                map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map_scan%div(p,q,freq,sb,det)  = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2
+                map_scan%dsum_co(p,q,freq,sb)  = map_scan%dsum_co(p,q,freq,sb) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map_scan%div_co(p,q,freq,sb)   = map_scan%div_co(p,q,freq,sb) + 1.d0 / tod%rms(freq,sb,j)**2
+
                 !end if
              end do
           end do
        end do
     end do
 
-    map_tot%dsum = map_tot%dsum + map_scan%dsum
-    map_tot%div  = map_tot%div  + map_scan%div
+    map_tot%dsum    = map_tot%dsum + map_scan%dsum
+    map_tot%div     = map_tot%div  + map_scan%div
+    map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
+    map_tot%div_co  = map_tot%div_co  + map_scan%div_co
+
     !write(*,*) 'Ending coadding'
 
   end subroutine binning
@@ -454,9 +471,9 @@ contains
              do freq = 1, nfreq
                 !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
                 if (tod%freqmask(freq,sb,j) == 0) cycle
-                if (tod%rms_sim(i,freq,sb,j) == 0.d0) cycle
-                map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(i,freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
-                map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(i,freq,sb,j)**2
+                if (tod%rms_sim(freq,sb,j) == 0.d0) cycle
+                map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
+                map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
                 !end if
              end do
           end do
@@ -501,6 +518,15 @@ contains
        map%rms = 0.d0
     end where
 
+    ! Co-added feeds
+    where(map%div_co > 0)
+       map%m_co   = map%dsum_co / map%div_co
+       map%rms_co = 1.d0 / sqrt(map%div_co)
+    elsewhere
+       map%m_co   = 0.d0
+       map%rms_co = 0.d0
+    end where
+
   end subroutine finalize_scan_binning
 
 
@@ -515,11 +541,9 @@ contains
     where(map%div_sim > 0) 
        map%m_sim = map%dsum_sim / map%div_sim 
        map%rms_sim = 1.d0 / sqrt(map%div_sim)
- 
     elsewhere
        map%m_sim   = 0.d0 
        map%rms_sim = 0.d0
-
     end where
 
   end subroutine finalize_scan_binning_sim
@@ -529,28 +553,30 @@ contains
     implicit none
     type(map_type), intent(inout) :: map
 
-   ! write(*,*) count(map%div > 0)
     where(map%div > 0)
-       !write(*,*) map%dsum, map%div
        map%m   = map%dsum / map%div
-       map%rms = 1.d0 / sqrt(map%div) ! overwrite
-
+       map%rms = 1.d0 / sqrt(map%div)
     elsewhere
        map%m   = 0.d0
        map%rms = 0.d0
-
     end where
- 
+
+    ! Co-added feeds
+    where(map%div_co > 0)
+       map%m_co   = map%dsum_co / map%div_co
+       map%rms_co = 1.0 / sqrt(map%div_co)
+    elsewhere
+       map%m_co   = 0.0
+       map%rms_co = 0.0
+    end where 
 
     ! Simulated data
     where(map%div_sim > 0)
        map%m_sim   = map%dsum_sim / map%div_sim 
-       map%rms_sim = 1.d0 / sqrt(map%div_sim) 
-
+       map%rms_sim = 1.0 / sqrt(map%div_sim) 
     elsewhere
-       map%m_sim   = 0.d0 
-       map%rms_sim = 0.d0 
-
+       map%m_sim   = 0.0 
+       map%rms_sim = 0.0 
     end where
 
 

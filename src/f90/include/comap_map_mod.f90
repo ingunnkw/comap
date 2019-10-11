@@ -12,13 +12,16 @@ module comap_map_mod
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
      character(len=512) :: name
-     integer(i4b), allocatable, dimension(:)       :: feeds
-     real(dp),     allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
-     real(dp),     allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
-     real(sp),     allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
-     real(sp),     allocatable, dimension(:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim   !(n_x, n_y, nfreq, nsb, ndet)
-     integer(i4b), allocatable, dimension(:,:,:,:,:) :: nhit
-     real(dp),     allocatable, dimension(:,:)       :: sigma0
+
+     integer(i4b), allocatable, dimension(:)          :: feeds
+     real(dp),     allocatable, dimension(:)          :: x, y, k                           ! (n_x or n_y or n_k)
+     real(dp),     allocatable, dimension(:,:)        :: freq                              ! (nfreq, nsb)
+     real(sp),     allocatable, dimension(:,:,:,:,:)  :: m, rms, dsum, div                 ! (n_x, n_y, nfreq, nsb, ndet)
+     real(sp),     allocatable, dimension(:,:,:,:)    :: m_co, rms_co, dsum_co, div_co     ! (n_x, n_y, nfreq, nsb)
+     real(sp),     allocatable, dimension(:,:,:,:,:)  :: m_sim, rms_sim, dsum_sim, div_sim ! (n_x, n_y, nfreq, nsb, ndet)
+     integer(i4b), allocatable, dimension(:,:,:,:,:)  :: nhit                              ! (n_x, n_y, nfreq, nsb, ndet)
+     integer(i4b), allocatable, dimension(:,:,:,:)    :: nhit_co                           ! (n_x, n_y, nfreq, nsb)
+
   end type map_type
 
 
@@ -46,9 +49,10 @@ contains
        call write_hdf(file, "map", map%m)
        call write_hdf(file, "rms", map%rms)
        call write_hdf(file, "nhit", map%nhit)
-       call write_hdf(file, "map_beam", sum(map%m,dim=5))
-       call write_hdf(file, "rms_beam", sum(map%rms,dim=5))
-       call write_hdf(file, "nhit_beam", sum(map%nhit,dim=5))
+       call write_hdf(file, "map_beam", map%m_co)
+       call write_hdf(file, "rms_beam", map%rms_co)
+       call write_hdf(file, "nhit_beam", map%nhit_co)
+
     end if
     call write_hdf(file, "freq", map%freq)
     call write_hdf(file, "mean_az", map%mean_az)
@@ -74,9 +78,11 @@ contains
     call open_hdf_file(trim(filename), file, "w")
 
     ! For simulated data 
-    call write_hdf(file, "map_sim", map%m_sim)!(:,:,1,1,1,:)) 
-    call write_hdf(file, "rms_sim", map%rms_sim)!(:,:,1,1,1,:)) 
-    call write_hdf(file, "sim", sim) 
+    call write_hdf(file, "map_sim", map%m_sim) 
+    call write_hdf(file, "rms_sim", map%rms_sim)
+    call write_hdf(file, "sim", sim)  
+    ! call write_hdf(file, "map_sim_beam", sum(map%m_sim, dim=5))
+    ! call write_hdf(file, "rms_sim_beam", sum(map%rms_sim, dim=5))
 
     call close_hdf_file(file)
 
@@ -222,11 +228,16 @@ contains
     implicit none
     type(map_type), intent(inout) :: map
 
-    map%m    = 0.d0
-    map%rms  = 0.d0
-    map%dsum = 0.d0
-    map%div  = 0.d0
-    map%nhit = 0.d0
+    map%m       = 0.d0
+    map%rms     = 0.d0
+    map%dsum    = 0.d0
+    map%div     = 0.d0
+    map%nhit    = 0.d0
+    map%m_co    = 0.d0
+    map%rms_co  = 0.d0
+    map%dsum_co = 0.d0
+    map%div_co  = 0.d0
+    map%nhit_co = 0.d0
 
     ! Simulated data
     map%m_sim    = 0.d0
@@ -241,16 +252,22 @@ contains
     implicit none
     type(map_type), intent(inout) :: map
 
-    if (allocated(map%x))     deallocate(map%x) 
-    if (allocated(map%y))     deallocate(map%y)
-    if (allocated(map%freq))  deallocate(map%freq)
-    if (allocated(map%k))     deallocate(map%k)
-    if (allocated(map%m))     deallocate(map%m)
-    if (allocated(map%rms))   deallocate(map%rms)
-    if (allocated(map%dsum))  deallocate(map%dsum)
-    if (allocated(map%nhit))  deallocate(map%nhit)
-    if (allocated(map%div))   deallocate(map%div)
-    if (allocated(map%feeds)) deallocate(map%feeds)
+    if (allocated(map%x))       deallocate(map%x) 
+    if (allocated(map%y))       deallocate(map%y)
+    if (allocated(map%freq))    deallocate(map%freq)
+    if (allocated(map%k))       deallocate(map%k)
+    if (allocated(map%m))       deallocate(map%m)
+    if (allocated(map%rms))     deallocate(map%rms)
+    if (allocated(map%dsum))    deallocate(map%dsum)
+    if (allocated(map%nhit))    deallocate(map%nhit)
+    if (allocated(map%div))     deallocate(map%div)
+    if (allocated(map%feeds))   deallocate(map%feeds)
+    if (allocated(map%m_co))    deallocate(map%m_co)
+    if (allocated(map%rms_co))  deallocate(map%rms_co)
+    if (allocated(map%nhit_co)) deallocate(map%nhit_co)
+    if (allocated(map%div_co))  deallocate(map%div_co)
+    if (allocated(map%dsum_co)) deallocate(map%dsum_co)
+
 
     ! Simulated data 
     if (allocated(map%m_sim))    deallocate(map%m_sim)
