@@ -8,6 +8,7 @@ program tod2comap
   use quiet_fft_mod
   use quiet_hdf_mod
   use tod2comap_mapmaker
+  use rngmod
   !use tod2comap_utils
   implicit none
 
@@ -30,21 +31,23 @@ program tod2comap
   type(patch_info)      :: pinfo
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
-  character(len=512)    :: filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
+  character(len=512)    :: filename, map_filename, sim_filename, parfile, acceptfile, prefix, prefix_sim, pre, pre_sim, map_name, object, coord_system, l1file, sim_name
   character(len=6)      :: obsid
-  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq
+  character(len=5)      :: sim_string
+  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim
 
   integer(i4b)          :: myid, nproc, ierr, root
   logical               :: binning_split, found
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
 
+  type(planck_rng)      :: rng_handle
+  integer(i4b)          :: seed
 
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
   root = 0
-
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! mpi per scan, all detectors
@@ -55,7 +58,15 @@ program tod2comap
   !write(*,*) get_obj_info('jupiter', 58526.592246526d0)
   !stop
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
+  call get_parameter(0, parfile, 'SIM_DIR', par_string=pre_sim)
   call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+  call get_parameter(0, parfile, 'MAP_NAME', par_string=map_name)
+  call get_parameter(0, parfile, 'SIM_NAME', par_string=sim_name)
+  call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
+  call get_parameter(0, parfile, 'SEED', par_int=seed)
+
+  call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
+
   !call get_parameter(0, parfile, 'ACCEPTLIST', par_string=acceptfile)
   binning_split = .true.
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
@@ -105,7 +116,6 @@ program tod2comap
      !write(*,*) myid, i, 'of', nscan
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
-
      call nullify_map_type(map_scan)
 
      ! Get TOD / read level 2 file
@@ -139,11 +149,39 @@ program tod2comap
      call finalize_scan_binning(map_scan)
 
      prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
-     call output_submap_h5(trim(prefix), map_scan)
+     map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+     call output_submap_h5(map_filename, map_scan)
      !call free_map_type(map_scan)
      call free_tod_type(tod)
 
+
+     do sim=1, nsim
+        call nullify_map_type(map_scan)
+        write(*,*) myid, "making sim", sim, 'of', nsim
+        do j = 2, nsub-1
+
+           filename = scan%ss(j)%l2file
+
+           call get_sim(trim(filename), tod, parfile, rng_handle)
+           call time2pix_sim(tod, map_scan, parfile, pinfo)
+           call time2pix_sim(tod, map_tot, parfile, pinfo)
+           call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
+
+        end do
+        call finalize_scan_binning_sim(map_scan)
+
+        call int2string(sim, sim_string)
+        prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
+        sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
+        call output_submap_sim_h5(sim_filename, map_scan, sim)
+        call free_tod_type(tod)
+     end do
+
+
   end do
+
+
+
 
   !call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%div, buffer%div, size(map_tot%div), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
@@ -161,7 +199,8 @@ program tod2comap
      call finalize_binning(map_tot)
      write(*,*) maxval(map_tot%m)
      prefix = trim(pre)//trim(scan%object)
-     call output_map_h5(trim(prefix), map_tot)
+     map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+     call output_map_h5(map_filename, map_tot)
      call free_map_type(map_tot)
   end if
 

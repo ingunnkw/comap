@@ -7,7 +7,7 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, nsim,  n_k, ntheta ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2)
@@ -16,24 +16,23 @@ module comap_map_mod
      real(dp),     allocatable, dimension(:)       :: x, y, k ! (n_x or n_y or n_k)
      real(dp),     allocatable, dimension(:,:)     :: freq    ! (nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:) :: m, rms, dsum, div ! (n_x, n_y, nfreq, nsb, ndet)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim   !(n_x, n_y, nfreq, nsb, ndet, nsim)
+     real(sp),     allocatable, dimension(:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim   !(n_x, n_y, nfreq, nsb, ndet)
      integer(i4b), allocatable, dimension(:,:,:,:,:) :: nhit
+     real(dp),     allocatable, dimension(:,:)       :: sigma0
   end type map_type
 
 
 contains
 
   ! Writes an h5 file with maps/rms/nhit
-  subroutine output_map_h5(prefix, map, det, sb)
+  subroutine output_map_h5(filename, map, det, sb)
     implicit none
-    character(len=*), intent(in)    :: prefix
+    character(len=*), intent(in)    :: filename
     type(map_type),   intent(inout) :: map
     integer(i4b), optional :: det, sb
 
     type(hdf_file)     :: file
-    character(len=512) :: filename
     
-    filename = trim(prefix)//'_'//trim(map%name)//'.h5'
     call open_hdf_file(trim(filename), file, "w")
     call write_hdf(file, "n_x", map%n_x)
     call write_hdf(file, "n_y", map%n_y)
@@ -43,10 +42,6 @@ contains
        call write_hdf(file, "map", map%m(:,:,:,sb:sb,det:det))
        call write_hdf(file, "rms", map%rms(:,:,:,sb:sb,det:det))
        call write_hdf(file, "nhit", map%nhit(:,:,:,sb:sb,det:det))
-
-       ! For simulated data
-       call write_hdf(file, "map_sim", map%m_sim(:,:,:,sb:sb,det:det,:))
-       call write_hdf(file, "rms_sim", map%rms_sim(:,:,:,sb:sb,det:det,:))
     else
        call write_hdf(file, "map", map%m)
        call write_hdf(file, "rms", map%rms)
@@ -54,13 +49,6 @@ contains
        call write_hdf(file, "map_beam", sum(map%m,dim=5))
        call write_hdf(file, "rms_beam", sum(map%rms,dim=5))
        call write_hdf(file, "nhit_beam", sum(map%nhit,dim=5))
-
-       ! For simulated data
-       call write_hdf(file, "map_sim", map%m_sim) 
-       call write_hdf(file, "rms_sim", map%rms_sim) 
-       call write_hdf(file, "map_sim_beam", sum(map%m_sim, dim=5))
-       call write_hdf(file, "rms_sim_beam", sum(map%rms_sim, dim=5))
- 
     end if
     call write_hdf(file, "freq", map%freq)
     call write_hdf(file, "mean_az", map%mean_az)
@@ -74,15 +62,34 @@ contains
   end subroutine output_map_h5
 
 
-  subroutine output_submap_h5(prefix, map)
+  subroutine output_submap_sim_h5(filename, map, sim)
     implicit none
-    character(len=*), intent(in) :: prefix
+    character(len=*), intent(in) :: filename
+    type(map_type),   intent(in) :: map
+    integer(i4b),     intent(in) :: sim
+
+    type(hdf_file)     :: file
+ 
+
+    call open_hdf_file(trim(filename), file, "w")
+
+    ! For simulated data 
+    call write_hdf(file, "map_sim", map%m_sim)!(:,:,1,1,1,:)) 
+    call write_hdf(file, "rms_sim", map%rms_sim)!(:,:,1,1,1,:)) 
+    call write_hdf(file, "sim", sim) 
+
+    call close_hdf_file(file)
+
+  end subroutine output_submap_sim_h5
+
+
+  subroutine output_submap_h5(filename, map)
+    implicit none
+    character(len=*), intent(in) :: filename
     type(map_type),   intent(in) :: map
 
     type(hdf_file)     :: file
-    character(len=512) :: filename
-
-    filename = trim(prefix)//'_'//trim(map%name)//'.h5'
+    
     call open_hdf_file(trim(filename), file, "w")
     call write_hdf(file, "n_x", map%n_x)
     call write_hdf(file, "n_y", map%n_y)
@@ -96,11 +103,6 @@ contains
     call write_hdf(file, "mean_el", map%mean_el)
     call write_hdf(file, "time", map%time)
     call write_hdf(file, "feeds", map%feeds)
-
-    ! For simulated data 
-    call write_hdf(file, "map_sim", map%m_sim)!(:,:,1,1,1,:)) 
-    call write_hdf(file, "rms_sim", map%rms_sim)!(:,:,1,1,1,:)) 
-
     call close_hdf_file(file)
 
   end subroutine output_submap_h5
@@ -113,21 +115,18 @@ contains
     type(map_type),   intent(out) :: map
 
     type(hdf_file) :: file
-    integer(i4b)   :: nx, ny, nfreq, nsb, ndet, nsim, ext(7)
+    integer(i4b)   :: nx, ny, nfreq, nsb, ndet, ext(7)
 
     call free_map_type(map)
 
     call open_hdf_file(trim(filename), file, "r")
 
-    call get_size_hdf(file, "map_sim", ext)
-    nx = ext(1); ny = ext(2); nfreq = ext(3); nsb = ext(4); ndet = ext(5); nsim = ext(6)
+    call get_size_hdf(file, "map", ext)
+    nx = ext(1); ny = ext(2); nfreq = ext(3); nsb = ext(4); ndet = ext(5)
 
     allocate(map%x(nx), map%y(ny))
     allocate(map%m(nx,ny,nfreq,nsb,ndet), map%rms(nx,ny,nfreq,nsb,ndet), map%nhit(nx,ny,nfreq, nsb,ndet))
     allocate(map%freq(nfreq,nsb))
-
-    ! For simulated data 
-    allocate(map%m_sim(nx,ny,nfreq,nsb,ndet,nsim), map%rms_sim(nx,ny,nfreq,nsb,ndet,nsim)) 
     
 
     call read_hdf(file, "n_x", map%n_x)
@@ -142,10 +141,6 @@ contains
     call read_hdf(file, "mean_az", map%mean_az)
     call read_hdf(file, "mean_el", map%mean_el)
     call read_hdf(file, "feeds", map%feeds)
-
-    ! Simulated data
-    call read_hdf(file, "map_sim", map%m_sim) 
-    call read_hdf(file, "rms_sim", map%rms_sim)
 
     call close_hdf_file(file)
 
@@ -262,7 +257,7 @@ contains
     if (allocated(map%rms_sim))  deallocate(map%rms_sim) 
     if (allocated(map%dsum_sim)) deallocate(map%dsum_sim) 
     if (allocated(map%div_sim))  deallocate(map%div_sim) 
-
+ 
   end subroutine free_map_type
 
 end module comap_map_mod

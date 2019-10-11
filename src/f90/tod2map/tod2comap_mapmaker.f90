@@ -27,11 +27,9 @@ contains
 
     ! Set up map grid
     if (allocated(map%x)) return
-    call get_parameter(0, parfile, 'MAP_NAME', par_string=map%name)
     call get_parameter(0, parfile, 'NUMFREQ', par_int=map%nfreq)
     call get_parameter(0, parfile, 'NUM_SIDEBAND', par_int=map%nsb)
     call get_parameter(0, parfile, 'NUM_DET', par_int=map%ndet_tot)
-    call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=map%nsim)
     call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
     
     !fs = 1!200
@@ -94,10 +92,10 @@ contains
          & map%div(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%rms(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
          & map%freq(map%nfreq, map%nsb), &
-         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
-         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
-         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
-         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim))
+         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
+         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot))
 
     map%dsum = 0.d0
     map%nhit = 0.d0
@@ -121,7 +119,7 @@ contains
     character(len=*)                :: parfile
     type(patch_info), intent(in)    :: pinfo
 
-    integer(i4b) :: scan, i, j, p, q, sb, freq, det, sim
+    integer(i4b) :: scan, i, j, p, q, sb, freq, det
     real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
     character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:,:) :: sigma0
@@ -139,7 +137,6 @@ contains
     map%ndet = tod%ndet
     if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
     map%feeds = tod%feeds
-
     
     !call wall_time(t1)
     !!$OMP PARALLEL PRIVATE(scan,j,i,p,q,sb,freq)
@@ -196,14 +193,6 @@ contains
           elsewhere
              map%rms(:,:,freq,sb,:) = 0.d0
           end where
-          ! Simulations
-          do sim = 1, tod%nsim
-             where(map%nhit(:,:,freq,sb,:) > 0)
-                map%rms_sim(:,:,freq,sb,:,sim) = map%rms_sim(:,:,freq,sb,:,sim) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2   
-             elsewhere
-                map%rms_sim(:,:,freq,sb,:,sim) = 0.d0
-             end where
-          end do
        end do
     end do
 
@@ -211,8 +200,88 @@ contains
     !stop
     deallocate(sigma0)
 
-
   end subroutine time2pix
+
+
+  subroutine time2pix_sim(tod, map, parfile, pinfo)
+    implicit none
+    type(tod_type),   intent(inout) :: tod
+    type(map_type),   intent(inout) :: map
+    character(len=*)                :: parfile
+    type(patch_info), intent(in)    :: pinfo
+
+    integer(i4b) :: scan, i, j, p, q, sb, freq, det
+    real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
+    character(len=15) :: coord_system, object
+    real(dp), allocatable, dimension(:,:) :: sigma0
+    real(dp), dimension(3) :: pos
+
+    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+    call initialize_comap_ephem_mod(parfile)
+
+    x_min = map%x(1); x_max = map%x(map%n_x)
+    y_min = map%y(1); y_max = map%y(map%n_y)
+    allocate(sigma0(tod%nfreq,tod%nsb))
+    sigma0 = 0.d0
+
+    map%ndet = tod%ndet
+    if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
+    map%feeds = tod%feeds
+    
+    ! Get position of a non-fixed object (assuming ~no movement during one subscan)
+    pos = 0.d0
+    !write(*,*) pinfo%fixed
+    if (.not. pinfo%fixed) pos = get_obj_info(object,tod%t(1))
+    !write(*,*) pos
+
+    do j = 1, tod%ndet
+       det = tod%feeds(j)
+       if (.not. is_alive(det)) cycle
+       !write(*,*) j, det
+       do i = 1, tod%nsamp
+          if (trim(coord_system) .eq. 'horizontal') then
+             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
+             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
+          else
+             !if (i .eq. 1) write(*,*) det, tod%point(1,i,det)
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
+             !p = min(max(nint((tod%point(1,i,det)-x_min)/map%dthetax),1),map%n_x)
+             !q = min(max(nint((tod%point(2,i,det)-y_min)/map%dthetay),1),map%n_y)
+          end if
+          if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
+             tod%pixel(i,det) = (q-1)*map%n_x + p
+             do sb = 1, tod%nsb
+                do freq = 1, tod%nfreq
+                   if (tod%freqmask(freq,sb,j) == 0) cycle
+                  
+                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1.d0
+                   sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,det)
+                end do
+             end do
+          else
+             tod%pixel(i,det) = -200
+          end if
+       end do
+    end do
+
+    do sb = 1, tod%nsb
+       do freq = 1, tod%nfreq
+          if (sigma0(freq,sb) == 0) cycle
+          where(map%nhit(:,:,freq,sb,:) > 0)
+             map%rms_sim(:,:,freq,sb,:) = map%rms_sim(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2 
+          elsewhere
+             map%rms_sim(:,:,freq,sb,:) = 0.d0
+          end where
+       end do
+    end do
+
+
+    deallocate(sigma0)
+
+  end subroutine time2pix_sim
+
 
 
   subroutine rotation_matrix(ra_center, dec_center, ra, dec)!x, y, z)
@@ -275,7 +344,7 @@ contains
     !type(acceptlist), intent(in)    :: alist
     character(len=*)                :: parfile
 
-    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nsim
+    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
     real(dp)     :: x_min, x_max, y_min, y_max
     character(len=15) :: coord_system, object
@@ -291,7 +360,6 @@ contains
     ndet = map_tot%ndet
     nsb = map_tot%nsb 
     nfreq = map_tot%nfreq
-    nsim  = map_tot%nsim
 
     pos = 0.d0
     if (.not. pinfo%fixed) pos = get_obj_info(object, tod%t(1))
@@ -326,13 +394,6 @@ contains
                 !write(*,*) tod%rms(i,freq,sb,det)
                 map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2 * tod%d(i,freq,sb,j)
                 map_scan%div(p,q,freq,sb,det) = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(i,freq,sb,j)**2
-
-                do sim = 1, tod%nsim
-                   ! Simulattions 
-                   if (tod%rms_sim(i,freq,sb,j,sim) == 0.d0) cycle
-                   map_scan%dsum_sim(p,q,freq,sb,det,sim) = map_scan%dsum_sim(p,q,freq,sb,det,sim) + 1.d0 / tod%rms_sim(i,freq,sb,j,sim)**2 * tod%d_sim(i,freq,sb,j,sim) 
-                   map_scan%div_sim(p,q,freq,sb,det,sim) = map_scan%div_sim(p,q,freq,sb,det,sim) + 1.d0 / tod%rms_sim(i,freq,sb,j,sim)**2
-                end do
                 !end if
              end do
           end do
@@ -341,6 +402,66 @@ contains
 
     map_tot%dsum = map_tot%dsum + map_scan%dsum
     map_tot%div  = map_tot%div  + map_scan%div
+    !write(*,*) 'Ending coadding'
+
+  end subroutine binning
+
+
+  subroutine binning_sim(map_tot, map_scan, tod, scan, parfile, pinfo)!(map_tot, map_scan, tod, alist, scan, parfile)
+    implicit none
+    type(tod_type),   intent(in)    :: tod
+    type(patch_info), intent(in)    :: pinfo
+    type(map_type),   intent(inout) :: map_tot, map_scan
+    !type(acceptlist), intent(in)    :: alist
+    character(len=*)                :: parfile
+
+    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq
+    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
+    real(dp)     :: x_min, x_max, y_min, y_max
+    character(len=15) :: coord_system, object
+    real(dp), allocatable, dimension(:) :: dsum, div
+    real(dp), dimension(3) :: pos
+
+    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+
+    x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
+    y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
+
+    ndet = map_tot%ndet
+    nsb = map_tot%nsb 
+    nfreq = map_tot%nfreq
+    
+    pos = 0.d0
+    if (.not. pinfo%fixed) pos = get_obj_info(object, tod%t(1))
+
+    do i = 1, tod%nsamp
+       do j = 1, ndet
+          det = tod%feeds(j)
+          if (.not. is_alive(det)) cycle
+          if (tod%pixel(i,det) .lt. 0) cycle
+          !if (tod%point_tel(2,i,det) > 30.d0) cycle
+          if (trim(coord_system) .eq. 'horizontal') then
+             p = nint((tod%point_tel(1,i,j)-x_min)/map_tot%dthetax)
+             q = nint((tod%point_tel(2,i,j)-y_min)/map_tot%dthetay)
+          else
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map_tot%dthetax)
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map_tot%dthetay)
+             !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
+             !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+          end if
+          do sb = 1, nsb
+             do freq = 1, nfreq
+                !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
+                if (tod%freqmask(freq,sb,j) == 0) cycle
+                if (tod%rms_sim(i,freq,sb,j) == 0.d0) cycle
+                map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(i,freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
+                map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(i,freq,sb,j)**2
+                !end if
+             end do
+          end do
+       end do
+    end do
 
     ! Simulated data
     map_tot%dsum_sim = map_tot%dsum_sim + map_scan%dsum_sim
@@ -348,7 +469,8 @@ contains
 
     !write(*,*) 'Ending coadding'
 
-  end subroutine binning
+  end subroutine binning_sim
+
 
   ! Sums over det, sb, and freq  to create one single map for a given subscan
   subroutine finalize_scan_binning(map)
@@ -379,6 +501,16 @@ contains
        map%rms = 0.d0
     end where
 
+  end subroutine finalize_scan_binning
+
+
+  ! Sums over det, sb, and freq  to create one single map for a given subscan
+  subroutine finalize_scan_binning_sim(map)
+    implicit none
+    type(map_type), intent(inout) :: map
+    
+    integer(i4b) :: p, q
+
     ! Simulated data
     where(map%div_sim > 0) 
        map%m_sim = map%dsum_sim / map%div_sim 
@@ -390,8 +522,7 @@ contains
 
     end where
 
-  end subroutine finalize_scan_binning
-
+  end subroutine finalize_scan_binning_sim
 
 
   subroutine finalize_binning(map)

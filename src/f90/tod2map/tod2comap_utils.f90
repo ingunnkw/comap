@@ -1,6 +1,7 @@
 module tod2comap_utils
   use comap_lx_mod
   use cholesky_decomposition_mod
+  use rngmod
   implicit none
 
   type tod_type
@@ -12,7 +13,7 @@ module tod2comap_utils
      real(sp), allocatable, dimension(:,:,:)   :: freqmask             ! (freq, sb, det)
      real(dp), allocatable, dimension(:)       :: t                    ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g, rms ! (time, freq,  sb, det)
-     real(dp), allocatable, dimension(:,:,:,:,:) :: d_sim, d_raw_sim, rms_sim ! (time, freq,  sb, det, sim)   
+     real(dp), allocatable, dimension(:,:,:,:) :: d_sim, d_raw_sim, rms_sim ! (time, freq,  sb, det, sim)   
      real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
      real(dp), allocatable, dimension(:,:) :: pixel               ! (sb, freq) or (time, det)
      real(dp), allocatable, dimension(:,:,:)   :: point, point_tel     ! (det, 3, time)
@@ -26,7 +27,7 @@ contains
     character(len=*), intent(in)    :: l2file, parfile
     type(tod_type),   intent(inout) :: tod
 
-    integer(i4b) :: i, j, k, l, h, nsim
+    integer(i4b) :: i, j, k, l
     real(dp)     :: nu_cut
     logical(lgt) :: hifreq
     type(lx_struct) :: data
@@ -38,16 +39,13 @@ contains
     call free_tod_type(tod)
 
     call get_parameter(0, parfile, 'APPLY_HIGHPASS_FILTER', par_lgt=hifreq)
-    call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
-
-
+ 
     tod%samprate = 50.d0 !data%samprate
     tod%nsamp = size(data%time)
     tod%nfreq = size(data%nu,1)
     tod%nsb   = size(data%tod,3)
     tod%ndet  = size(data%tod,4)
-    tod%nsim  = nsim
-
+    
     !write(*,*) tod%nsamp, tod%nfreq, tod%nsb, tod%ndet
     allocate( tod%t(tod%nsamp), tod%f(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%point(3,tod%nsamp,tod%ndet), tod%pixel(tod%nsamp, 19), &
@@ -56,18 +54,12 @@ contains
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%rms(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%d_raw_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet, nsim), &
-         & tod%d_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet, nsim), &
-         & tod%rms_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet, nsim), &
          & tod%feeds(tod%ndet) )
 
     allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%alpha(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%freqmask(tod%nfreq, tod%nsb, tod%ndet))
-
-    ! Get simulated data
-    call simulate_tod(data, tod%d_raw_sim, parfile)
 
     tod%t = data%time; tod%f = data%nu
     tod%point = data%point_cel ! call make_angles_safe(tod%point(1,:),maxang)
@@ -98,16 +90,6 @@ contains
 
              ! Estimate RMS
              tod%rms(:,j,l,k) = sqrt(variance(tod%d(:,j,l,k)))
-
-             do h=1, nsim
-                ! Apply high pass filter
-                tod%d_sim(:,j,l,k,h) = tod%d_raw_sim(:,j,l,k,h)
-                !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
-                if (hifreq) call hp_filter(nu_cut, tod%d_sim(:,j,l,k,h),tod%samprate)
-
-                ! Estimate RMS
-                tod%rms_sim(:,j,l,k,h) = sqrt(variance(tod%d_sim(:,j,l,k,h)))
-             end do
           end do
        end do
     end do
@@ -115,6 +97,83 @@ contains
     call free_lx_struct(data)
 
   end subroutine get_tod
+
+  subroutine get_sim(l2file, tod, parfile, rng_handle)
+    implicit none
+    character(len=*), intent(in)    :: l2file, parfile
+    type(tod_type),   intent(inout) :: tod
+    type(planck_rng), intent(inout) :: rng_handle
+
+    integer(i4b) :: i, j, k, l
+    real(dp)     :: nu_cut
+    logical(lgt) :: hifreq
+    type(lx_struct) :: data
+
+    nu_cut = 0.1d0
+
+    ! Read data
+    call read_l2_file(l2file, data)
+    call free_tod_type(tod)
+
+    call get_parameter(0, parfile, 'APPLY_HIGHPASS_FILTER', par_lgt=hifreq)
+ 
+    tod%samprate = 50.d0 !data%samprate
+    tod%nsamp = size(data%time)
+    tod%nfreq = size(data%nu,1)
+    tod%nsb   = size(data%tod,3)
+    tod%ndet  = size(data%tod,4)
+    
+    !write(*,*) tod%nsamp, tod%nfreq, tod%nsb, tod%ndet
+    allocate( tod%t(tod%nsamp), tod%f(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%point(3,tod%nsamp,tod%ndet), tod%pixel(tod%nsamp, 19), &
+         & tod%point_tel(3,tod%nsamp, tod%ndet), &
+         & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%d_raw_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%d_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%rms_sim(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%feeds(tod%ndet) )
+
+    allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%alpha(tod%nfreq, tod%nsb, tod%ndet), &
+         & tod%freqmask(tod%nfreq, tod%nsb, tod%ndet))
+
+    ! Get simulated data
+    call simulate_tod(data, tod%d_raw_sim, parfile, rng_handle)
+
+    tod%t = data%time; tod%f = data%nu
+    tod%point = data%point_cel ! call make_angles_safe(tod%point(1,:),maxang)
+    tod%point_tel = data%point_tel
+    !tod%g     = data%gain
+    tod%feeds  = data%pixels
+    tod%sigma0 = data%sigma0
+    tod%fknee  = data%fknee
+    tod%alpha  = data%alpha
+    tod%freqmask = data%freqmask
+    tod%mean_el = mean(data%point_tel(2,:,1)) ! Mean boresight
+    tod%mean_az = mean(data%point_tel(1,:,1)) ! Mean boresight
+    !write(*,*) shape(data%point), tod%nsamp
+    tod%pixel = -200
+
+    do k = 1, tod%ndet
+       do l = 1, tod%nsb
+          do j = 1, tod%nfreq
+             if (tod%freqmask(j,l,k) == 0) cycle             
+             ! Apply high pass filter
+             tod%d_sim(:,j,l,k) = tod%d_raw_sim(:,j,l,k)
+             !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
+             if (hifreq) call hp_filter(nu_cut, tod%d_sim(:,j,l,k),tod%samprate)
+             
+             ! Estimate RMS
+             tod%rms_sim(:,j,l,k) = sqrt(variance(tod%d_sim(:,j,l,k)))
+             
+          end do
+       end do
+    end do
+
+    call free_lx_struct(data)
+
+  end subroutine get_sim
 
 
 
@@ -138,19 +197,18 @@ contains
   end subroutine hp_filter
 
 
-  subroutine simulate_tod(data, tod_sim, parfile)
+  subroutine simulate_tod(data, tod_sim, parfile, rng_handle)
     implicit none 
   
     type(Lx_struct),  intent(in)                    :: data
     character(len=*), intent(in)                    :: parfile
-    real(dp), dimension(:,:,:,:,:), intent(inout)   :: tod_sim 
+    real(dp), dimension(:,:,:,:), intent(inout)     :: tod_sim 
+    type(planck_rng), intent(inout)                 :: rng_handle
     type(hdf_file)                                  :: file
-    type(planck_rng)                                :: rng_handle
-
+  
     real(dp),     allocatable, dimension(:,:)       :: cholesky_of_corr      ! Cholesky decomp of correlation matrix       
     real(dp),     allocatable, dimension(:)         :: z                     ! Array with gaussian distributed random values
-
-    real(dp),     allocatable, dimension(:,:,:,:)   :: data_corr             ! Correlation matrix of data                  
+    real(dp),     allocatable, dimension(:,:,:,:)   :: data_corr             ! Correlation matrix of data 
     real(dp),     allocatable, dimension(:,:,:,:)   :: cholesky_of_data_corr ! Cholesky decomposition of correlatio nmatrix of data
     real(dp),     allocatable, dimension(:,:)       :: data_current
     real(dp),     allocatable, dimension(:,:)       :: A
@@ -165,10 +223,10 @@ contains
     call get_parameter(0, parfile, 'CORR_MATRIX_LOC',           par_string=corrmatrixfile)
     call get_parameter(0, parfile, 'BRUTE_FORCE_SIM',           par_int=brute_force)
 
-    n_samples    = size(data%tod,1)      ! Number of time samples                                                          
-    n_freq       = size(data%freqmask,1) ! Number of frequency channels                                                    
-    n_bands      = size(data%tod,3)      ! Number of side-bands                                                            
-    n_feeds      = size(data%tod,4)      ! Number of feeds                                                                 
+    n_samples    = size(data%tod,1)      ! Number of time samples
+    n_freq       = size(data%freqmask,1) ! Number of frequency channels   
+    n_bands      = size(data%tod,3)      ! Number of side-bands  
+    n_feeds      = size(data%tod,4)      ! Number of feeds     
 
     allocate(cholesky_of_corr(n_freq, n_freq))
     allocate(z(n_freq))
@@ -180,42 +238,40 @@ contains
     allocate(A(n_freq, n_freq))
     allocate(B(n_freq, n_freq))
 
-    ! ------------ SIMULATIONS FROM PREDEFINED CORR MATRICES -----------                                                   
+    ! ------------ SIMULATIONS FROM PREDEFINED CORR MATRICES -----------    
     if (brute_force == 0) then
-       ! Reading in cholesky decomposition of correlation matrix                                                           
+       ! Reading in cholesky decomposition of correlation matrix       
        call open_hdf_file(corrmatrixfile, file, "r")
        if (data%polyorder == 1) then
-          call read_hdf(file, "cholesky1", cholesky_of_corr)   ! 1. order polynom                                          
+          call read_hdf(file, "cholesky1", cholesky_of_corr)   ! 1. order polynom
        else if (data%polyorder == 0) then
-          call read_hdf(file, "cholesky0", cholesky_of_corr)   ! 0. order polynom                                          
+          call read_hdf(file, "cholesky0", cholesky_of_corr)   ! 0. order polynom  
        else if (data%polyorder == -1) then
-          call read_hdf(file, "cholesky_1", cholesky_of_corr)   ! Polyfilter turned off                                    
+          call read_hdf(file, "cholesky_1", cholesky_of_corr)   ! Polyfilter turned off 
        end if
        call close_hdf_file(file)
 
-       ! Transpose cholesky decomposition because Python and Fortran have opposite array indexing                          
+       ! Transpose cholesky decomposition because Python and Fortran have opposite array indexing 
        cholesky_of_corr = transpose(cholesky_of_corr)
 
-       do m=1, n_sim
-          do k=1, n_feeds
-             do j=1, n_bands
-                do i=1, n_samples
-
-                   do o=1, n_freq
-                      z(o) = rand_gauss(rng_handle)
-                   end do
-
-                   tod_sim(i,:,j,k,m) = matmul(cholesky_of_corr,z) * data%sigma0(:,j,k) 
-
+       do k=1, n_feeds
+          do j=1, n_bands
+             do i=1, n_samples
+                
+                do o=1, n_freq
+                   z(o) = rand_gauss(rng_handle)
                 end do
+
+                tod_sim(i,:,j,k) = matmul(cholesky_of_corr,z) * data%sigma0(:,j,k) 
+
              end do
           end do
        end do
 
-    ! --------- BRUTE-FORCE SIMULATIONS FROM DATA CORR MATRICES ----------                                                 
+    ! --------- BRUTE-FORCE SIMULATIONS FROM DATA CORR MATRICES ----------- 
     else
 
-       ! Calculating correlation matrix for all bands and feeds                                                            
+       ! Calculating correlation matrix for all bands and feeds 
 
        do j=1, n_feeds
           if (.not. is_alive(j)) cycle
@@ -242,7 +298,7 @@ contains
           end do
        end do
 
-       ! Calculating cholesky decomposition of the correlation matrix for all bands and feeds                              
+       ! Calculating cholesky decomposition of the correlation matrix for all bands and feeds 
        do j=1, n_feeds
           if (.not. is_alive(j)) cycle
           do k=1, n_bands
@@ -251,24 +307,20 @@ contains
              cholesky_of_data_corr(:,:,k,j) = B
           end do
        end do
-       ! Calculating simulated data using the cholesky decompositions                                                      
-       do m=1, n_sim
-          do k=1, n_feeds
-             do j=1, n_bands
-                do i=1, n_samples
-
-                   do o=1, n_freq
-                      z(o) = rand_gauss(rng_handle)
-                   end do
-
-                   tod_sim(i,:,j,k,m) = matmul(cholesky_of_data_corr(:,:,j,k), z) * data%sigma0(:,j,k)
-
+       ! Calculating simulated data using the cholesky decompositions       
+       do k=1, n_feeds
+          do j=1, n_bands
+             do i=1, n_samples
+                
+                do o=1, n_freq
+                   z(o) = rand_gauss(rng_handle)
                 end do
+                
+                tod_sim(i,:,j,k) = matmul(cholesky_of_data_corr(:,:,j,k), z) * data%sigma0(:,j,k)
+
              end do
           end do
        end do
-
-
     end if
 
   end subroutine simulate_tod
