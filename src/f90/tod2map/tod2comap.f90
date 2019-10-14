@@ -155,27 +155,27 @@ program tod2comap
      call free_tod_type(tod)
 
 
-     do sim=1, nsim
-        call nullify_map_type(map_scan)
-        write(*,*) myid, "making sim", sim, 'of', nsim
-        do j = 2, nsub-1
+     !do sim=1, nsim
+     !   call nullify_map_type(map_scan)
+     !   write(*,*) myid, "making sim", sim, 'of', nsim
+     !   do j = 2, nsub-1
 
-           filename = scan%ss(j)%l2file
+     !      filename = scan%ss(j)%l2file
 
-           call get_sim(trim(filename), tod, parfile, rng_handle)
-           call time2pix_sim(tod, map_scan, parfile, pinfo)
-           call time2pix_sim(tod, map_tot, parfile, pinfo)
-           call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
+     !      call get_sim(trim(filename), tod, parfile, rng_handle)
+     !      call time2pix_sim(tod, map_scan, parfile, pinfo)
+     !      call time2pix_sim(tod, map_tot, parfile, pinfo)
+     !      call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
 
-        end do
-        call finalize_scan_binning_sim(map_scan)
+     !   end do
+     !   call finalize_scan_binning_sim(map_scan)
 
-        call int2string(sim, sim_string)
-        prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
-        sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
-        call output_submap_sim_h5(sim_filename, map_scan, sim)
-        call free_tod_type(tod)
-     end do
+     !   call int2string(sim, sim_string)
+     !   prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
+     !   sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
+     !   call output_submap_sim_h5(sim_filename, map_scan, sim)
+     !   call free_tod_type(tod)
+     !end do
 
 
   end do

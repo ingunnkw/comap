@@ -52,8 +52,8 @@ contains
        y_min = 25.d0; y_max = 80.d0
     else
        if (pinfo%fixed) then
-          x_min = pinfo%pos(1) - pinfo%obj_rad 
-          x_max = pinfo%pos(1) + pinfo%obj_rad 
+          x_min = pinfo%pos(1) - pinfo%obj_rad /abs(cos(mean_dec*PI/180.d0))
+          x_max = pinfo%pos(1) + pinfo%obj_rad /abs(cos(mean_dec*PI/180.d0))
           y_min = pinfo%pos(2) - pinfo%obj_rad 
           y_max = pinfo%pos(2) + pinfo%obj_rad 
        else
