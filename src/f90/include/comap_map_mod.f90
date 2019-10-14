@@ -18,7 +18,7 @@ module comap_map_mod
      real(dp),     allocatable, dimension(:,:)        :: freq                              ! (nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:)  :: m, rms, dsum, div                 ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)    :: m_co, rms_co, dsum_co, div_co     ! (n_x, n_y, nfreq, nsb)
-     real(sp),     allocatable, dimension(:,:,:,:,:)  :: m_sim, rms_sim, dsum_sim, div_sim ! (n_x, n_y, nfreq, nsb, ndet)
+     real(sp),     allocatable, dimension(:,:,:,:)    :: m_sim, rms_sim, dsum_sim, div_sim ! (n_x, n_y, nfreq, nsb, ndet)
      integer(i4b), allocatable, dimension(:,:,:,:,:)  :: nhit                              ! (n_x, n_y, nfreq, nsb, ndet)
      integer(i4b), allocatable, dimension(:,:,:,:)    :: nhit_co                           ! (n_x, n_y, nfreq, nsb)
 

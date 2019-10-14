@@ -2,6 +2,7 @@ module tod2comap_utils
   use comap_lx_mod
   use cholesky_decomposition_mod
   use rngmod
+  use comap_detector_mod
   implicit none
 
   type tod_type
