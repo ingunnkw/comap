@@ -256,7 +256,8 @@ program l2gen
            end if
            
            call mkdirs(trim(scan%ss(k)%l2file), .true.)
-           call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
+           !call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
+           call write_l2_file(scan, k, data_l2_decimated)
            call update_status(status, 'write_l2')
            cycle
         end if
@@ -317,7 +318,7 @@ program l2gen
            write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
         end if
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
-        call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
+        call write_l2_file(scan, k, data_l2_decimated)
         call update_status(status, 'write_l2')
 
         ! Clean up data structures
@@ -339,107 +340,124 @@ contains
     
   !   integer(i4b) :: i, j, k, l, nomp, nsamp, nfreq, nsb, ndet, err
   !   integer*8    :: plan_fwd, plan_back
+  !   type(hdf_file)                         :: file
   !   real(dp)     :: samprate, nu
   !   real(dp),     allocatable, dimension(:) :: dt, dt2, tod, x, v
   !   complex(spc), allocatable, dimension(:) :: dv
+  !   integer(i4b), allocatable, dimension(:) :: pixels
+  !   character(len=100)   :: filename
     
-  !   nsamp = 11
     
+  !   filename ='/mn/stornext/d16/cmbco/comap/pathfinder/ovro/2019-10/comap-0008532-2019-10-22-024650.hd5'
+  !   allocate(pixels(18))
     
-  !   allocate(dt(nsamp), dt2(nsamp), tod(nsamp), x(nsamp), v(nsamp))
+  !   call open_hdf_file(filename, file, "r")
     
-  !   do i = 1, nsamp
-  !      v(i) =  (i - nsamp/2.d0) ** 4
-  !      tod(i) = sqrt(v(i)) * rand_gauss(rng_handle)
-  !      x(i) = (i-1) * 1.d0 / (nsamp-1.d0)
-  !   end do
-  !   dt(:) = tod(:)
+  !   ! Read telescope coordinates
+  !   !call read_hdf(file, "spectrometer/pixel_pointing/pixel_az",            data%point_tel(1,:,:))
+  !   call read_hdf(file, "spectrometer/feeds", pixels)
+  !   call read_hdf(file, "comap", pixels)
     
-  !   call smooth_spline('inv_var', 1.d-1, x, dt, 1.d30, 1.d30, dt2, v)
-
-  !   open(58,file='test.dat')
-  !   do i = 1, nsamp
-  !      write(58,*) x(i), tod(i), dt(i)
-  !   end do
-  !   close(58)
-
-  !   nsb = 1000
-  !   open(58,file='test2.dat')
-  !   do i = 1, nsb
-  !      write(58,*) (i-1) * 1.d0 / (nsb-1.d0), splint(x, dt, dt2, (i-1) * 1.d0 / (nsb-1.d0))
-  !   end do
-  !   close(58)
-
-
-  !   !   subroutine smooth_spline(weight, alpha, x, y, yp1, ypn, y2, variance)
-  !   ! implicit none
-
-  !   ! character(len=*),       intent(in)    :: weight
-  !   ! real(dp),               intent(in)    :: alpha, yp1, ypn
-  !   ! real(dp), dimension(:), intent(in)    :: x
-  !   ! real(dp), dimension(:), intent(in), optional    :: variance
-  !   ! real(dp), dimension(:), intent(inout) :: y
-  !   ! real(dp), dimension(:), intent(out)   :: y2
-
-
-  ! ! ! Routines from Numerical Recipes
-  ! ! subroutine spline_plain(x, y, yp1, ypn, y2)
-  ! !   implicit none
-
-  ! !   real(dp),               intent(in)  :: yp1, ypn
-  ! !   real(dp), dimension(:), intent(in)  :: x, y
-  ! !   real(dp), dimension(:), intent(out) :: y2
-
-    
-
-  !   ! nsamp = 10
-    
-  !   ! i = 0
-  !   ! ts:do 
-  !   !    i = i+1
-  !   !    if (i > nsamp - 1) exit
-  !   !    do j = 1, 5
-  !   !       !do k = 1, 5
-  !   !       write(*,*) i, j, k
-  !   !       i = i + 2
-  !   !       cycle ts
-  !   !       !end do
-  !   !    end do
-  !   ! end do ts
-  !   ! nsamp       = 1000
-  !   ! samprate    = 50.d0    
-  !   ! n           = nsamp+1
-
-  !   ! ! Set up OpenMP environment and FFTW plans
-  !   ! nomp = 1
-  !   ! call sfftw_init_threads(err)
-  !   ! call sfftw_plan_with_nthreads(nomp)
-
-  !   ! allocate(dt(2*nsamp), dv(0:n-1))
-  !   ! call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
-  !   ! call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
-  !   ! deallocate(dt, dv)
-
-  !   ! allocate(dt(2*nsamp), dv(0:n-1), tod(nsamp))
-  !   ! tod = 0.d0
-  !   ! dt(1:nsamp)            = tod(:)
-  !   ! dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
-  !   ! call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
-  !   ! ! Apply lowpass filter
-  !   ! do l = 0, n-1
-  !   !    nu = ind2freq(l+1, samprate, n)
-  !   !    dv(l) = sqrt(2.d0 * nsamp) * rand_gauss(rng_handle) !dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
-  !   ! end do
-    
-  !   ! call sfftw_execute_dft_c2r(plan_back, dv, dt)
-  !   ! dt = dt / (2*nsamp)
-  !   ! write(*,*) variance(dt), sqrt(variance(dt)), variance(dt) 
-  !   ! deallocate(dt, dv)
-    
-  !   ! call sfftw_destroy_plan(plan_fwd)
-  !   ! call sfftw_destroy_plan(plan_back)
+  !   write(*,*) pixels
 
   ! end subroutine test_fft
+    
+    ! nsamp = 11
+    
+    
+    ! allocate(dt(nsamp), dt2(nsamp), tod(nsamp), x(nsamp), v(nsamp))
+    
+    ! do i = 1, nsamp
+    !    v(i) =  (i - nsamp/2.d0) ** 4
+    !    tod(i) = sqrt(v(i)) * rand_gauss(rng_handle)
+    !    x(i) = (i-1) * 1.d0 / (nsamp-1.d0)
+    ! end do
+    ! dt(:) = tod(:)
+    
+    ! call smooth_spline('inv_var', 1.d-1, x, dt, 1.d30, 1.d30, dt2, v)
+
+    ! open(58,file='test.dat')
+    ! do i = 1, nsamp
+    !    write(58,*) x(i), tod(i), dt(i)
+    ! end do
+    ! close(58)
+
+    ! nsb = 1000
+    ! open(58,file='test2.dat')
+    ! do i = 1, nsb
+    !    write(58,*) (i-1) * 1.d0 / (nsb-1.d0), splint(x, dt, dt2, (i-1) * 1.d0 / (nsb-1.d0))
+    ! end do
+    ! close(58)
+
+
+
+    !   subroutine smooth_spline(weight, alpha, x, y, yp1, ypn, y2, variance)
+    ! implicit none
+
+    ! character(len=*),       intent(in)    :: weight
+    ! real(dp),               intent(in)    :: alpha, yp1, ypn
+    ! real(dp), dimension(:), intent(in)    :: x
+    ! real(dp), dimension(:), intent(in), optional    :: variance
+    ! real(dp), dimension(:), intent(inout) :: y
+    ! real(dp), dimension(:), intent(out)   :: y2
+
+
+  ! ! Routines from Numerical Recipes
+  ! subroutine spline_plain(x, y, yp1, ypn, y2)
+  !   implicit none
+
+  !   real(dp),               intent(in)  :: yp1, ypn
+  !   real(dp), dimension(:), intent(in)  :: x, y
+  !   real(dp), dimension(:), intent(out) :: y2
+
+    
+
+    ! nsamp = 10
+    
+    ! i = 0
+    ! ts:do 
+    !    i = i+1
+    !    if (i > nsamp - 1) exit
+    !    do j = 1, 5
+    !       !do k = 1, 5
+    !       write(*,*) i, j, k
+    !       i = i + 2
+    !       cycle ts
+    !       !end do
+    !    end do
+    ! end do ts
+    ! nsamp       = 1000
+    ! samprate    = 50.d0    
+    ! n           = nsamp+1
+
+    ! ! Set up OpenMP environment and FFTW plans
+    ! nomp = 1
+    ! call sfftw_init_threads(err)
+    ! call sfftw_plan_with_nthreads(nomp)
+
+    ! allocate(dt(2*nsamp), dv(0:n-1))
+    ! call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
+    ! call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
+    ! deallocate(dt, dv)
+
+    ! allocate(dt(2*nsamp), dv(0:n-1), tod(nsamp))
+    ! tod = 0.d0
+    ! dt(1:nsamp)            = tod(:)
+    ! dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+    ! call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+    ! ! Apply lowpass filter
+    ! do l = 0, n-1
+    !    nu = ind2freq(l+1, samprate, n)
+    !    dv(l) = sqrt(2.d0 * nsamp) * rand_gauss(rng_handle) !dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
+    ! end do
+    
+    ! call sfftw_execute_dft_c2r(plan_back, dv, dt)
+    ! dt = dt / (2*nsamp)
+    ! write(*,*) variance(dt), sqrt(variance(dt)), variance(dt) 
+    ! deallocate(dt, dv)
+    
+    ! call sfftw_destroy_plan(plan_fwd)
+    ! call sfftw_destroy_plan(plan_back)
 
 
   subroutine find_spikes(data_l2, verb)
