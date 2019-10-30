@@ -8,13 +8,13 @@ module comap_scan_mod
   ! extracted directly from the level2-runlist. Category and object
   ! are indices into name arrays.
   type comap_subscan
-    integer(i4b)       :: id
+    integer(i4b)       :: id, feature
     real(dp)           :: mjd(2), az, el, dk, lat, lon, time_of_day
     character(len=512) :: l2file, l3file, scanmode
   end type comap_subscan
 
   type comap_scan_info
-    integer(i4b)         :: id, nsub
+    integer(i4b)         :: id, nsub, objectnum
     real(dp)             :: mjd(2)
     character(len=512)   :: l1file, object
     type(comap_subscan), allocatable, dimension(:) :: ss
@@ -118,7 +118,7 @@ contains
   subroutine read_runlist(file, l1dir, l2dir, l3dir, runlist, object)
     implicit none
     character(len=*)   :: file
-    character(len=512) :: name, l1dir, l2dir, l3dir, line, l1file
+    character(len=512) :: name, l1dir, l2dir, l3dir, line, l1file, objlist(29)
     character(len=512), optional :: object
     character(len=9)   :: subsid
     integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n, cnum, cmax, nsub, feature, a, b, c, d
@@ -128,6 +128,10 @@ contains
     n = count_num_scan(file)
     call free_runlist(runlist)
     allocate(runlist%scans(n))
+    objlist = (/'jupiter', 'venus', 'TauA', 'shela', 'hetdex', 'patch1', &
+         'patch2', 'co1', 'co2', 'co3', 'co4', 'co5', 'co6', 'co7', 'mars', &
+         'fg1', 'fg2', 'fg3', 'fg4', 'fg5', 'fg6', 'fg7', 'ambient_load', &
+         'ground_scan', 'stationary', 'sky_dip', 'CasA', 'CygA', 'other' /)
     cnum = 0
     runlist%nsub = 0
     unit = getlun()
@@ -140,6 +144,7 @@ contains
           read(line,*) scan%id, scan%mjd, scan%nsub
           scan%l1file = trim(l1dir) // "/" // trim(get_token(line, " ", 5))
           scan%object = name
+          scan%objectnum = findloc(objlist, trim(name), 1)
           allocate(scan%ss(scan%nsub))
           cnum         = cnum+1
           runlist%nsub = runlist%nsub + scan%nsub
@@ -150,7 +155,7 @@ contains
              if (present(object)) then
                 if (trim(object) /= trim(name)) cycle
              end if
-
+             scan%ss(k)%feature = feature
              if (feature == 16) then
                 scan%ss(k)%scanmode = 'circ'
              else if (feature == 32) then
@@ -224,6 +229,7 @@ contains
     b%mjd  = a%mjd
     b%l1file = a%l1file
     b%object = a%object
+    b%objectnum = a%objectnum
     allocate(b%ss(b%nsub))
     do i = 1, b%nsub
        b%ss(i)%id          = a%ss(i)%id
@@ -237,7 +243,7 @@ contains
        b%ss(i)%l2file      = a%ss(i)%l2file
        b%ss(i)%l3file      = a%ss(i)%l3file
        b%ss(i)%scanmode    = a%ss(i)%scanmode
-
+       b%ss(i)%feature     = a%ss(i)%feature
     end do
   end subroutine
 

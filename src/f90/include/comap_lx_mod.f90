@@ -1,5 +1,6 @@
 module comap_lx_mod
   use healpix_types
+  use comap_scan_mod
   use comap_defs
   use comap_detector_mod
   use quiet_mpi_mod
@@ -280,11 +281,12 @@ contains
   end subroutine read_l1_file
 
 
-  subroutine read_l2_file(filename, data)
+  subroutine read_l2_file(filename, data, scan)
     implicit none
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
+    type(comap_scan_info)        :: scan
     integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, nsim, ext(7), poly
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
@@ -487,12 +489,15 @@ contains
     if(allocated(data%amb_time))      deallocate(data%amb_time)
   end subroutine
 
-  subroutine write_l2_file(filename, data)
+  subroutine write_l2_file(scan, k, data)
     implicit none
-    character(len=*), intent(in) :: filename
+    type(comap_scan_info), intent(in) :: scan
+    integer(i4b),     intent(in) :: k
     type(lx_struct)              :: data
-    type(hdf_file)               :: file
-    call open_hdf_file(filename, file, "w")
+    type(hdf_file)               :: file, l1_file
+    integer(i4b)                 :: n_hk(1), hk_start_ind, hk_end_ind
+    real(dp), allocatable, dimension(:) :: hk_buffer
+    call open_hdf_file(scan%ss(k)%l2file, file, "w")
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "mjd_start",         data%mjd_start)
     call write_hdf(file, "decimation_time",   data%decimation_time)
@@ -536,6 +541,46 @@ contains
        call write_hdf(file, "diagnostics",    data%diagnostics)
        call write_hdf(file, "cut_params",     data%cut_params)
     end if 
+    
+    ! scan-data
+    ! call write_hdf(file, "l1file", teststr)
+    call write_hdf(file, "field", scan%objectnum)
+    call write_hdf(file, "time_of_day", scan%ss(k)%time_of_day)
+    call write_hdf(file, "scanid", scan%ss(k)%id)
+    call write_hdf(file, "feature", scan%ss(k)%feature)
+    
+    ! hk-data
+    call open_hdf_file(scan%l1file, l1_file, "r")
+    call get_size_hdf(l1_file, "hk/array/weather/utc", n_hk)
+    allocate(hk_buffer(n_hk(1)))
+    call read_hdf(l1_file, "hk/array/weather/utc", hk_buffer)
+    
+    hk_start_ind = minloc(abs(data%time(1) - hk_buffer), 1) + 1
+    hk_end_ind = minloc(abs(data%time(size(data%time)) - hk_buffer), 1) - 1
+    
+    call write_hdf(file, "hk_mjd", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/airTemperature", hk_buffer)
+    call write_hdf(file, "hk_airtemp", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/dewPointTemp", hk_buffer)
+    call write_hdf(file, "hk_dewtemp", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/pressure", hk_buffer)
+    call write_hdf(file, "hk_pressure", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/rainToday", hk_buffer)
+    call write_hdf(file, "hk_rain", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/relativeHumidity", hk_buffer)
+    call write_hdf(file, "hk_humidity", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/windDirection", hk_buffer)
+    call write_hdf(file, "hk_winddir", hk_buffer(hk_start_ind:hk_end_ind))
+    
+    call read_hdf(l1_file, "hk/array/weather/windSpeed", hk_buffer)
+    call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
+    
     call close_hdf_file(file)
   end subroutine
 
