@@ -97,10 +97,10 @@ contains
          & map%rms_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
          & map%m_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
          & map%freq(map%nfreq, map%nsb), &
-         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
-         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
-         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot), &
-         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot))
+         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb), &
+         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb))
 
     map%dsum    = 0.0
     map%nhit    = 0
@@ -266,8 +266,7 @@ contains
              do sb = 1, tod%nsb
                 do freq = 1, tod%nfreq
                    if (tod%freqmask(freq,sb,j) == 0) cycle
-                  
-                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1.d0
+                   map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
                    sigma0(freq,sb) = sigma0(freq,sb) + tod%sigma0(freq,sb,det)
                 end do
              end do
@@ -472,8 +471,11 @@ contains
                 !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
                 if (tod%freqmask(freq,sb,j) == 0) cycle
                 if (tod%rms_sim(freq,sb,j) == 0.d0) cycle
-                map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
-                map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
+                !map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
+                !map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
+
+                map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
+                map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
                 !end if
              end do
           end do
