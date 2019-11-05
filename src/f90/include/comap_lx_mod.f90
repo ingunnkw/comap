@@ -281,12 +281,11 @@ contains
   end subroutine read_l1_file
 
 
-  subroutine read_l2_file(filename, data, scan)
+  subroutine read_l2_file(filename, data)
     implicit none
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    type(comap_scan_info)        :: scan
     integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, nsim, ext(7), poly
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
