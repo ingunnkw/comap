@@ -150,7 +150,7 @@ program l2gen
      if (n_tsys == 1) tsys_time(2) = data_l1%time(nsamp)
      if (n_tsys == 0) then
         write(*,*) "No ambient subscans!"
-        stop
+        cycle
      end if
 
      ! Get patch info
@@ -345,18 +345,27 @@ contains
   !   real(dp),     allocatable, dimension(:) :: dt, dt2, tod, x, v
   !   complex(spc), allocatable, dimension(:) :: dv
   !   integer(i4b), allocatable, dimension(:) :: pixels
-  !   character(len=100)   :: filename
+  !   character(len=512)   :: filename, teststr(1)
     
     
-  !   filename ='/mn/stornext/d16/cmbco/comap/pathfinder/ovro/2019-10/comap-0008532-2019-10-22-024650.hd5'
+  !   filename ='/mn/stornext/d16/cmbco/comap/protodir/test.h5'
   !   allocate(pixels(18))
     
-  !   call open_hdf_file(filename, file, "r")
+  !   call open_hdf_file(filename, file, "w")
     
+    
+  !   teststr(1) = "aldflkfdsmlfksm"
+
+  !   ! scan-data
+  !   call write_hdf(file, "test", teststr)
+  !   ! call write_hdf(file, "pix", pixels)
+
+  !   call close_hdf_file(file)
+
   !   ! Read telescope coordinates
   !   !call read_hdf(file, "spectrometer/pixel_pointing/pixel_az",            data%point_tel(1,:,:))
-  !   call read_hdf(file, "spectrometer/feeds", pixels)
-  !   call read_hdf(file, "comap", pixels)
+  !   ! call read_hdf(file, "spectrometer/feeds", pixels)
+  !   ! call read_hdf(file, "comap", pixels)
     
   !   write(*,*) pixels
 
@@ -1079,12 +1088,12 @@ contains
           end do
        end do
     end do
-    if (sum(data_l2%freqmask_full) == 0.0) then
-       if (verb) then
-          write(*,*) "All frequencies masked after hard cut, id: ", id
-       end if
-       stop  ! fix this to "stop working on this file"
-    end if
+    ! if (sum(data_l2%freqmask_full) == 0.0) then
+    !    if (verb) then
+    !       write(*,*) "All frequencies masked after hard cut, id: ", id
+    !    end if
+    !    ! fix this to "stop working on this file"
+    ! end if
 
     ! convert to relative variance
     do i = 1, ndet
@@ -2311,7 +2320,6 @@ contains
              if (verb) then
                 write(*,*) 'ERROR: All frequencies removed by freqmask!'
              end if
-             stop
           else if (det == 0 .and. sb == 0) then
              data%freqmask_full(freq,:,:) = 0.d0
           else if (det == 0 .and. freq == 0) then
@@ -2331,7 +2339,6 @@ contains
              if (verb) then
                 write(*,*) 'ERROR: All frequencies removed by freqmask!'
              end if
-             stop
           end if
        end if
     end do
