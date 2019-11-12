@@ -162,7 +162,7 @@ contains
     do j = 1, tod%ndet
        det = tod%feeds(j)
        if (.not. is_alive(det)) cycle
-       !sigma0(:,:) = sigma0(:,:) + tod%sigma0(:,:,det)
+       !sigma0(:,:) = sigma0(:,:) + 1.0 / tod%sigma0(:,:,det)**2
        !write(*,*) j, det
        do i = 1, tod%nsamp
           if (trim(coord_system) .eq. 'horizontal') then
@@ -194,7 +194,6 @@ contains
     !!$OMP END PARALLEL
     !call wall_time(t2)
     !write(*,*) 'Wall time time2pix = ', t2-t1
-    !sigma0 = sigma0/size(tod)
     
     !do sb = 1, tod%nsb
     !   do freq = 1, tod%nfreq
@@ -403,9 +402,9 @@ contains
                 !write(*,*) tod%rms(i,freq,sb,det)
 
                 map_scan%dsum(p,q,freq,sb,det) = map_scan%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                map_scan%div(p,q,freq,sb,det)  = map_scan%div(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2
-                map_scan%dsum_co(p,q,freq,sb)  = map_scan%dsum_co(p,q,freq,sb) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                map_scan%div_co(p,q,freq,sb)   = map_scan%div_co(p,q,freq,sb) + 1.d0 / tod%rms(freq,sb,j)**2
+                map_scan%div(p,q,freq,sb,det)  = map_scan%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
+                map_scan%dsum_co(p,q,freq,sb)  = map_scan%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map_scan%div_co(p,q,freq,sb)   = map_scan%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
 
                 !end if
              end do
@@ -532,7 +531,7 @@ contains
   end subroutine finalize_scan_binning
 
 
-  ! Sums over det, sb, and freq  to create one single map for a given subscan
+  ! Sums over det, sb, and freq  to create one single map for a given scan
   subroutine finalize_scan_binning_sim(map)
     implicit none
     type(map_type), intent(inout) :: map
