@@ -38,7 +38,7 @@ program tod2comap
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim
 
   integer(i4b)          :: myid, nproc, ierr, root, split_mode
-  logical               :: binning_split, found
+  logical               :: binning_split, found, obs_map
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
 
@@ -66,6 +66,7 @@ program tod2comap
   call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
   call get_parameter(0, parfile, 'SEED', par_int=seed)
   call get_parameter(0, parfile, 'SPLIT_MODE', par_int=split_mode)
+  call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
@@ -157,11 +158,14 @@ program tod2comap
      end do
 
      call int2string(scan%id, obsid)
-     call finalize_scan_binning(map_scan)
 
-     prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
-     map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
-     call output_map_h5(map_filename, map_scan)
+     if (obs_map) then
+        call finalize_scan_binning(map_scan)
+
+        prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
+        map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+        call output_map_h5(map_filename, map_scan)
+     end if
      !call free_map_type(map_scan)
      call free_tod_type(tod)
 
@@ -179,12 +183,14 @@ program tod2comap
            call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
 
         end do
-        call finalize_scan_binning_sim(map_scan)
+        if (obs_map) then 
+           call finalize_scan_binning_sim(map_scan)
 
-        call int2string(sim, sim_string)
-        prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
-        sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
-        call output_submap_sim_h5(sim_filename, map_scan, sim)
+           call int2string(sim, sim_string)
+           prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
+           sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
+           call output_submap_sim_h5(sim_filename, map_scan, sim)
+        end if
         call free_tod_type(tod)
      end do
 
