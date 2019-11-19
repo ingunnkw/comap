@@ -127,6 +127,14 @@ program tod2comap
         if (mod(scan%id,2) == 1) cycle ! even obsIDs
      end if
 
+     if (split_mode == 0) then
+        ! Full-mission
+     else if (split_mode == 1) then
+        if (mod(scan%id,2) == 0) cycle ! Odd obsIDs
+     else if (split_mode == 2) then
+        if (mod(scan%id,2) == 1) cycle ! Even obsIDs
+     end if
+
      call nullify_map_type(map_scan)
      
 
