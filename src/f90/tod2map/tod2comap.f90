@@ -31,13 +31,14 @@ program tod2comap
   type(patch_info)      :: pinfo
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
-  character(len=512)    :: filename, map_filename, sim_filename, parfile, acceptfile, prefix, prefix_sim, pre, pre_sim, map_name, object, coord_system, l1file, sim_name
+  character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
+  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name
   character(len=6)      :: obsid
   character(len=5)      :: sim_string
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim
 
-  integer(i4b)          :: myid, nproc, ierr, root
-  logical               :: binning_split, found
+  integer(i4b)          :: myid, nproc, ierr, root, split_mode
+  logical               :: binning_split, found, obs_map
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
 
@@ -64,6 +65,8 @@ program tod2comap
   call get_parameter(0, parfile, 'SIM_NAME', par_string=sim_name)
   call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
   call get_parameter(0, parfile, 'SEED', par_int=seed)
+  call get_parameter(0, parfile, 'SPLIT_MODE', par_int=split_mode)
+  call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
@@ -116,7 +119,24 @@ program tod2comap
      !write(*,*) myid, i, 'of', nscan
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
+     !write(*,*) scan%id
+
+     if (split_mode == 1) then
+        if (mod(scan%id,2) == 0) cycle ! odd obsIDs
+     else if (split_mode == 2) then
+        if (mod(scan%id,2) == 1) cycle ! even obsIDs
+     end if
+
+     if (split_mode == 0) then
+        ! Full-mission
+     else if (split_mode == 1) then
+        if (mod(scan%id,2) == 0) cycle ! Odd obsIDs
+     else if (split_mode == 2) then
+        if (mod(scan%id,2) == 1) cycle ! Even obsIDs
+     end if
+
      call nullify_map_type(map_scan)
+     
 
      ! Get TOD / read level 2 file
      nsub = scan%nsub
@@ -136,8 +156,8 @@ program tod2comap
         !call nullify_map_type(map_scan)
         call time2pix(tod, map_scan, parfile, pinfo)
         call time2pix(tod, map_tot, parfile, pinfo)
-        write(*,*) myid, "making maps, obsID", i, 'scan', j
-        call binning(map_tot, map_scan, tod, i, parfile, pinfo)
+        write(*,*) myid, "making maps, obsID", i, 'scan', scan%ss(j)%id
+        call binning(map_scan, tod, i, parfile, pinfo)
         !call finalize_scan_binning(map_scan)
         !prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
         !call output_submap_h5(trim(prefix), map_scan)
@@ -145,12 +165,20 @@ program tod2comap
         !call free_tod_type(tod)
      end do
 
-     call int2string(scan%id, obsid)
-     call finalize_scan_binning(map_scan)
+     map_tot%dsum    = map_tot%dsum + map_scan%dsum
+     map_tot%div     = map_tot%div  + map_scan%div
+     map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
+     map_tot%div_co  = map_tot%div_co  + map_scan%div_co
 
-     prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
-     map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
-     call output_map_h5(map_filename, map_scan)
+     call int2string(scan%id, obsid)
+
+     if (obs_map) then
+        call finalize_scan_binning(map_scan)
+
+        prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
+        map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+        call output_map_h5(map_filename, map_scan)
+     end if
      !call free_map_type(map_scan)
      call free_tod_type(tod)
 
@@ -168,12 +196,14 @@ program tod2comap
            call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
 
         end do
-        call finalize_scan_binning_sim(map_scan)
+        if (obs_map) then 
+           call finalize_scan_binning_sim(map_scan)
 
-        call int2string(sim, sim_string)
-        prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
-        sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
-        call output_submap_sim_h5(sim_filename, map_scan, sim)
+           call int2string(sim, sim_string)
+           prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
+           sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
+           call output_submap_sim_h5(sim_filename, map_scan, sim)
+        end if
         call free_tod_type(tod)
      end do
 
@@ -187,11 +217,11 @@ program tod2comap
   call mpi_allreduce(map_tot%div, buffer%div, size(map_tot%div), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum, buffer%dsum, size(map_tot%dsum), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit, buffer%nhit, size(map_tot%nhit), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !call mpi_allreduce(map_tot%rms, buffer%rms, size(map_tot%rms), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%div_co, buffer%div_co, size(map_tot%div_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum_co, buffer%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_co, buffer%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%rms_co, buffer%rms_co, size(map_tot%rms_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !call mpi_allreduce(map_tot%rms_co, buffer%rms_co, size(map_tot%rms_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
 
   if (myid == 0) then
      map_tot%div  = buffer%div
