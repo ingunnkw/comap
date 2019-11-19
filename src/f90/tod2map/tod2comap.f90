@@ -149,13 +149,18 @@ program tod2comap
         call time2pix(tod, map_scan, parfile, pinfo)
         call time2pix(tod, map_tot, parfile, pinfo)
         write(*,*) myid, "making maps, obsID", i, 'scan', scan%ss(j)%id
-        call binning(map_tot, map_scan, tod, i, parfile, pinfo)
+        call binning(map_scan, tod, i, parfile, pinfo)
         !call finalize_scan_binning(map_scan)
         !prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
         !call output_submap_h5(trim(prefix), map_scan)
         !!call free_map_type(map_scan)
         !call free_tod_type(tod)
      end do
+
+     map_tot%dsum    = map_tot%dsum + map_scan%dsum
+     map_tot%div     = map_tot%div  + map_scan%div
+     map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
+     map_tot%div_co  = map_tot%div_co  + map_scan%div_co
 
      call int2string(scan%id, obsid)
 
