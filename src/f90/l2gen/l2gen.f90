@@ -2757,8 +2757,9 @@ contains
 
     type(lx_struct), intent(inout) :: data_l2
 
-    integer(i4b) :: i, j, k, ndet, nfreq, nsb
-
+    integer(i4b) :: i, j, k, nsamp, ndet, nfreq, nsb
+    real(dp)     :: var
+    nsamp = size(data_l2%tod,1)
     nfreq = size(data_l2%tod,2)
     nsb   = size(data_l2%tod,3)
     ndet  = size(data_l2%tod,4)    
@@ -2770,7 +2771,8 @@ contains
     do i = 1, ndet
        do j = 1, nsb
           do k = 1, nfreq
-             data_l2%sigma0(k,j,i) = sqrt(variance(data_l2%tod(:,k,j,i)))
+             var = variance(data_l2%tod(2:,k,j,i) - data_l2%tod(:nsamp-1,k,j,i)) / 2
+             data_l2%sigma0(k,j,i) = sqrt(var)!sqrt(variance(data_l2%tod(:,k,j,i)))
              data_l2%alpha(k,j,i)  = -2.d0
              data_l2%fknee(k,j,i)  = 1.d-6   ! Set to a very low value
           end do

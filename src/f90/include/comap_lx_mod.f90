@@ -286,7 +286,7 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, nsim, ext(7), poly
+    integer(i4b)                 :: nsamp, nfreq, nfreq_full, nsb, ndet, npoint, nsim, ext(4), poly
     call free_lx_struct(data)
     call open_hdf_file(filename, file, "r")
     call get_size_hdf(file, "tod", ext)
