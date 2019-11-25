@@ -31,7 +31,7 @@ contains
     type(tod_type),   intent(inout) :: tod
 
     integer(i4b) :: i, j, k, l
-    real(dp)     :: nu_cut
+    real(dp)     :: nu_cut, var
     logical(lgt) :: hifreq
     type(lx_struct) :: data
 
@@ -92,7 +92,8 @@ contains
              if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
              ! Estimate RMS
-             tod%rms(j,l,k) = sqrt(variance(tod%d(:,j,l,k)))
+             var = variance(tod%d(2:,j,l,k) - tod%d(:tod%nsamp-1,j,l,k)) /2
+             tod%rms(j,l,k) = sqrt(var)!sqrt(variance(tod%d(:,j,l,k)))
           end do
        end do
     end do

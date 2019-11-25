@@ -72,7 +72,8 @@ contains
 !!$    stop
     
     !write(*,*) map%dthetax, map%dthetay
-    map%n_x = int((x_max-x_min)/map%dthetax); map%n_y = int((y_max-y_min)/map%dthetay)
+    !map%n_x = int((x_max-x_min)/map%dthetax); map%n_y = int((y_max-y_min)/map%dthetay)
+    map%n_x = int(2.d0 * pinfo%obj_rad / pinfo%resolution); map%n_y = int(2.d0 * pinfo%obj_rad / pinfo%resolution)
     !write(*,*) map%n_x, map%n_y
 
     allocate(map%x(map%n_x), map%y(map%n_y))

@@ -14,7 +14,7 @@ module comap_scan_mod
   end type comap_subscan
 
   type comap_scan_info
-    integer(i4b)         :: id, nsub, objectnum
+    integer(i4b)         :: id, nsub, objectnum, even, day
     real(dp)             :: mjd(2)
     character(len=512)   :: l1file, object
     type(comap_subscan), allocatable, dimension(:) :: ss
@@ -176,6 +176,9 @@ contains
              scan%ss(k)%l3file = trim(l3dir) // "/" // trim(name) // "/" // trim(name) // "_" // &
                   & trim(subsid) // ".h5"
           end do
+          !jackknives
+          scan%even = a
+          scan%day  = b
           call copy_scan_info(scan, runlist%scans(cnum))
           call free_scan_info(scan)
        end do
