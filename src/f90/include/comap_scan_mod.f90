@@ -233,6 +233,8 @@ contains
     b%l1file = a%l1file
     b%object = a%object
     b%objectnum = a%objectnum
+    b%even = a%even
+    b%day = a%day
     allocate(b%ss(b%nsub))
     do i = 1, b%nsub
        b%ss(i)%id          = a%ss(i)%id
