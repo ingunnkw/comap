@@ -53,7 +53,8 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:)     :: chi2          ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
-
+     real(sp),     allocatable, dimension(:,:,:,:,:) :: el_az_stats ! (g/a, n_chunks, freq, sb, feed)
+     
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
 !!$     real(dp)                                        :: scanfreq(2), pixsize 
@@ -486,6 +487,7 @@ contains
     if(allocated(data%t_hot))         deallocate(data%t_hot)
     if(allocated(data%amb_state))     deallocate(data%amb_state)
     if(allocated(data%amb_time))      deallocate(data%amb_time)
+    if(allocated(data%el_az_stats))   deallocate(data%el_az_stats)
   end subroutine
 
   subroutine write_l2_file(scan, k, data)
@@ -520,6 +522,7 @@ contains
     call write_hdf(file, "n_nan",             data%n_nan)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     if (allocated(data%chi2)) call write_hdf(file, "chi2",           data%chi2)
+    if (allocated(data%el_az_stats)) call write_hdf(file, "el_az_stats", data%el_az_stats)
     call write_hdf(file, "polyorder",         data%polyorder)
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",         data%tod_poly)
@@ -843,6 +846,12 @@ contains
        allocate(lx_out%spike_data(size(lx_in%spike_data,1),size(lx_in%spike_data,2),size(lx_in%spike_data,3),size(lx_in%spike_data,4),size(lx_in%spike_data,5)))
        lx_out%spike_data = lx_in%spike_data
     end if
+
+    if(allocated(lx_in%el_az_stats))   then
+       allocate(lx_out%el_az_stats(size(lx_in%el_az_stats,1),size(lx_in%el_az_stats,2),size(lx_in%el_az_stats,3),size(lx_in%el_az_stats,4),size(lx_in%el_az_stats,5)))
+       lx_out%el_az_stats = lx_in%el_az_stats
+    end if
+
     
     if(allocated(lx_in%pca_ampl))   then
        allocate(lx_out%pca_ampl(size(lx_in%pca_ampl,1),size(lx_in%pca_ampl,2),size(lx_in%pca_ampl,3),size(lx_in%pca_ampl,4)))

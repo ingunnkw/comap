@@ -72,7 +72,7 @@ program l2gen
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   nscan    = get_num_scans()
-  do snum = myid+1, nscan, nproc
+  do snum = myid+1, nscan, nproc     
      call get_scan_info(snum, scan)
      process = .false.
      do k = 2, scan%nsub-1
@@ -182,14 +182,19 @@ program l2gen
 
         if (rem_el) then
            ! Remove elevation gain
-           if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster') &
-                .or. (scan%ss(k)%scanmode == 'liss')) then 
-              if (verb) then
-                 write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
-              end if
-              call remove_elevation_gain(data_l2_fullres)
-              call update_status(status, 'remove_elevation')
+           ! if ((scan%ss(k)%scanmode == 'circ') .or. (scan%ss(k)%scanmode == 'raster') &
+           !      .or. (scan%ss(k)%scanmode == 'liss')) then 
+           !    if (verb) then
+           !       write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
+           !    end if
+           !    call remove_elevation_gain(data_l2_fullres)
+           !    call update_status(status, 'remove_elevation')
+           ! end if
+           if (verb) then
+              write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
            end if
+           call subtract_pointing_templates(data_l2_fullres, scan%ss(k))
+           call update_status(status, 'subtract_pointing_templates')
         end if
         if (verb) then           
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
@@ -2024,6 +2029,13 @@ contains
             &size(data_in%spike_data,4),size(data_in%spike_data,5)))
        data_out%spike_data = data_in%spike_data
     end if
+
+    if(allocated(data_in%el_az_stats))   then
+       allocate(data_out%el_az_stats(size(data_in%el_az_stats,1),&
+            &size(data_in%el_az_stats,2),size(data_in%el_az_stats,3),&
+            &size(data_in%el_az_stats,4),size(data_in%el_az_stats,5)))
+       data_out%el_az_stats = data_in%el_az_stats
+    end if
     
 
     data_out%freqmask      = data_in%freqmask
@@ -2415,6 +2427,68 @@ contains
     end do
 
   end subroutine postprocess_frequency_mask
+
+  subroutine subtract_pointing_templates(data, scan) 
+    implicit none
+    type(lx_struct),  intent(inout) :: data
+    type(comap_subscan), intent(in) :: scan
+    integer(i4b)    :: n, ndet, nsb, nfreq, i, j, k, l, m, tmin, tmax, parfile_time
+    real(dp)        :: a, sigma0, chisq, tsys, tau, dnu, const, g
+    real(dp), dimension(:), allocatable :: el, az, dat
+    
+    ! new linear function fit roughly every 5 min
+    n = max(1, floor((data%time(size(data%time)) - data%time(1)) * 24 * 60 / 5.d0))  
+    m = (size(data%time)) / n
+    nfreq = size(data%tod,2)
+    nsb   = size(data%tod,3)
+    ndet  = size(data%tod,4)
+    if (.not. allocated(data%el_az_stats)) allocate(data%el_az_stats(2,n,nfreq,nsb,ndet))
+    data%el_az_stats = 0.d0
+    !$OMP PARALLEL PRIVATE(j,k,l,i,el,az,dat,g,a,tmin,tmax)
+    allocate(el(m), az(m), dat(m))
+    !$OMP DO SCHEDULE(guided)
+    do j = 1, nfreq
+       do k = 1, ndet
+          if (.not. is_alive(data%pixels(k))) cycle
+          do l = 1, nsb
+             if (data%freqmask_full(j,l,k) == 0.d0) cycle
+             do i = 1, n
+                tmin = (i-1)*m+1
+                tmax = i*m
+                if (i == n) then
+                   tmax = size(data%time)
+                end if
+                az  = data%point_tel(1,tmin:tmax,k)
+                dat = data%tod(tmin:tmax,j,l,k)
+                !write(*,*) tmin, tmax, 'min max'
+                if (scan%scanmode == 'ces') then
+                   call fit_az_template(az, dat, a)
+                   data%tod(tmin:tmax,j,l,k) = &
+                        data%tod(tmin:tmax,j,l,k) &
+                        - a * az &
+                        + sum(a * az) / size(az)
+                   data%el_az_stats(2,i,j,l,k) = a
+                else 
+                   el  = data%point_tel(2,tmin:tmax,k)
+                   if (any(el == 0.d0)) write(*,*) "El is zero!!!", k, l, j, i
+                   call fit_pointing_templates(el, az, dat, g, a)
+                   data%tod(tmin:tmax,j,l,k) = &
+                        data%tod(tmin:tmax,j,l,k) &
+                        - g / sin(el*pi/180.) &
+                        - a * az &
+                        + sum(g / sin(el*pi/180.) + a * az) / size(el)
+                   data%el_az_stats(1,i,j,l,k) = g
+                   data%el_az_stats(2,i,j,l,k) = a
+                end if
+             end do
+          end do
+       end do
+    end do
+    !$OMP END DO
+    deallocate(el,az,dat)    
+    !$OMP END PARALLEL
+  end subroutine subtract_pointing_templates
+
 
   subroutine remove_elevation_gain(data) 
     implicit none
