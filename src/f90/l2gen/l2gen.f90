@@ -2442,7 +2442,9 @@ contains
     nfreq = size(data%tod,2)
     nsb   = size(data%tod,3)
     ndet  = size(data%tod,4)
-    if (.not. allocated(data%el_az_stats)) allocate(data%el_az_stats(2,n,nfreq,nsb,ndet))
+    if (allocated(data%el_az_stats)) deallocate(data%el_az_stats)
+    allocate(data%el_az_stats(2,n,nfreq,nsb,ndet))
+!    if (.not. allocated(data%el_az_stats)) allocate(data%el_az_stats(2,n,nfreq,nsb,ndet))
     data%el_az_stats = 0.d0
     !$OMP PARALLEL PRIVATE(j,k,l,i,el,az,dat,g,a,tmin,tmax)
     allocate(el(m), az(m), dat(m))
