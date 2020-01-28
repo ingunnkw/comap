@@ -14,7 +14,7 @@ module comap_scan_mod
   end type comap_subscan
 
   type comap_scan_info
-    integer(i4b)         :: id, nsub, objectnum, even, day
+    integer(i4b)         :: id, nsub, objectnum, even, day, half, meanel
     real(dp)             :: mjd(2)
     character(len=512)   :: l1file, object
     type(comap_subscan), allocatable, dimension(:) :: ss
@@ -177,8 +177,10 @@ contains
                   & trim(subsid) // ".h5"
           end do
           !jackknives
-          scan%even = a
-          scan%day  = b
+          scan%even   = a
+          scan%day    = b
+          scan%half   = c
+          scan%meanel = d
           call copy_scan_info(scan, runlist%scans(cnum))
           call free_scan_info(scan)
        end do

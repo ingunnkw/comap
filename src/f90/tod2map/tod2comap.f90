@@ -32,10 +32,10 @@ program tod2comap
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
   character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
-  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife
+  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, map_file1, map_file2
   character(len=6)      :: obsid
   character(len=5)      :: sim_string
-  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim
+  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split
 
   integer(i4b)          :: myid, nproc, ierr, root
   logical               :: binning_split, found, obs_map, split_mode
@@ -66,7 +66,6 @@ program tod2comap
   call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
   call get_parameter(0, parfile, 'SEED', par_int=seed)
   call get_parameter(0, parfile, 'JACKKNIVES', par_string=jackknife)
-  !call get_parameter(0, parfile, 'SPLIT_MODE', par_int=split_mode)
   call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
@@ -102,6 +101,8 @@ program tod2comap
   else
      split_mode = .false.
   end if
+  n1 = 0
+  n2 = 0
 
   !if (myid==0) then
   if (myid==0) write(*,*) "Initialising mapmaker"
@@ -134,6 +135,10 @@ program tod2comap
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
      !write(*,*) scan%id
+     if (jackknife .eq. 'even') split = scan%even
+     if (jackknife .eq. 'day')  split = scan%day
+     if (jackknife .eq. 'half') split = scan%half
+     if (jackknife .eq. 'el')   split = scan%meanel
 
 !     if (split_mode == 1) then
 !        if (mod(scan%id,2) == 0) cycle ! odd obsIDs
@@ -170,14 +175,8 @@ program tod2comap
         !call nullify_map_type(map_scan)
         call time2pix(tod, map_scan, parfile, pinfo)
         call time2pix(tod, map_tot, parfile, pinfo)
-        if (jackknife .eq. 'even') then
-           if (scan%even .eq. 1) then
-              call time2pix(tod, map_split1, parfile, pinfo)
-           else
-              call time2pix(tod, map_split2, parfile, pinfo)
-           end if
-        else if (jackknife .eq. 'day') then
-           if (scan%day .eq. 1) then
+        if (split_mode) then
+           if (split .eq. 0) then
               call time2pix(tod, map_split1, parfile, pinfo)
            else
               call time2pix(tod, map_split2, parfile, pinfo)
@@ -197,30 +196,19 @@ program tod2comap
      map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
      map_tot%div_co  = map_tot%div_co  + map_scan%div_co
 
-     if (jackknife .eq. 'even') then
-        if (scan%even .eq. 1) then
+     if (split_mode) then
+        if (split .eq. 0) then
            map_split1%dsum    = map_split1%dsum + map_scan%dsum
            map_split1%div     = map_split1%div  + map_scan%div
            map_split1%dsum_co = map_split1%dsum_co + map_scan%dsum_co
            map_split1%div_co  = map_split1%div_co  + map_scan%div_co
+           n1 = n1 + 1
         else
            map_split2%dsum    = map_split2%dsum + map_scan%dsum
            map_split2%div     = map_split2%div  + map_scan%div
            map_split2%dsum_co = map_split2%dsum_co + map_scan%dsum_co
            map_split2%div_co  = map_split2%div_co  + map_scan%div_co
-        end if
-           
-     else if (jackknife .eq. 'day') then
-        if (scan%day .eq. 1) then
-           map_split1%dsum    = map_split1%dsum + map_scan%dsum
-           map_split1%div     = map_split1%div  + map_scan%div
-           map_split1%dsum_co = map_split1%dsum_co + map_scan%dsum_co
-           map_split1%div_co  = map_split1%div_co  + map_scan%div_co
-        else
-           map_split2%dsum    = map_split2%dsum + map_scan%dsum
-           map_split2%div     = map_split2%div  + map_scan%div
-           map_split2%dsum_co = map_split2%dsum_co + map_scan%dsum_co
-           map_split2%div_co  = map_split2%div_co  + map_scan%div_co
+           n2 = n2 + 1
         end if
      end if
 
@@ -290,6 +278,9 @@ program tod2comap
      call mpi_allreduce(map_split2%div_co,  buffer2%div_co,  size(map_tot%div_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
      call mpi_allreduce(map_split2%dsum_co, buffer2%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
      call mpi_allreduce(map_split2%nhit_co, buffer2%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+
+     call mpi_allreduce(n1, nn1, 1, MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+     call mpi_allreduce(n2, nn2, 1, MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   end if
 
   if (myid == 0) then
@@ -313,6 +304,15 @@ program tod2comap
      map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
      call output_map_h5(map_filename, map_tot)
      call free_map_type(map_tot)
+     if (split_mode) then
+        map_file1   = trim(prefix)//'_split1_'//trim(map_name)//'.h5'
+        map_file2   = trim(prefix)//'_split2_'//trim(map_name)//'.h5'
+        write(*,*) 'split 1 vs 2:', nn1, nn2
+        call output_map_h5(map_file1, map_split1)
+        call output_map_h5(map_file2, map_split2)
+        call free_map_type(map_split1)
+        call free_map_type(map_split2)
+     end if
   end if
 
   !deallocate(tod)
