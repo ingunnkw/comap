@@ -132,7 +132,7 @@ contains
 
     allocate(map%x(nx), map%y(ny))
     allocate(map%m(nx,ny,nfreq,nsb,ndet), map%rms(nx,ny,nfreq,nsb,ndet), map%nhit(nx,ny,nfreq, nsb,ndet))
-    allocate(map%freq(nfreq,nsb))
+    allocate(map%freq(nfreq,nsb), map%feeds(ndet))
     
 
     call read_hdf(file, "n_x", map%n_x)
@@ -147,7 +147,6 @@ contains
     call read_hdf(file, "mean_az", map%mean_az)
     call read_hdf(file, "mean_el", map%mean_el)
     call read_hdf(file, "feeds", map%feeds)
-
     call close_hdf_file(file)
 
   end subroutine read_map_h5
