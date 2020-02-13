@@ -136,7 +136,7 @@ contains
 
     allocate(map%x(nx), map%y(ny))
     allocate(map%m(nx,ny,nfreq,nsb,ndet), map%rms(nx,ny,nfreq,nsb,ndet), map%nhit(nx,ny,nfreq, nsb,ndet))
-    allocate(map%freq(nfreq,nsb))
+    allocate(map%freq(nfreq,nsb), map%feeds(ndet))
     
 
     call read_hdf(file, "n_x", map%n_x)
