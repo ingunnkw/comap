@@ -38,7 +38,7 @@ program tod2comap
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split
 
   integer(i4b)          :: myid, nproc, ierr, root
-  logical               :: binning_split, found, obs_map, split_mode
+  logical               :: binning_split, found, obs_map, split_mode, verbose
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
 
@@ -67,6 +67,7 @@ program tod2comap
   call get_parameter(0, parfile, 'SEED', par_int=seed)
   call get_parameter(0, parfile, 'JACKKNIVES', par_string=jackknife)
   call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
+  call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose)
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
@@ -106,6 +107,7 @@ program tod2comap
 
   !if (myid==0) then
   if (myid==0) write(*,*) "Initialising mapmaker"
+  !if (myid == 0) write(*,*) trim(jackknife)
   call initialize_mapmaker(map_scan, parfile, pinfo)
   call initialize_mapmaker(map_tot,  parfile, pinfo)
   call initialize_mapmaker(buffer,   parfile, pinfo)
@@ -135,24 +137,12 @@ program tod2comap
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
      !write(*,*) scan%id
-     if (jackknife .eq. 'even') split = scan%even
-     if (jackknife .eq. 'day')  split = scan%day
-     if (jackknife .eq. 'half') split = scan%half
-     if (jackknife .eq. 'el')   split = scan%meanel
+     if (jackknife .eq. 'even')   split = scan%even
+     if (jackknife .eq. 'day')    split = scan%day
+     if (jackknife .eq. 'half')   split = scan%half
+     if (jackknife .eq. 'meanel') split = scan%meanel
 
-!     if (split_mode == 1) then
-!        if (mod(scan%id,2) == 0) cycle ! odd obsIDs
-!     else if (split_mode == 2) then
-!        if (mod(scan%id,2) == 1) cycle ! even obsIDs
-!     end if
-
-!     if (split_mode == 0) then
-!        ! Full-mission
-!     else if (split_mode == 1) then
-!        if (mod(scan%id,2) == 0) cycle ! Odd obsIDs
-!     else if (split_mode == 2) then
-!        if (mod(scan%id,2) == 1) cycle ! Even obsIDs
-!     end if
+     write(*,*) myid, scan%id!, scan%even, scan%day, scan%half, scan%meanel
 
      call nullify_map_type(map_scan)
      
@@ -168,7 +158,10 @@ program tod2comap
         !stop
 
         call get_tod(trim(filename), tod, parfile)
-     
+        !elevation cuts here
+        !if (tod%mean_el .lt. 35.d0) cycle
+        !if (tod%mean_el .gt. 65.d0) cycle
+        
         !call int2string(scan%ss(j)%id, scanid)
         !write(*,*) 'scan', scanid
 
@@ -182,7 +175,7 @@ program tod2comap
               call time2pix(tod, map_split2, parfile, pinfo)
            end if
         end if
-        write(*,*) myid, "making maps, obsID", i, 'scan', scan%ss(j)%id
+        if (verbose) write(*,*) myid, "making maps, obsID", i, 'scan', scan%ss(j)%id
         call binning(map_scan, tod, i, parfile, pinfo)
         !call finalize_scan_binning(map_scan)
         !prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
@@ -212,7 +205,7 @@ program tod2comap
         end if
      end if
 
-    call int2string(scan%id, obsid)
+     call int2string(scan%id, obsid)
 
      if (obs_map) then
         call finalize_scan_binning(map_scan)
@@ -296,6 +289,22 @@ program tod2comap
      write(*,*) "Finalising"
      call finalize_binning(map_tot)
      if (split_mode) then
+        map_split1%div  = buffer1%div 
+        map_split1%dsum = buffer1%dsum
+        map_split1%nhit = buffer1%nhit
+        map_split1%rms  = buffer1%rms
+        map_split1%div_co  = buffer1%div_co
+        map_split1%dsum_co = buffer1%dsum_co
+        map_split1%nhit_co = buffer1%nhit_co
+        map_split1%rms_co  = buffer1%rms_co
+        map_split2%div  = buffer2%div
+        map_split2%dsum = buffer2%dsum
+        map_split2%nhit = buffer2%nhit
+        map_split2%rms  = buffer2%rms
+        map_split2%div_co  = buffer2%div_co
+        map_split2%dsum_co = buffer2%dsum_co
+        map_split2%nhit_co = buffer2%nhit_co
+        map_split2%rms_co  = buffer2%rms_co
         call finalize_binning(map_split1)
         call finalize_binning(map_split2)
      end if

@@ -21,7 +21,7 @@ contains
     character(len=*)                            :: parfile
 
     integer(i4b) :: i, j, k, l, p, q, fs, st, ierr
-    real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec
+    real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec, d1, d2
     character(len=15)   :: coord_system
     real(8), parameter :: PI = 4*atan(1.d0)
 
@@ -37,6 +37,8 @@ contains
     pad = 0.5d0 ! degrees
     !write(*,*) pinfo%resolution
     map%dthetay = pinfo%resolution ! degrees (arcmin/60), resolution
+    map%center = pinfo%pos
+    map%nside = 4096/(pinfo%resolution*60)
     map%mean_el = 0.d0!mean(tod(:)%mean_el)
     map%mean_az = 0.d0!mean(tod(:)%mean_az)
     mean_dec = 0.d0
@@ -115,12 +117,21 @@ contains
     map%m_co    = 0.0
     map%rms_co  = 0.0
 
-    
     ! Simulated data
     map%dsum_sim = 0.0
     map%div_sim  = 0.0 
     map%m_sim    = 0.0
     map%rms_sim  = 0.0 
+
+    ! Frequency
+    d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
+    do i = 1, map%nsb
+       temp = 26.d0 + (i-1)*2.d0 + d1
+       do j = 1, map%nfreq
+          map%freq(j,i) = temp + (j-1)*d2
+       end do
+    end do
+
   end subroutine initialize_mapmaker
 
 
@@ -149,7 +160,7 @@ contains
     map%ndet = tod%ndet
     if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
     map%feeds = tod%feeds
-    
+     
     !call wall_time(t1)
     !!$OMP PARALLEL PRIVATE(scan,j,i,p,q,sb,freq)
     !!$OMP DO SCHEDULE(guided)
@@ -163,9 +174,14 @@ contains
     do j = 1, tod%ndet
        det = tod%feeds(j)
        if (.not. is_alive(det)) cycle
+       !write(*,*) det
        !sigma0(:,:) = sigma0(:,:) + 1.0 / tod%sigma0(:,:,det)**2
        !write(*,*) j, det
        do i = 1, tod%nsamp
+          if (tod%test(i) .eq. 1) cycle
+          !if (tod%point_tel(2,i,j) .lt. 35.d0) cycle
+          !if (tod%point_tel(2,i,j) .gt. 65.d0) cycle
+          !if (tod%point_tel(1,i,j) .lt. 40.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
              p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
              q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
@@ -251,6 +267,10 @@ contains
        if (.not. is_alive(det)) cycle
        !write(*,*) j, det
        do i = 1, tod%nsamp
+          if (tod%test(i) .eq. 1) cycle
+          !if (tod%point_tel(2,i,j) .lt. 35.d0) cycle
+          !if (tod%point_tel(2,i,j) .gt. 65.d0) cycle
+          !if (tod%point_tel(1,i,j) .lt. 40.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
              p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
              q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)

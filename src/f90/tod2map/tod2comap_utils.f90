@@ -10,16 +10,16 @@ module tod2comap_utils
      integer(i4b) :: nsamp, ndet, nfreq, nsb, nsim
      real(dp)     :: fmin, fmax, df, mean_el, mean_az
 
-     integer(i4b), allocatable, dimension(:)   :: feeds                ! active feeds
-     real(sp), allocatable, dimension(:,:,:)   :: freqmask             ! (freq, sb, det)
-     real(dp), allocatable, dimension(:)       :: t                    ! (time) 
-     real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g  ! (time, freq,  sb, det)
-     real(dp), allocatable, dimension(:,:,:,:) :: d_sim, d_raw_sim    ! (time, freq,  sb, det)
-     real(dp), allocatable, dimension(:,:,:)   :: rms                    ! (freq,  sb, det)
-     real(dp), allocatable, dimension(:,:,:)   :: rms_sim                ! (freq,  sb, det)   
-     real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha,f ! (freq, sb, det)
-     real(dp), allocatable, dimension(:,:)     :: pixel               ! (sb, freq) or (time, det)
-     real(dp), allocatable, dimension(:,:,:)   :: point, point_tel     ! (det, 3, time)
+     integer(i4b), allocatable, dimension(:)   :: feeds, test             ! active feeds
+     real(sp), allocatable, dimension(:,:,:)   :: freqmask                ! (freq, sb, det)
+     real(dp), allocatable, dimension(:)       :: t                       ! (time) 
+     real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g     ! (time, freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:,:) :: d_sim, d_raw_sim        ! (time, freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:)   :: rms                     ! (freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:)   :: rms_sim                 ! (freq,  sb, det)   
+     real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha, f ! (freq, sb, det)
+     real(dp), allocatable, dimension(:,:)     :: pixel                   ! (sb, freq) or (time, det)
+     real(dp), allocatable, dimension(:,:,:)   :: point, point_tel        ! (det, 3, time)
 
   end type tod_type
 
@@ -57,7 +57,7 @@ contains
          & tod%d(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%g(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet), &
          & tod%rms(tod%nfreq, tod%nsb, tod%ndet), &
-         & tod%feeds(tod%ndet) )
+         & tod%feeds(tod%ndet), tod%test(tod%nsamp) )
 
     allocate( tod%sigma0(tod%nfreq, tod%nsb, tod%ndet), &
          & tod%fknee(tod%nfreq, tod%nsb, tod%ndet), &
@@ -77,6 +77,7 @@ contains
     tod%mean_az = mean(data%point_tel(1,:,1)) ! Mean boresight
     !write(*,*) shape(data%point), tod%nsamp
     tod%pixel = -200
+    tod%test  = 0
 
     do k = 1, tod%ndet
        do l = 1, tod%nsb
@@ -97,6 +98,9 @@ contains
           end do
        end do
     end do
+
+    ! Perform tests
+    call turnaround_test(tod%point_tel,tod%test)
 
     call free_lx_struct(data)
 
@@ -199,6 +203,35 @@ contains
     deallocate(tod_fft)
 
   end subroutine hp_filter
+
+
+  subroutine update_mask(mask)
+    implicit none
+    real(sp), dimension(:,:,:), intent(inout) :: mask
+
+  end subroutine update_mask
+
+  
+  subroutine turnaround_test(point, turn)
+    implicit none
+    real(dp),     dimension(:,:,:), intent(in)    :: point
+    integer(i4b), dimension(:),     intent(inout) :: turn
+    real(dp)     :: d1, d2
+    integer(i4b) :: n,i
+
+    n = size(turn)
+
+    do i = 1+12, n-12
+       d1 = point(1,i+1,1) - point(1,i-1,1)
+       d2 = point(1,i,1)   - point(1,i-2,1)
+       if ((d1 .lt. 0.d0) .and. (d2 .gt. 0.d0)) then
+          turn(i-12:i+12) = 1
+       else if ((d1 .gt. 0.d0) .and. (d2 .lt. 0.d0)) then
+          turn(i-12:i+12) = 1
+       end if
+    end do
+      
+  end subroutine turnaround_test
 
 
   subroutine simulate_tod(data, tod_sim, parfile, rng_handle)
@@ -347,6 +380,7 @@ contains
     if (allocated(tod%pixel))     deallocate(tod%pixel)
     if (allocated(tod%freqmask))  deallocate(tod%freqmask)
     if (allocated(tod%feeds))     deallocate(tod%feeds)
+    if (allocated(tod%test))      deallocate(tod%test)
 
     ! Simulated data 
     if (allocated(tod%d_sim))     deallocate(tod%d_sim)
