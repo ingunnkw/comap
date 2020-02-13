@@ -198,8 +198,14 @@ contains
                 do freq = 1, tod%nfreq
                    if (tod%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
-                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1
-                   map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
+                   ! Flipping sb 1 and 3
+                   if ((sb .eq. 1) .or. (sb .eq. 3)) then
+                      map%nhit(p,q,tod%nfreq-freq+1,sb,det) = map%nhit(p,q,tod%nfreq-freq+1,sb,det) + 1
+                      map%nhit_co(p,q,tod%nfreq-freq+1,sb)  = map%nhit_co(p,q,tod%nfreq-freq+1,sb)  + 1                      
+                   else
+                      map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1
+                      map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
+                   end if
                  end do
              end do
           else
@@ -249,8 +255,6 @@ contains
 
     x_min = map%x(1); x_max = map%x(map%n_x)
     y_min = map%y(1); y_max = map%y(map%n_y)
-    allocate(sigma0(tod%nfreq,tod%nsb))
-    sigma0 = 0.d0
 
     map%ndet = tod%ndet
     if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
@@ -286,8 +290,12 @@ contains
              do sb = 1, tod%nsb
                 do freq = 1, tod%nfreq
                    if (tod%freqmask(freq,sb,j) == 0) cycle
-                   map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
-                   sigma0(freq,sb) = sigma0(freq,sb) + 1./tod%sigma0(freq,sb,det)**2
+                   ! Flipping sb 1 and 3
+                   if ((sb .eq. 1) .or. (sb .eq. 3)) then
+                      map%nhit_co(p,q,tod%nfreq-freq+1,sb)  = map%nhit_co(p,q,tod%nfreq-freq+1,sb)  + 1
+                   else
+                      map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
+                   end if
                 end do
              end do
           else
@@ -296,24 +304,6 @@ contains
        end do
     end do
 
-    where (sigma0 > 0.)
-       sigma0 = 1./sqrt(sigma0)
-    elsewhere
-       sigma0 = 0.
-    end where
-
-    ! do sb = 1, tod%nsb
-    !    do freq = 1, tod%nfreq
-    !       if (sigma0(freq,sb) == 0) cycle
-    !       where(map%nhit(:,:,freq,sb,:) > 0)
-    !          map%rms_sim(:,:,freq,sb,:) = map%rms_sim(:,:,freq,sb,:) + map%nhit(:,:,freq,sb,:)/sigma0(freq,sb)**2 
-    !       elsewhere
-    !          map%rms_sim(:,:,freq,sb,:) = 0.d0
-    !       end where
-    !    end do
-    ! end do
-
-    deallocate(sigma0)
 
   end subroutine time2pix_sim
 
@@ -427,13 +417,18 @@ contains
                 !write(*,*) i, det, sb, freq
                 !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                 !write(*,*) tod%rms(i,freq,sb,det)
-
-                map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
-                map%dsum_co(p,q,freq,sb)  = map%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                map%div_co(p,q,freq,sb)   = map%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
-
-                !end if
+                ! Flipping sb 1 and 3
+                if ((sb .eq. 1) .or. (sb .eq. 3)) then
+                   map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2 * tod%d(i,nfreq-freq+1,sb,j)
+                   map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2
+                   map%dsum_co(p,q,freq,sb)  = map%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2 * tod%d(i,nfreq-freq+1,sb,j)
+                   map%div_co(p,q,freq,sb)   = map%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2
+                else
+                   map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
+                   map%dsum_co(p,q,freq,sb)  = map%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_co(p,q,freq,sb)   = map%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
+                end if
              end do
           end do
        end do
@@ -499,10 +494,14 @@ contains
                 if (tod%rms_sim(freq,sb,j) == 0.d0) cycle
                 !map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
                 !map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
-
-                map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
-                map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
-                !end if
+                ! Flipping sb 1 and 3
+                if ((sb .eq. 1) .or. (sb .eq. 3)) then
+                   map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(nfreq-freq+1,sb,j)**2 * tod%d_sim(i,nfreq-freq+1,sb,j)
+                   map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(nfreq-freq+1,sb,j)**2
+                else
+                   map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
+                   map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
+                end if
              end do
           end do
        end do
