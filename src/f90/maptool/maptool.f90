@@ -10,10 +10,12 @@ program maptool
   use quiet_mapfile_mod
   use powell_mod
   use rngmod
+  use quiet_hdf_mod
   use quiet_mpi_mod
   use quiet_task_mod
   use quiet_pixspace_mod
   use comap_map_mod
+  use comap_lx_mod
 
   implicit none
 
@@ -5501,21 +5503,22 @@ spectral = beta(1)
     
     integer(i4b),    intent(in) :: unit
     
-    character(len=512)          :: mapfile, outprefix, val_in
+    character(len=512)          :: mapfile, level2file, outprefix, val_in
     character(len=4)            :: ftxt
-    character(len=2)            :: sbtxt
-    integer(i4b)                :: i, k, l, p, s, nfreq, nsb, nx, ny
-    integer(i4b)                :: numsamp, burn, numrej, numpar
+    character(len=2)            :: sbtxt, feedtxt
+    integer(i4b)                :: i, k, l, m, p, s, nfreq, nsb, nx, ny, ndet
+    integer(i4b)                :: numsamp, burn, numrej, numpar, outputlevel
+    integer(i4b)                :: feedind
     real(dp)                    :: gain, mingain, maxgain, minbeam, maxbeam
     real(dp)                    :: r, xjup, yjup, x, y
     real(dp)                    :: gain0, fwhm0, xpos0, ypos0, mono
     real(dp)                    :: abstemp, obstemp, fwhm, nu0, dist, dist_fid
     real(dp)                    :: inittemp, initfwhm, initdist, tsys0, tsys
     real(dp)                    :: f_A, f_D, sigma, omega_b, omega_ref, ratio
-    logical(lgt)                :: second_time
+    logical(lgt)                :: second_time, chatty
     real(dp),     dimension(5)  :: nu, T_p, T_p2
     real(dp),     dimension(5)  :: stepsize, parmean, parstdd
-    integer(i4b), dimension(4)  :: pos
+    integer(i4b), dimension(2)  :: pos
 
     real(dp),         allocatable, dimension(:,:,:) :: ipar, fpar
     real(dp),         allocatable, dimension(:,:)   :: params
@@ -5523,30 +5526,77 @@ spectral = beta(1)
     character(len=4), allocatable, dimension(:)     :: parname
 
     type(map_type)  :: inmap
+    type(lx_struct) :: data
 
     call initialize_random_seeds(MPI_COMM_WORLD, 357888, rng_handle)
 
     ! Get parameters
-    if (iargc() /= 5) then
-       write(*,*) 'gain takes 4 parameters: map, prefix, numsamp, burn'
+    if (iargc() /= 7) then
+       write(*,*) 'gain takes 6 parameters: level2, map, output, prefix, numsamp, burn'
        write(*,*) ''
        call give_user_info
     else 
-       call getarg(2, mapfile)
-       call getarg(3, outprefix)
+       call getarg(2, level2file)
+       call getarg(3, mapfile)
        call getarg(4, val_in)
+       read(val_in,*) outputlevel
+       call getarg(5, outprefix)
+       call getarg(6, val_in)
        read(val_in,*) numsamp
-       call getarg(5, val_in)
+       call getarg(7, val_in)
        read(val_in,*) burn
     end if
 
     if (numsamp-burn <= 0) then
-       write(*,*) 'No samples left after burn-in. Exiting'
+       if (myid==0) write(*,*) 'No samples left after burn-in. Exiting'
        call mpi_finalize(ierr)
        stop
     end if
 
-    tsys0 = 35. !Assumed Tsys for initial gain calib
+    if (outputlevel == 0) then
+       chatty = .false.
+       if (myid==0) write(*,*) 'Outputlevel 0: Summary statistics'
+    else if (outputlevel == 1) then
+       chatty = .true.
+       if (myid==0) write(*,*) 'Outputlevel 1: Summary statistics and chatty'
+    else if (outputlevel == 2) then
+       chatty = .true.
+       if (myid==0) write(*,*) 'Outputlevel 2: Full chains and chatty'
+    else if (outputlevel == 3) then
+       chatty = .true.
+       if (myid==0) write(*,*) 'Outputlevel 3: Debug'
+    else
+       if (myid==0) write(*,*) 'Unknown outputlevel. Exiting'
+       call mpi_finalize(ierr)
+       stop
+    end if
+
+    ! Read map information
+    call read_map_h5(mapfile, inmap)
+    if (myid==0) write(*,*) shape(inmap%m), 'shape inmap'
+    nx = size(inmap%m,1)
+    ny = size(inmap%m,2)
+    nfreq = size(inmap%m,3)
+    nsb = size(inmap%m,4)
+    ndet = size(inmap%m,5)
+    if (myid==0) write(*,*) nx, ny, nfreq, nsb, ndet, 'nx, ny, nfreq, nsb, ndet'
+    !write(*,*) minval(inmap%x), maxval(inmap%x), 'x range'
+    !write(*,*) minval(inmap%y), maxval(inmap%y), 'y range'
+
+    ! Read tsys and frequency from level2 file
+    !call open_hdf_file(level2file, l2object, r)
+    !call read_hdf(level2file, l2object, r)
+    call read_l2_file(level2file, data)
+!    if (myid==0) write(*,*) shape(data%Tsys_lowres), 'shape Tsys_lowres'
+    if (myid==0) write(*,*) shape(data%Tsys_lowres), 'shape Tsys_lowres'
+    if (myid==0) write(*,*) data%pixels
+    if (myid==0) write(*,*) ' '
+    if (myid==0) write(*,*) size(inmap%feeds), 'nfeeds map'
+    if (myid==0) write(*,*) size(data%pixels), 'npixels l2'
+    !ndet = size(data%pixels)
+    if (myid==0) write(*,*) data%pix2ind, 'pixels2ind'
+
+
 
     ! Find temperature (K) of Jupiter as function of frequency nu from WMAP
     nu        = [22.85d0, 33.11d0, 40.92d0, 60.41d0, 93.25d0]
@@ -5558,27 +5608,6 @@ spectral = beta(1)
     dist_fid = 5.2d0
     f_A = 1.d0
 
-    ! Calculate temperature at 30 GHz for 4 arcmin fwhm in uK
-    initdist = 5.62477d0 !obs
-    initfwhm = 4.d0
-    inittemp = splint(nu, T_p, T_p2, 30.d0) * 1d6
-    sigma    = initfwhm / 60.d0 / sqrt(8.d0*log(2.d0)) * pi/180.d0
-    omega_b  = 2.d0*pi*sigma**2
-    f_d = (initdist/dist_fid)**2
-    inittemp = inittemp * omega_ref/omega_b * f_A / f_d
-
-    ! Read map information
-    call read_map_h5(mapfile, inmap)
-    !write(*,*) shape(inmap%m), 'shape inmap'
-    nx = size(inmap%m,1)
-    ny = size(inmap%m,2)
-    nfreq = size(inmap%m,3)
-    nsb = size(inmap%m,4)
-    if (myid==0) write(*,*) nx, ny, nfreq, nsb, 'nx, ny, nfreq, nsb'
-    !write(*,*) minval(inmap%x), maxval(inmap%x), 'x range'
-    !write(*,*) minval(inmap%y), maxval(inmap%y), 'y range'
-    !write(*,*) numsamp, '= numsamp'
-    pos = maxloc(inmap%m(:,:,:,:))
 
     ! Set up parameter structure and initialize
     numpar = 5
@@ -5594,119 +5623,164 @@ spectral = beta(1)
     allocate(chisq(0:numsamp))
 
     ! Loop over all frequency channels
-    do l = 1, nsb
-       call int2string(l, sbtxt)
-       ipar = 0.d0
-!       do k = 20, 20
-       do k = 1+myid, nfreq, numprocs
-          call int2string(k, ftxt)
-          write(*,*) myid, 'processing freq:', ftxt,'      sb:',sbtxt
-          ! init values
-          params(0,1) = inittemp/maxval(inmap%m)    !tsys0
-          params(0,2) = initfwhm
-          params(0,3) = inmap%x(pos(1))
-          params(0,4) = inmap%y(pos(2))
-          params(0,5) = 0.d0
-          ! init step size
-          stepsize(1) = 0.1d0 !gain
-          stepsize(2) = 0.01d0 !beam arcmin
-          stepsize(3) = 0.0001d0 !ra degrees
-          stepsize(4) = 0.0001d0 !dec degrees
-          stepsize(5) = 1000.d0  ! offset uK
+    do m = 1, ndet
+       feedind = data%pix2ind(m) 
+       if (feedind == 0) cycle
+       call int2string(m, feedtxt)
+       if (myid==0) then
           do p = 1, numpar
-             if (myid==0) write(*,*) 'init ', parname(p), ' =', params(0,p), '+-', stepsize(p)
+             open(15+p, file=trim(outprefix)//'_all_'//parname(p)//'_feed'//feedtxt//'.dat')
           end do
-
-          ! Extract observed parameters
-          dist = 5.62477d0 !obs
-          f_d = (dist/dist_fid)**2
-          !nu0 = inmap%f(k,l)
-          nu0 = 27.953125d0 ! GHz
-          nu0 = 26.d0 + (l-1)*2.d0 + (k-1)*0.03125d0 ! GHz
-          if (myid==0) write(*,*) nu0, '= nu0' !, inmap%f(k,l) 
-          !Find intrinsic Jupiter temperature in uK
-          abstemp = splint(nu, T_p, T_p2, nu0) * 1d6
-
-          ! Loop twice, first one to initialize start points and step size
-          second_time = .false.
-          do while (.true.)
-             numrej = 0
-             chisq  = 0.d0
-             ! Calculate chisq for given gain, beam size and position
-             call calculate_chisq(inmap, k, l, abstemp, omega_ref, f_A, f_D, tsys0, params(0,:), chisq(0))
-             ! Loop over MCMC samples
-             do s = 1, numsamp
-                !if (modulo(s,10 /= 0)) write(*,*) 'Processing sample', s, 'of', numsamp
-                ! Draw random parameters
-                do p = 1, numpar
-                   params(s,p) = params(s-1,p) + rand_gauss(rng_handle) * stepsize(p)
-                end do
-                ! Calculate chisq for given parameters
-                call calculate_chisq(inmap, k,l, abstemp, omega_ref, f_A, f_D, tsys0, params(s,:), chisq(s))
-                ! Reject if necessary poor sample
-                if (chisq(s) == 0.d0) then
-                   ratio = 0.d0
-                else if (chisq(s) < chisq(s-1)) then
-                   ratio = 1.d0
-                else
-                   ratio = exp(-0.5*(chisq(s)-chisq(s-1)))
-                end if
-                if (rand_uni(rng_handle) > ratio) then
-                   params(s,:) = params(s-1,:)
-                   chisq(s)    = chisq(s-1)
-                   numrej = numrej + 1
-                end if
-             end do
-             
-             ! Collect and write results
-             write(*,*) myid, k, '  Accept rate =', real(numsamp-numrej,dp)/real(numsamp,dp)
-             do p = 1, numpar
-                parmean(p) = mean(params(burn:numsamp,p))
-                parstdd(p) = sqrt(variance(params(burn:numsamp,p)))
-                ! Check if we have data
-                if (parstdd(p) /= 0.d0) then
-                   if (myid==0) write(*,*) parname(p), ' =', parmean(p), '+-', parstdd(p)
-                   ! write chains to file
-                   if (second_time) then
-                      open(14, file=trim(outprefix)//'_'//parname(p)//'_sb'//sbtxt//'_f'//ftxt//'.dat')
-                      do i = 1, numsamp
-                         write(14,*) i, params(i,p)
-                      end do
-                      close(14)
-                      ipar(k,p,1) = parmean(p)
-                      ipar(k,p,2) = parstdd(p)
-                   else
-                      stepsize(p) = parstdd(p) * 0.3
-                      params(0,p) = parmean(p)
-                   end if
-                else
-                   write(*,*) 'No data for freq:',ftxt,' sb:',sbtxt  
-                end if
-             end do
-            
-             if (second_time) then
-                exit
-             end if
-             second_time = .true.             
-          end do !while loop
-
-       end do !freq loop
-       call mpi_reduce(ipar, fpar, size(ipar), mpi_double_precision, mpi_sum, root, MPI_COMM_WORLD, ierr)
-       if (myid==0) then 
-          do p = 1, numpar
-             open(15, file=trim(outprefix)//'_all_'//parname(p)//'_sb'//sbtxt//'.dat')
-             do i = 1, nfreq
-                write(15,*) i, fpar(i,p,:) 
-             end do
-             close(15)
-          end do
-          open(15, file=trim(outprefix)//'_all_tsys_sb'//sbtxt//'.dat')
-          do i = 1, nfreq
-             write(15,*) i, tsys0/fpar(i,1,1) 
-          end do
-          close(15)
        end if
-    end do !sb loop
+       !call int2string(data%pixels(m), feedtxt)
+       do l = 1, nsb
+          call int2string(l, sbtxt)
+          ipar = 0.d0
+          !do k = 1, nfreq
+          do k = 1+myid, nfreq, numprocs
+             if (data%freqmask(k,l,feedind) == 0d0) cycle
+             call int2string(k, ftxt)
+             tsys0 = data%Tsys_lowres(k,l,feedind)
+             nu0   = data%nu(k,l,feedind)
+             if (chatty) write(*,*) myid, ' processing feed',feedtxt,' sb',sbtxt,' freq',ftxt,' tsys',tsys0
+!write(*,*) nu0, inmap%freq(k,l) ,'nu', ' sb',sbtxt,' freq',ftxt
+!cycle
+
+    ! Calculate temperature at freq (GHz) for beam (arcmin fwhm) in K
+    initdist = 5.5568d0 !5.685d0 !5.62477d0 !obs
+    initfwhm = 4.d0*nu0/30.d0
+    inittemp = splint(nu, T_p, T_p2, nu0) ! in K
+    sigma    = initfwhm / 60.d0 / sqrt(8.d0*log(2.d0)) * pi/180.d0
+    omega_b  = 2.d0*pi*sigma**2
+    f_d = (initdist/dist_fid)**2
+    inittemp = inittemp * omega_ref/omega_b * f_A / f_d
+    if (myid==0) write(*,*) inittemp, 'init temp guess'
+
+    pos = maxloc(inmap%m(:,:,k,l,m))
+
+
+             ! init values
+             params(0,1) = inittemp/maxval(inmap%m)    !tsys0
+             params(0,2) = initfwhm
+             params(0,3) = inmap%x(pos(1))
+             params(0,4) = inmap%y(pos(2))
+             params(0,5) = 0.d0
+             ! init step size
+             stepsize(1) = 0.02d0 !gain
+             stepsize(2) = 0.1d0 !beam arcmin
+             stepsize(3) = 0.001d0 !ra degrees
+             stepsize(4) = 0.001d0 !dec degrees
+             stepsize(5) = 0.003d0 ! offset K
+             do p = 1, numpar
+                if (myid==0 .and. chatty) write(*,*) 'init ', parname(p), ' =', params(0,p), '+-', stepsize(p)
+             end do
+
+             ! Extract observed parameters
+             dist = 5.5568d0  !OBS ephemris
+             f_d = (dist/dist_fid)**2
+
+
+             !Find intrinsic Jupiter temperature in K
+             abstemp = splint(nu, T_p, T_p2, nu0) !* 1d6
+
+             ! Loop twice, first one to initialize start points and step size
+             second_time = .false.
+             do while (.true.)
+                numrej = 0
+                chisq  = 0.d0
+                ! Calculate chisq for given gain, beam size and position
+                call calculate_chisq(inmap, k, l, m, abstemp, omega_ref, f_A, f_D, params(0,2), params(0,3), params(0,4), params(0,:), chisq(0))
+                ! Loop over MCMC samples
+                do s = 1, numsamp
+                   if (outputlevel == 2 .or. outputlevel == 3) then
+                      if (mod(s,10000)==0) write(*,*) 'Processing sample', s, 'of', numsamp
+                   end if
+                   ! Draw random parameters
+                   do p = 1, numpar
+                      params(s,p) = params(s-1,p) + rand_gauss(rng_handle) * stepsize(p)
+                   end do
+                ! Calculate chisq for given parameters
+                   call calculate_chisq(inmap, k,l, m, abstemp, omega_ref, f_A, f_D, params(0,2), params(0,3), params(0,4), params(s,:), chisq(s))
+                   ! Reject if necessary poor sample
+                   if (chisq(s) == 0.d0) then
+                      ratio = 0.d0
+                   else if (chisq(s) < chisq(s-1)) then
+                      ratio = 1.d0
+                   else
+                      ratio = exp(-0.5*(chisq(s)-chisq(s-1)))
+                   end if
+                   if (rand_uni(rng_handle) > ratio) then
+                      params(s,:) = params(s-1,:)
+                      chisq(s)    = chisq(s-1)
+                      numrej = numrej + 1
+                   end if
+                end do
+             
+                ! Collect and write results
+                write(*,*) 'feed',feedtxt,' sb',sbtxt,' freq',ftxt, '  Accept rate =', real(numsamp-numrej,dp)/real(numsamp,dp), second_time
+                if (outputlevel == 3) then
+                   open(13, file=trim(outprefix)//'_chisq.dat')
+                   do i = 1, numsamp
+                      write(13,*) i, chisq(i)
+                   end do
+                   close(13)
+                end if
+
+!parmean(0) = mean(chisq(burn:numsamp))
+
+                do p = 1, numpar
+                   parmean(p) = mean(params(burn:numsamp,p))
+                   parstdd(p) = sqrt(variance(params(burn:numsamp,p)))
+                   ! Check if we have data
+                   if (parstdd(p) /= 0.d0) then
+                      if (myid==0 .and. chatty) write(*,*) parname(p), ' =', parmean(p), '+-', parstdd(p)
+                      ! write chains to file
+                      if (second_time) then
+                         if (outputlevel == 2 .or. outputlevel == 3) then
+                            open(14, file=trim(outprefix)//'_'//parname(p)//'_feed'//feedtxt//'_sb'//sbtxt//'_f'//ftxt//'.dat')
+                            do i = 1, numsamp
+                               write(14,*) i, params(i,p)
+                            end do
+                            close(14)
+                         end if
+                         ipar(k,p,1) = parmean(p)
+                         ipar(k,p,2) = parstdd(p)
+                      else
+                         stepsize(p) = parstdd(p) * 0.3
+                         params(0,p) = parmean(p)
+                      end if
+                   else ! if no data
+                      if (chatty) write(*,*) 'feed',feedtxt,' sb',sbtxt,' freq',ftxt,'  No data', second_time
+                   end if
+                end do
+            
+                if (second_time) then
+                   exit
+                end if
+                second_time = .true.             
+             end do !while loop
+
+          end do !freq loop
+          call mpi_reduce(ipar, fpar, size(ipar), mpi_double_precision, mpi_sum, root, MPI_COMM_WORLD, ierr)
+
+          if (myid==0) then 
+             if (sum(fpar) /= 0d0) then
+                do p = 1, numpar
+
+                   do i = 1, nfreq
+                      if (data%freqmask(i,l,feedind) == 0d0) cycle
+                      write(15+p,*) data%nu(i,l,feedind), fpar(i,p,:) 
+                   end do
+
+                end do
+             end if
+          end if
+
+       end do !sb loop
+       do p = 1, numpar
+          close(15+p)
+       end do
+    end do ! det loop
 
     deallocate(params, chisq, parname, ipar, fpar)
   end subroutine estimate_gain_from_map
@@ -5716,18 +5790,19 @@ spectral = beta(1)
   ! subroutine calculate_chisq
   !---------------------------------------------------------------------------------
 
-  subroutine calculate_chisq(inmap, freq, sb, abstemp, omega_ref, f_A, f_D, tsys0, params, chisq)
+  subroutine calculate_chisq(inmap, freq, sb, det, abstemp, omega_ref, f_A, f_D, fwhmo, xo, yo, params, chisq) 
     implicit none
    
     type(map_type)                        :: inmap 
-    integer(i4b),             intent(in)  :: freq, sb
-    real(dp),                 intent(in)  :: abstemp, omega_ref, f_A, f_D, tsys0
+    integer(i4b),             intent(in)  :: freq, sb, det
+    real(dp),                 intent(in)  :: abstemp, omega_ref, f_A, f_D
+    real(dp),                 intent(in)  :: fwhmo, xo, yo
     real(dp), dimension(4),   intent(in)  :: params
     real(dp),                 intent(out) :: chisq
 
     
     integer(i4b)                :: i, j, nx, ny
-    real(dp)                    :: r, xjup, yjup, x, y
+    real(dp)                    :: ro, rjup, xjup, yjup, x, y
     real(dp)                    :: tsys, fwhm, mono, gain
     real(dp)                    :: obstemp, sigma, omega_b, sigma_n
     integer(i4b), dimension(2)  :: pos
@@ -5742,7 +5817,7 @@ spectral = beta(1)
     sigma    = fwhm / 60.d0 / sqrt(8.d0*log(2.d0)) * pi/180.d0
     omega_b  = 2.d0*pi*sigma**2
     obstemp = abstemp * omega_ref/omega_b * f_A / f_d
-    sigma_n = 10000 ! OBS should be read from file
+    !sigma_n = 10000 ! OBS should be read from file
     !write(*,*) obstemp, abstemp, 'observed and intrinsic T_jup'
 
     ! Make theoretical map of Jupiter for given beam, gain and position
@@ -5754,15 +5829,16 @@ spectral = beta(1)
     !open(17,file='residual.dat')
     do j = 1, ny
        do i = 1, nx
-          if (inmap%m(i,j,freq,sb) /= 0.) then  
+          if (inmap%m(i,j,freq,sb,det) /= 0.) then  
              x = inmap%x(i)
              y = inmap%y(j)
-             r = sqrt((yjup-y)**2 + ((xjup-x)/cos(yjup*pi/180.d0))**2) * pi/180.d0
-             if (r*180.d0/pi < 3.d0*fwhm/60.) then !degrees
-               !write(16,*) i, j, inmap%m(i,j,freq,sb)
-               !write(17,*) i, j, (exp(-r**2/sigma**2/2.d0)*obstemp*tsys0/tsys+mono-inmap%m(i,j,freq,sb))
-                !chisq  = chisq + (exp(-r**2/sigma**2/2.d0)*obstemp*tsys0/tsys+mono-inmap%m(i,j,freq,sb))**2 / sigma_n**2
-                chisq  = chisq + (exp(-r**2/sigma**2/2.d0)*obstemp*gain+mono-inmap%m(i,j,freq,sb))**2 / sigma_n**2
+             ro = sqrt((yo-y)**2 + ((xo-x)/cos(yo*pi/180.d0))**2) * pi/180.d0
+             if (ro*180.d0/pi < 3.d0*fwhmo/60.) then !degrees
+                rjup = sqrt((yjup-y)**2 + ((xjup-x)/cos(yjup*pi/180.d0))**2) * pi/180.d0
+                !write(16,*) i, j, inmap%m(i,j,freq,sb, det)
+                !write(17,*) i, j, (exp(-r**2/sigma**2/2.d0)*obstemp*gain+mono-inmap%m(i,j,freq,sb,det)), (exp(-r**2/sigma**2/2.d0)*obstemp*gain+mono-inmap%m(i,j,freq,sb,det)) / inmap%rms(i,j,freq,sb,det)
+               
+                chisq  = chisq + (exp(-rjup**2/sigma**2/2.d0)*obstemp*gain+mono-inmap%m(i,j,freq,sb,det))**2 / inmap%rms(i,j,freq,sb,det)**2
              end if
           end if
        end do

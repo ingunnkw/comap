@@ -14,7 +14,7 @@ module comap_scan_mod
   end type comap_subscan
 
   type comap_scan_info
-    integer(i4b)         :: id, nsub, objectnum, even, day
+    integer(i4b)         :: id, nsub, objectnum, even, day, half, meanel
     real(dp)             :: mjd(2)
     character(len=512)   :: l1file, object
     type(comap_subscan), allocatable, dimension(:) :: ss
@@ -121,7 +121,7 @@ contains
     character(len=512) :: name, l1dir, l2dir, l3dir, line, l1file, objlist(30)
     character(len=512), optional :: object
     character(len=9)   :: subsid
-    integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n, cnum, cmax, nsub, feature, a, b, c, d
+    integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n, cnum, cmax, nsub, feature, jk01, jk02, jk03, jk04, jk05, jk06, jk07, jk08, jk09, jk10
     real(dp)           :: mjd(2), mjd_file(2)
     type(comap_runlist):: runlist
     type(comap_scan_info)    :: scan
@@ -151,7 +151,7 @@ contains
           runlist%nsub = runlist%nsub + scan%nsub
           do k = 1, scan%nsub
              read(unit,*) scan%ss(k)%id, scan%ss(k)%mjd, feature, &
-                  & scan%ss(k)%az, scan%ss(k)%el, scan%ss(k)%dk, a, b, c, d
+                  & scan%ss(k)%az, scan%ss(k)%el, scan%ss(k)%dk, jk01, jk02, jk03, jk04, jk05, jk06, jk07, jk08, jk09, jk10
              call int2string(scan%ss(k)%id, subsid)
              if (present(object)) then
                 if (trim(object) /= trim(name)) cycle
@@ -180,8 +180,12 @@ contains
                   & trim(subsid) // ".h5"
           end do
           !jackknives
-          scan%even = a
-          scan%day  = b
+          !write(*,*) scan%id, jk01, jk02, jk03, jk04
+          scan%even   = jk01
+          scan%day    = jk02
+          scan%half   = jk03
+          scan%meanel = jk04
+          !write(*,*) scan%id, scan%even, scan%day, scan%half, scan%meanel
           call copy_scan_info(scan, runlist%scans(cnum))
           call free_scan_info(scan)
        end do
@@ -237,6 +241,8 @@ contains
     b%objectnum = a%objectnum
     b%even = a%even
     b%day = a%day
+    b%half = a%half
+    b%meanel = a%meanel
     allocate(b%ss(b%nsub))
     do i = 1, b%nsub
        b%ss(i)%id          = a%ss(i)%id

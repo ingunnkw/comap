@@ -7,10 +7,10 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
-     real(dp)     :: mean_az, mean_el, time(2)
+     real(dp)     :: mean_az, mean_el, time(2), center(2)
      character(len=512) :: name
 
      integer(i4b), allocatable, dimension(:)          :: feeds
@@ -41,6 +41,8 @@ contains
     call write_hdf(file, "n_y", map%n_y)
     call write_hdf(file, "x",   map%x)
     call write_hdf(file, "y",   map%y)
+    call write_hdf(file, "patch_center", map%center)
+    call write_hdf(file, "nside", map%nside)
     if (present(det)) then
        call write_hdf(file, "map", map%m(:,:,:,sb:sb,det:det))
        call write_hdf(file, "rms", map%rms(:,:,:,sb:sb,det:det))
@@ -109,6 +111,8 @@ contains
     call write_hdf(file, "mean_el", map%mean_el)
     call write_hdf(file, "time", map%time)
     call write_hdf(file, "feeds", map%feeds)
+    call write_hdf(file, "patch_center", map%center)
+    call write_hdf(file, "nside", map%nside)
     call close_hdf_file(file)
 
   end subroutine output_submap_h5
@@ -132,7 +136,7 @@ contains
 
     allocate(map%x(nx), map%y(ny))
     allocate(map%m(nx,ny,nfreq,nsb,ndet), map%rms(nx,ny,nfreq,nsb,ndet), map%nhit(nx,ny,nfreq, nsb,ndet))
-    allocate(map%freq(nfreq,nsb))
+    allocate(map%freq(nfreq,nsb), map%feeds(ndet))
     
 
     call read_hdf(file, "n_x", map%n_x)
@@ -147,6 +151,8 @@ contains
     call read_hdf(file, "mean_az", map%mean_az)
     call read_hdf(file, "mean_el", map%mean_el)
     call read_hdf(file, "feeds", map%feeds)
+    call read_hdf(file, "patch_center", map%center)
+    call read_hdf(file, "nside", map%nside)
 
     call close_hdf_file(file)
 
@@ -267,7 +273,6 @@ contains
     if (allocated(map%nhit_co)) deallocate(map%nhit_co)
     if (allocated(map%div_co))  deallocate(map%div_co)
     if (allocated(map%dsum_co)) deallocate(map%dsum_co)
-
 
     ! Simulated data 
     if (allocated(map%m_sim))    deallocate(map%m_sim)
