@@ -118,7 +118,7 @@ contains
   subroutine read_runlist(file, l1dir, l2dir, l3dir, runlist, object)
     implicit none
     character(len=*)   :: file
-    character(len=512) :: name, l1dir, l2dir, l3dir, line, l1file, objlist(29)
+    character(len=512) :: name, l1dir, l2dir, l3dir, line, l1file, objlist(30)
     character(len=512), optional :: object
     character(len=9)   :: subsid
     integer(i4b)       :: unit, nobj, nscan, nfile, sid, i, j, k, n, cnum, cmax, nsub, feature, a, b, c, d
@@ -131,7 +131,8 @@ contains
     objlist = (/'jupiter', 'venus', 'TauA', 'shela', 'hetdex', 'patch1', &
          'patch2', 'co1', 'co2', 'co3', 'co4', 'co5', 'co6', 'co7', 'mars', &
          'fg1', 'fg2', 'fg3', 'fg4', 'fg5', 'fg6', 'fg7', 'ambient_load', &
-         'ground_scan', 'stationary', 'sky_dip', 'CasA', 'CygA', 'other' /)
+         'ground_scan', 'stationary', 'sky_dip', 'CasA', 'CygA', 'other', &
+         'NCP'/)
     cnum = 0
     runlist%nsub = 0
     unit = getlun()
@@ -160,6 +161,8 @@ contains
                 scan%ss(k)%scanmode = 'circ'
              else if (feature == 32) then
                 scan%ss(k)%scanmode = 'ces'
+             else if (feature == 128) then
+                scan%ss(k)%scanmode = 'stationary'   
              else if (feature == 512) then
                 scan%ss(k)%scanmode = 'raster'
              else if (feature == 8192) then
@@ -219,13 +222,12 @@ contains
     implicit none
     type(comap_scan_info) :: a
     if (allocated(a%ss)) deallocate(a%ss)
-  end subroutine
+  end subroutine free_scan_info
 
   subroutine copy_scan_info(a, b)
     implicit none
     type(comap_scan_info) :: a, b
     integer(i4b) :: i
-
     call free_scan_info(b)
     b%id = a%id
     b%nsub = a%nsub

@@ -7,8 +7,8 @@ module comap_lx_mod
   use quiet_hdf_mod
   use quiet_fft_mod
   use quiet_utils
-  implicit none
-
+  implicit none 
+  
   type lx_struct
      ! Level 1 fields
      real(dp)                                        :: mjd_start

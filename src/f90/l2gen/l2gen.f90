@@ -27,13 +27,12 @@ program l2gen
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
-  type(planck_rng)     :: rng_handle
+  type(planck_rng)     :: rng_handle 
   type(status_file)    :: status
   type(patch_info)     :: pinfo
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
+
   
-  ! call test_fft()
-  ! stop  
   call getarg(1, parfile)
   call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
   call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
@@ -191,18 +190,21 @@ program l2gen
            !    call update_status(status, 'remove_elevation')
            ! end if
            if (verb) then
-              write(*,*) 'Removing elevation gain, id: ', scan%ss(k)%id
+              write(*,*) 'Removing pointing templates, id: ', scan%ss(k)%id
            end if
-           call subtract_pointing_templates(data_l2_fullres, scan%ss(k))
+           call subtract_pointing_templates(data_l2_fullres, scan%ss(k), verb)
            call update_status(status, 'subtract_pointing_templates')
         end if
         if (verb) then           
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
-              write(*,*) "NaN in tod before filtering!"
+              write(*,*) "NaN in tod before filtering!", scan%ss(k)%id
            end if
         end if
         data_l2_fullres%mask_outliers = mask_outliers
         if (mask_outliers) then
+           if (verb) then
+              write(*,*) 'Making frequency mask', scan%ss(k)%id
+           end if
            ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
            call copy_lx_struct(data_l2_fullres, data_l2_filter)
            call update_status(status, 'copy_data')
@@ -338,141 +340,6 @@ program l2gen
   call free_status(status)
 
 contains
-
-
-  ! subroutine test_fft()
-  !   implicit none
-    
-  !   integer(i4b) :: i, j, k, l, nomp, nsamp, nfreq, nsb, ndet, err
-  !   integer*8    :: plan_fwd, plan_back
-  !   type(hdf_file)                         :: file
-  !   real(dp)     :: samprate, nu
-  !   real(dp),     allocatable, dimension(:) :: dt, dt2, tod, x, v
-  !   complex(spc), allocatable, dimension(:) :: dv
-  !   integer(i4b), allocatable, dimension(:) :: pixels
-  !   character(len=512)   :: filename, teststr(1)
-    
-    
-  !   filename ='/mn/stornext/d16/cmbco/comap/protodir/test.h5'
-  !   allocate(pixels(18))
-    
-  !   call open_hdf_file(filename, file, "w")
-    
-    
-  !   teststr(1) = "aldflkfdsmlfksm"
-
-  !   ! scan-data
-  !   call write_hdf(file, "test", teststr)
-  !   ! call write_hdf(file, "pix", pixels)
-
-  !   call close_hdf_file(file)
-
-  !   ! Read telescope coordinates
-  !   !call read_hdf(file, "spectrometer/pixel_pointing/pixel_az",            data%point_tel(1,:,:))
-  !   ! call read_hdf(file, "spectrometer/feeds", pixels)
-  !   ! call read_hdf(file, "comap", pixels)
-    
-  !   write(*,*) pixels
-
-  ! end subroutine test_fft
-    
-    ! nsamp = 11
-    
-    
-    ! allocate(dt(nsamp), dt2(nsamp), tod(nsamp), x(nsamp), v(nsamp))
-    
-    ! do i = 1, nsamp
-    !    v(i) =  (i - nsamp/2.d0) ** 4
-    !    tod(i) = sqrt(v(i)) * rand_gauss(rng_handle)
-    !    x(i) = (i-1) * 1.d0 / (nsamp-1.d0)
-    ! end do
-    ! dt(:) = tod(:)
-    
-    ! call smooth_spline('inv_var', 1.d-1, x, dt, 1.d30, 1.d30, dt2, v)
-
-    ! open(58,file='test.dat')
-    ! do i = 1, nsamp
-    !    write(58,*) x(i), tod(i), dt(i)
-    ! end do
-    ! close(58)
-
-    ! nsb = 1000
-    ! open(58,file='test2.dat')
-    ! do i = 1, nsb
-    !    write(58,*) (i-1) * 1.d0 / (nsb-1.d0), splint(x, dt, dt2, (i-1) * 1.d0 / (nsb-1.d0))
-    ! end do
-    ! close(58)
-
-
-
-    !   subroutine smooth_spline(weight, alpha, x, y, yp1, ypn, y2, variance)
-    ! implicit none
-
-    ! character(len=*),       intent(in)    :: weight
-    ! real(dp),               intent(in)    :: alpha, yp1, ypn
-    ! real(dp), dimension(:), intent(in)    :: x
-    ! real(dp), dimension(:), intent(in), optional    :: variance
-    ! real(dp), dimension(:), intent(inout) :: y
-    ! real(dp), dimension(:), intent(out)   :: y2
-
-
-  ! ! Routines from Numerical Recipes
-  ! subroutine spline_plain(x, y, yp1, ypn, y2)
-  !   implicit none
-
-  !   real(dp),               intent(in)  :: yp1, ypn
-  !   real(dp), dimension(:), intent(in)  :: x, y
-  !   real(dp), dimension(:), intent(out) :: y2
-
-    
-
-    ! nsamp = 10
-    
-    ! i = 0
-    ! ts:do 
-    !    i = i+1
-    !    if (i > nsamp - 1) exit
-    !    do j = 1, 5
-    !       !do k = 1, 5
-    !       write(*,*) i, j, k
-    !       i = i + 2
-    !       cycle ts
-    !       !end do
-    !    end do
-    ! end do ts
-    ! nsamp       = 1000
-    ! samprate    = 50.d0    
-    ! n           = nsamp+1
-
-    ! ! Set up OpenMP environment and FFTW plans
-    ! nomp = 1
-    ! call sfftw_init_threads(err)
-    ! call sfftw_plan_with_nthreads(nomp)
-
-    ! allocate(dt(2*nsamp), dv(0:n-1))
-    ! call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
-    ! call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
-    ! deallocate(dt, dv)
-
-    ! allocate(dt(2*nsamp), dv(0:n-1), tod(nsamp))
-    ! tod = 0.d0
-    ! dt(1:nsamp)            = tod(:)
-    ! dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
-    ! call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
-    ! ! Apply lowpass filter
-    ! do l = 0, n-1
-    !    nu = ind2freq(l+1, samprate, n)
-    !    dv(l) = sqrt(2.d0 * nsamp) * rand_gauss(rng_handle) !dv(l) * 1.d0/(1.d0 + (nu/nu_gain)**alpha_gain)
-    ! end do
-    
-    ! call sfftw_execute_dft_c2r(plan_back, dv, dt)
-    ! dt = dt / (2*nsamp)
-    ! write(*,*) variance(dt), sqrt(variance(dt)), variance(dt) 
-    ! deallocate(dt, dv)
-    
-    ! call sfftw_destroy_plan(plan_fwd)
-    ! call sfftw_destroy_plan(plan_back)
-
 
   subroutine find_spikes(data_l2, verb)
     implicit none
@@ -2057,6 +1924,7 @@ contains
        data_out%pca_comp      = data_in%pca_comp
        data_out%pca_eigv      = data_in%pca_eigv
     end if
+    
     ! Make angles safe for averaging
     do j = 1, ndet
        if (.not. is_alive(data_in%pixels(j))) cycle
@@ -2168,7 +2036,7 @@ contains
        end do
     end do
 
-
+    
     data_out%chi2 = 0.d0
     ! calculate chisquared statistics on decimated data
     do i = 1, ndet
@@ -2178,6 +2046,11 @@ contains
              if (data_out%freqmask(k,j,i) == 0) cycle
              var = variance(data_out%tod(2:,k,j,i) - data_out%tod(:nsamp_out-1,k,j,i)) / 2
              data_out%chi2(k,j,i) = (sum(data_out%tod(:,k,j,i) ** 2) / var - nsamp_out) / sqrt(2.d0*nsamp_out)
+             if (data_out%chi2(k,j,i) > 5.d0) then   !!!! add to parameter file
+                data_out%freqmask(k,j,i) = 0.d0
+                data_out%freqmask_full((k-1)*dnu+1:k*dnu,j,i) = 0.d0
+                data_out%freqmask_reason((k-1)*dnu+1:k*dnu,j,i) = 50
+             end if
           end do
        end do
     end do
@@ -2428,14 +2301,30 @@ contains
 
   end subroutine postprocess_frequency_mask
 
-  subroutine subtract_pointing_templates(data, scan) 
+  subroutine subtract_pointing_templates(data, scan, verb) 
     implicit none
     type(lx_struct),  intent(inout) :: data
     type(comap_subscan), intent(in) :: scan
+    logical(lgt),              intent(in)    :: verb
     integer(i4b)    :: n, ndet, nsb, nfreq, i, j, k, l, m, tmin, tmax, parfile_time
     real(dp)        :: a, sigma0, chisq, tsys, tau, dnu, const, g
     real(dp), dimension(:), allocatable :: el, az, dat
     
+    if (scan%scanmode == 'stationary') then
+       if (verb) then
+          write(*,*) 'Scan mode is stationary, so no pointing templates removed', scan%id
+       end if
+       return
+    else if (scan%scanmode == 'ces') then
+       if (verb) then
+          write(*,*) 'Scan mode is ces, so only az-template is removed', scan%id
+       end if
+    else 
+       if (verb) then
+          write(*,*) 'Scan mode is', scan%scanmode, ', so we remove both el- and az-templates', scan%id
+       end if
+    end if
+
     ! new linear function fit roughly every 5 min
     n = max(1, floor((data%time(size(data%time)) - data%time(1)) * 24 * 60 / 5.d0))  
     m = (size(data%time)) / n
@@ -2446,6 +2335,7 @@ contains
     allocate(data%el_az_stats(2,n,nfreq,nsb,ndet))
 !    if (.not. allocated(data%el_az_stats)) allocate(data%el_az_stats(2,n,nfreq,nsb,ndet))
     data%el_az_stats = 0.d0
+    
     !$OMP PARALLEL PRIVATE(j,k,l,i,el,az,dat,g,a,tmin,tmax)
     allocate(el(m), az(m), dat(m))
     !$OMP DO SCHEDULE(guided)
@@ -2454,13 +2344,15 @@ contains
           if (.not. is_alive(data%pixels(k))) cycle
           do l = 1, nsb
              if (data%freqmask_full(j,l,k) == 0.d0) cycle
-             do i = 1, n
+             do i = 1, n    ! I think we could change the order of these loops to improve things 
                 tmin = (i-1)*m+1
                 tmax = i*m
                 if (i == n) then
                    tmax = size(data%time)
                 end if
-                az  = data%point_tel(1,tmin:tmax,k)
+                az  = data%point_tel(1,tmin:tmax,k) 
+                call make_angles_safe(az, real(360.d0,dp))
+                
                 dat = data%tod(tmin:tmax,j,l,k)
                 !write(*,*) tmin, tmax, 'min max'
                 if (scan%scanmode == 'ces') then
