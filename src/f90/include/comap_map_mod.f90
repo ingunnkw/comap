@@ -27,6 +27,36 @@ module comap_map_mod
 
 contains
 
+  subroutine initialize_map_mod()
+    implicit none
+
+  end subroutine initialize_map_mod
+
+
+  subroutine copy_map(map1, map2)
+    implicit none
+    type(map_type), intent(in)    :: map1
+    type(map_type), intent(inout) :: map2
+
+    call free_map_type(map2)
+    map2%n_x     = map1%n_x
+    map2%n_y     = map1%n_y
+    map2%x       = map1%x
+    map2%y       = map1%y
+    map2%m       = map1%m
+    map2%rms     = map1%rms
+    map2%nhit    = map1%nhit
+    map2%freq    = map1%freq
+    map2%time    = map1%time
+    map2%mean_az = map1%mean_az
+    map2%mean_el = map1%mean_el
+    map2%feeds   = map1%feeds
+    map2%center  = map1%center
+    map2%nside   = map1%nside
+
+  end subroutine copy_map
+
+
   ! Writes an h5 file with maps/rms/nhit
   subroutine output_map_h5(filename, map, det, sb)
     implicit none

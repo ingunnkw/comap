@@ -5,7 +5,7 @@
 OBJS  := quiet_defs.o quiet_healpix_mod.o quiet_target_mod.o \
          quiet_pixspace_mod.o quiet_module_mod.o comap_detector_mod.o \
          comap_frequency_mod.o comap_ephem_mod.o comap_acceptlist_mod.o comap_scan_mod.o \
-         d1mach.o drc3jj.o quiet_l1_defs.o \
+         comap_jackknife_mod.o d1mach.o drc3jj.o quiet_l1_defs.o \
          math_tools.o powell_mod.o quasi_newton_mod.o cholesky_decomposition_mod.o mjd_to_gregorian_mod.o \
          quiet_fileutils.o quiet_detector_mod.o quiet_mapfile_mod.o \
          quiet_nr_mod.o quiet_utils.o quiet_hdf_mod.o quiet_Lx_mod.o \
@@ -84,6 +84,7 @@ quiet_todsim_mod.o       : quiet_gain_mod.o quiet_assembly_mod.o ziggurat.o
 quiet_stat_mod.o         : math_tools.o
 quiet_glitchy_noise_mod.o : quiet_utils.o quiet_constrained_mod.o
 wmap_beam_mod.o           : quiet_utils.o
+comap_jackknufe_mod.d     : quiet_utils.o quiet_hdf_mod.o
 
 quiet_system_backend.o: quiet_system_backend.cpp
 	$(MPCC) $(CCOMP) -DREVISION=$$(svn info | awk '/^Revis[ij]on/{print $$2}') -c $<
