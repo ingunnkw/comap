@@ -97,11 +97,13 @@ contains
         do feed = 1, nfeed
            do sb = 1, nsb
               temp = jk%jk_list(sb,feed,j)
-              if (temp > 0) goto 1
+              !write(*,*) temp
+              if (temp > 0) go to 1!exit !go to 60
            end do
+           !if (temp > 0) exit
         end do
         if (temp == 0) write(*,*) "Entire scan is rejected", jk%scan_list(j)
-1       do i = jk%njk, -1, 1
+1        do i = jk%njk, 1, -1
            if (temp > 2**i) then 
               jk%split(i,j) = 1
               temp = temp - 2**i
@@ -110,7 +112,7 @@ contains
            end if
         end do
      end do
-  
+     !write(*,*) jk%split
   end subroutine read_acceptlist
 
 

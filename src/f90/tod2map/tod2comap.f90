@@ -201,9 +201,11 @@ program tod2comap
         if (use_acc) then
            scan_index = findloc(jk_info%scan_list, scan%ss(j)%id, dim=1)
            do k = 1, jk_info%njk
+              !write(*,*) 2*k, 2*k-1
               if (jk_info%split(k,scan_index) .eq. 0) then
                  call time2pix(tod, map_jk(2*k -1), parfile, pinfo, jk_info%jk_list(:,:,scan_index))
               else
+                 !if (k==2) write(*,*) 'yes'
                  call time2pix(tod, map_jk(2*k), parfile, pinfo, jk_info%jk_list(:,:,scan_index))
               end if
            end do
@@ -224,7 +226,7 @@ program tod2comap
 
      if (use_acc) then
         do k = 1, jk_info%njk
-           if (split .eq. 0) then
+           if (jk_info%split(k,scan_index) .eq. 0) then
               map_jk(2*k-1)%dsum    = map_jk(2*k-1)%dsum    + map_scan%dsum
               map_jk(2*k-1)%div     = map_jk(2*k-1)%div     + map_scan%div
               map_jk(2*k-1)%dsum_co = map_jk(2*k-1)%dsum_co + map_scan%dsum_co
@@ -294,7 +296,7 @@ program tod2comap
   call mpi_allreduce(map_tot%dsum_co, buffer%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_co, buffer%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   !call mpi_allreduce(map_tot%rms_co,  buffer%rms_co,  size(map_tot%rms_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-  do i = 1, jk_info%njk
+  do i = 1, 2*jk_info%njk
      call mpi_allreduce(map_jk(i)%div,     buffer_jk(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
      call mpi_allreduce(map_jk(i)%dsum,    buffer_jk(i)%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
      call mpi_allreduce(map_jk(i)%nhit,    buffer_jk(i)%nhit,    size(map_tot%nhit),    MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
