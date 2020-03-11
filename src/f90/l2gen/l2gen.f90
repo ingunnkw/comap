@@ -2321,7 +2321,7 @@ contains
        end if
     else 
        if (verb) then
-          write(*,*) 'Scan mode is', scan%scanmode, ', so we remove both el- and az-templates', scan%id
+          write(*,*) 'Scan mode is ', trim(scan%scanmode), ', so we remove both el- and az-templates', scan%id
        end if
     end if
 
