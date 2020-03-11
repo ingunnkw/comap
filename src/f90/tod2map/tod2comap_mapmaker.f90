@@ -135,12 +135,13 @@ contains
   end subroutine initialize_mapmaker
 
 
-  subroutine time2pix(tod, map, parfile, pinfo)
+  subroutine time2pix(tod, map, parfile, pinfo, jk_list)
     implicit none
     type(tod_type),   intent(inout) :: tod
     type(map_type),   intent(inout) :: map
     character(len=*)                :: parfile
     type(patch_info), intent(in)    :: pinfo
+    integer(i4b), dimension(:,:), intent(in) :: jk_list
 
     integer(i4b) :: scan, i, j, p, q, sb, freq, det
     real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
@@ -195,6 +196,7 @@ contains
           if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
              tod%pixel(i,det) = (q-1)*map%n_x + p
              do sb = 1, tod%nsb
+                if (jk_list(sb,det) == 0) cycle
                 do freq = 1, tod%nfreq
                    if (tod%freqmask(freq,sb,j) == 0) cycle
                    !!$OMP ATOMIC
@@ -361,13 +363,14 @@ contains
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map, tod, scan, parfile, pinfo)!(map_tot, map_scan, tod, alist, scan, parfile)
+  subroutine binning(map, tod, scan, parfile, pinfo, jk_list)!(map_tot, map_scan, tod, alist, scan, parfile)
     implicit none
     type(tod_type),   intent(in)    :: tod
     type(patch_info), intent(in)    :: pinfo
     type(map_type),   intent(inout) :: map!_tot, map_scan
     !type(acceptlist), intent(in)    :: alist
     character(len=*)                :: parfile
+    integer(i4b), dimension(:,:), intent(in) :: jk_list
 
     integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
@@ -410,6 +413,7 @@ contains
              !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
           end if
           do sb = 1, nsb
+             if (jk_list(sb,det) == 0) cycle
              do freq = 1, nfreq
                 !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
                 if (tod%freqmask(freq,sb,j) == 0) cycle
@@ -419,10 +423,10 @@ contains
                 !write(*,*) tod%rms(i,freq,sb,det)
                 ! Flipping sb 1 and 3
                 if ((sb .eq. 1) .or. (sb .eq. 3)) then
-                   map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2 * tod%d(i,nfreq-freq+1,sb,j)
-                   map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2
-                   map%dsum_co(p,q,freq,sb)  = map%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2 * tod%d(i,nfreq-freq+1,sb,j)
-                   map%div_co(p,q,freq,sb)   = map%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(nfreq-freq+1,sb,j)**2
+                   map%dsum(p,q,nfreq-freq+1,sb,det) = map%dsum(p,q,nfreq-freq+1,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div(p,q,nfreq-freq+1,sb,det)  = map%div(p,q,nfreq-freq+1,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
+                   map%dsum_co(p,q,nfreq-freq+1,sb)  = map%dsum_co(p,q,nfreq-freq+1,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_co(p,q,nfreq-freq+1,sb)   = map%div_co(p,q,nfreq-freq+1,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
                 else
                    map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                    map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
@@ -496,8 +500,8 @@ contains
                 !map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
                 ! Flipping sb 1 and 3
                 if ((sb .eq. 1) .or. (sb .eq. 3)) then
-                   map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(nfreq-freq+1,sb,j)**2 * tod%d_sim(i,nfreq-freq+1,sb,j)
-                   map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(nfreq-freq+1,sb,j)**2
+                   map_scan%dsum_sim(p,q,nfreq-freq+1,sb)  = map_scan%dsum_sim(p,q,nfreq-freq+1,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
+                   map_scan%div_sim(p,q,nfreq-freq+1,sb)   = map_scan%div_sim(p,q,nfreq-freq+1,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
                 else
                    map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
                    map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
