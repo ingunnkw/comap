@@ -370,6 +370,7 @@ contains
        do k = 1, ndet
           if (.not. is_alive(data_l2%pixels(k))) cycle
           do j = 1, nsb
+             if (sum(data_l2%freqmask_full(:,j,k)) == 0.d0) cycle
              if ((isnan(data_l2%tod_poly(i+1,0,j,k))) .or. (isnan(data_l2%tod_poly(i,0,j,k)))) cycle
              ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
                               
