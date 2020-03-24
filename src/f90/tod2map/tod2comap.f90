@@ -77,11 +77,10 @@ program tod2comap
      call get_parameter(0, parfile, 'ACCEPT_DATA_FOLDER', par_string=acceptfile)
      call get_parameter(0, parfile, 'ACCEPT_DATA_ID_STRING', par_string=acc_id)
      call get_parameter(0, parfile, 'JK_DEF_FILE', par_string=jk_def_file)
+     if (trim(acc_id) .ne. '') acc_id = '_' // acc_id
      acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // '_' // trim(object) // '.h5'
-     write(*,*) acceptfile
   end if
 
-  stop
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
