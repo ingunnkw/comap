@@ -35,13 +35,13 @@ contains
     logical(lgt) :: hifreq
     type(lx_struct) :: data
 
-    nu_cut = 0.1d0
+    !nu_cut = 0.1d0
 
     ! Read data
     call read_l2_file(l2file, data)
     call free_tod_type(tod)
 
-    call get_parameter(0, parfile, 'APPLY_HIGHPASS_FILTER', par_lgt=hifreq)
+    call get_parameter(0, parfile, 'NUCUT_HIGH', par_dp=nu_cut)
  
     tod%samprate = 50.d0 !data%samprate
     tod%nsamp = size(data%time)
@@ -90,7 +90,7 @@ contains
              ! Apply high pass filter
              tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) !- 1.d0 ! remove at some point
              !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
-             if (hifreq) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
+             if (nu_cut > 0.0) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
              ! Estimate RMS
              var = variance(tod%d(2:,j,l,k) - tod%d(:tod%nsamp-1,j,l,k)) /2
