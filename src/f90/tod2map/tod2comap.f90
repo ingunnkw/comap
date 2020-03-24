@@ -35,7 +35,7 @@ program tod2comap
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
   character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
-  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, jk_def_file, map_file1, map_file2
+  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, jk_def_file, acc_id, map_file1, map_file2
   character(len=6)      :: obsid
   character(len=5)      :: sim_string
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split, scan_index
@@ -74,9 +74,14 @@ program tod2comap
   call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose)
   call get_parameter(0, parfile, 'USE_ACCEPT', par_lgt=use_acc)
   if (use_acc) then 
-     call get_parameter(0, parfile, 'ACCEPT_LIST', par_string=acceptfile)
+     call get_parameter(0, parfile, 'ACCEPT_DATA_FOLDER', par_string=acceptfile)
+     call get_parameter(0, parfile, 'ACCEPT_DATA_ID_STRING', par_string=acc_id)
      call get_parameter(0, parfile, 'JK_DEF_FILE', par_string=jk_def_file)
+     acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // '_' // trim(object) // '.h5'
+     write(*,*) acceptfile
   end if
+
+  stop
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
