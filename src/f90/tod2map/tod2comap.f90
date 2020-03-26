@@ -26,7 +26,7 @@ program tod2comap
 
 
   type(tod_type)        :: tod
-  type(map_type)        :: map_tot, map_scan, buffer!, map_split1, map_split2, buffer1, buffer2
+  type(map_type)        :: map_tot, map_scan, map_obs, buffer!, map_split1, map_split2, buffer1, buffer2
   type(map_type), allocatable, dimension(:) :: map_jk, buffer_jk
   type(comap_scan_info) :: scan
   !type(acceptlist)      :: alist
@@ -37,11 +37,12 @@ program tod2comap
   character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
   character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, jk_def_file, acc_id, map_file1, map_file2
   character(len=6)      :: obsid
+  character(len=8)      :: scanid
   character(len=5)      :: sim_string
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split, scan_index
 
   integer(i4b)          :: myid, nproc, ierr, root
-  logical               :: binning_split, found, obs_map, split_mode, verbose, use_acc
+  logical               :: binning_split, found, obs_map, scan_map, split_mode, verbose, use_acc
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
 
@@ -71,6 +72,7 @@ program tod2comap
   !call get_parameter(0, parfile, 'JACKKNIVES', par_string=jackknife)
   !call get_parameter(0, parfile, 'NUMBER_JK', par_int=njk)
   call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
+  call get_parameter(0, parfile, 'SCAN_MAPS', par_lgt=scan_map)
   call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose)
   call get_parameter(0, parfile, 'USE_ACCEPT', par_lgt=use_acc)
   if (use_acc) then 
@@ -124,6 +126,7 @@ program tod2comap
   if (myid==0) write(*,*) "Initialising mapmaker"
   !if (myid == 0) write(*,*) trim(jackknife)
   call initialize_mapmaker(map_scan, parfile, pinfo)
+  call initialize_mapmaker(map_obs,  parfile, pinfo)
   call initialize_mapmaker(map_tot,  parfile, pinfo)
   call initialize_mapmaker(buffer,   parfile, pinfo)
   call nullify_map_type(map_tot)
@@ -170,19 +173,19 @@ program tod2comap
 
      nsub = scan%nsub
      do j = 2, nsub-1
-     call nullify_map_type(map_scan)
+        call nullify_map_type(map_scan)
      
 
-     ! Get TOD / read level 2 file
-     !nsub = scan%nsub
-     !do j = 2, nsub-1
+        ! Get TOD / read level 2 file
+        !nsub = scan%nsub
+        !do j = 2, nsub-1
         !write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
         filename = scan%ss(j)%l2file
-
+     
         !write(*,*) trim(filename)
         !call mpi_finalize(ierr)
         !stop
-
+     
         call get_tod(trim(filename), tod, parfile)
         !elevation cuts here
         !if (tod%mean_el .lt. 35.d0) cycle
@@ -190,7 +193,7 @@ program tod2comap
         
         !call int2string(scan%ss(j)%id, scanid)
         !write(*,*) 'scan', scanid
-
+     
         if (use_acc) then
            scan_index = findloc(jk_info%scan_list, scan%ss(j)%id, dim=1)
         else
@@ -221,41 +224,59 @@ program tod2comap
         !call output_submap_h5(trim(prefix), map_scan)
         !!call free_map_type(map_scan)
         !call free_tod_type(tod)
-     !end do
+        !end do
 
-     map_tot%dsum    = map_tot%dsum + map_scan%dsum
-     map_tot%div     = map_tot%div  + map_scan%div
-     map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
-     map_tot%div_co  = map_tot%div_co  + map_scan%div_co
+        if (obs_map) then   
+           ! Add to obsID maps
+           map_obs%dsum    = map_obs%dsum + map_scan%dsum
+           map_obs%div     = map_obs%div  + map_scan%div
+           map_obs%dsum_co = map_obs%dsum_co + map_scan%dsum_co
+           map_obs%div_co  = map_obs%div_co  + map_scan%div_co
+        end if
 
-     if (use_acc) then
-        do k = 1, jk_info%njk
-           if (jk_info%split(k,scan_index) .eq. 0) then
-              map_jk(2*k-1)%dsum    = map_jk(2*k-1)%dsum    + map_scan%dsum
-              map_jk(2*k-1)%div     = map_jk(2*k-1)%div     + map_scan%div
-              map_jk(2*k-1)%dsum_co = map_jk(2*k-1)%dsum_co + map_scan%dsum_co
-              map_jk(2*k-1)%div_co  = map_jk(2*k-1)%div_co  + map_scan%div_co
-              !n1 = n1 + 1
-           else
-              map_jk(2*k)%dsum    = map_jk(2*k)%dsum    + map_scan%dsum
-              map_jk(2*k)%div     = map_jk(2*k)%div     + map_scan%div
-              map_jk(2*k)%dsum_co = map_jk(2*k)%dsum_co + map_scan%dsum_co
-              map_jk(2*k)%div_co  = map_jk(2*k)%div_co  + map_scan%div_co
-              !n2 = n2 + 1
-           end if
-        end do
-     end if
+        ! Add to total map
+        map_tot%dsum    = map_tot%dsum + map_scan%dsum
+        map_tot%div     = map_tot%div  + map_scan%div
+        map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
+        map_tot%div_co  = map_tot%div_co  + map_scan%div_co
 
-     end do
+        if (use_acc) then
+           ! Add to jackknives
+           do k = 1, jk_info%njk
+              if (jk_info%split(k,scan_index) .eq. 0) then
+                 map_jk(2*k-1)%dsum    = map_jk(2*k-1)%dsum    + map_scan%dsum
+                 map_jk(2*k-1)%div     = map_jk(2*k-1)%div     + map_scan%div
+                 map_jk(2*k-1)%dsum_co = map_jk(2*k-1)%dsum_co + map_scan%dsum_co
+                 map_jk(2*k-1)%div_co  = map_jk(2*k-1)%div_co  + map_scan%div_co
+                 !n1 = n1 + 1
+              else
+                 map_jk(2*k)%dsum    = map_jk(2*k)%dsum    + map_scan%dsum
+                 map_jk(2*k)%div     = map_jk(2*k)%div     + map_scan%div
+                 map_jk(2*k)%dsum_co = map_jk(2*k)%dsum_co + map_scan%dsum_co
+                 map_jk(2*k)%div_co  = map_jk(2*k)%div_co  + map_scan%div_co
+                 !n2 = n2 + 1
+              end if
+           end do
+        end if
+
+        if (scan_map) then
+           call finalize_scan_binning(map_scan)
+           call int2string(scan%ss(j)%id, scanid)
+           prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
+           map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+           call output_map_h5(map_filename, map_scan)
+        end if
+
+     end do ! end loop over scans
 
      call int2string(scan%id, obsid)
 
      if (obs_map) then
-        call finalize_scan_binning(map_scan)
+        call finalize_scan_binning(map_obs)
 
         prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
         map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
-        call output_map_h5(map_filename, map_scan)
+        call output_map_h5(map_filename, map_obs)
      end if
      !call free_map_type(map_scan)
      call free_tod_type(tod)
@@ -286,7 +307,7 @@ program tod2comap
      end do
 
 
-  end do
+  end do ! end loop over obsIDs
 
 
 
