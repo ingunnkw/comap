@@ -6,6 +6,7 @@ module tod2comap_mapmaker
   use comap_ephem_mod
   !use quiet_fft_mod
   use tod2comap_utils
+  use comap_jackknife_mod
   implicit none
 
 
@@ -13,14 +14,15 @@ module tod2comap_mapmaker
 contains
 
 
-  subroutine initialize_mapmaker(map, parfile, pinfo)
+  subroutine initialize_mapmaker(map, parfile, pinfo, jk_info)
     implicit none
     !type(tod_type), dimension(:), intent(in)    :: tod
-    type(map_type),               intent(inout) :: map
-    type(patch_info),             intent(in)    :: pinfo
-    character(len=*)                            :: parfile
+    type(map_type),   intent(inout) :: map
+    type(patch_info), intent(in)    :: pinfo
+    type(jk_type),    intent(in)    :: jk_info
+    character(len=*)                :: parfile
 
-    integer(i4b) :: i, j, k, l, p, q, fs, st, ierr
+    integer(i4b) :: i, j, k, l, p, q, fs, st, ierr, njkfeed, n
     real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec, d1, d2
     character(len=15)   :: coord_system
     real(8), parameter :: PI = 4*atan(1.d0)
@@ -31,6 +33,7 @@ contains
     call get_parameter(0, parfile, 'NUM_SIDEBAND', par_int=map%nsb)
     call get_parameter(0, parfile, 'NUM_DET', par_int=map%ndet_tot)
     call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+    call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=map%nsim)
     
     !fs = 1!200
     !st = tod%nsamp!-200 ! tod%nsamp
@@ -99,11 +102,7 @@ contains
          & map%div_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
          & map%rms_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
          & map%m_co(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%freq(map%nfreq, map%nsb), &
-         & map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb), &
-         & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb))
+         & map%freq(map%nfreq, map%nsb))
 
     map%dsum    = 0.0
     map%nhit    = 0
@@ -118,10 +117,45 @@ contains
     map%rms_co  = 0.0
 
     ! Simulated data
-    map%dsum_sim = 0.0
-    map%div_sim  = 0.0 
-    map%m_sim    = 0.0
-    map%rms_sim  = 0.0 
+    if (map%nsim > 0) then
+       allocate(map%m_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
+            & map%dsum_sim(map%n_x, map%n_y, map%nfreq, map%nsb,map%ndet_tot, map%nsim), &
+            & map%div_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim), &
+            & map%rms_sim(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%nsim))
+       map%dsum_sim = 0.0
+       map%div_sim  = 0.0 
+       map%m_sim    = 0.0
+       map%rms_sim  = 0.0
+    end if
+
+    ! Jackknives
+    map%njk = jk_info%njk
+    if (map%njk > 0) then
+       njkfeed = sum(jk_info%feedmap); allocate(map%jk_feed(njkfeed))
+       n = 1
+       do i = 1, map%njk
+          if (jk_info%feedmap(i) .eq. 1) then
+             map%jk_feed(n) = i
+             n = n + 1
+          end if
+       end do
+       map%jk_def = jk_info%jk_name
+       allocate(map%m_jk(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*jk_info%n_feed), &
+            & map%rms_jk(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*jk_info%n_feed), &
+            & map%dsum_jk(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*jk_info%n_feed), &
+            & map%div_jk(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*jk_info%n_feed), &
+            & map%nhit_jk(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*jk_info%n_feed), &
+            & map%m_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
+            & map%rms_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
+            & map%dsum_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
+            & map%div_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
+            & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd))
+       map%m_jk    = 0.0; map%m_jkco    = 0.0
+       map%rms_jk  = 0.0; map%rms_jkco  = 0.0
+       map%nhit_jk = 0;   map%nhit_jkco = 0
+       map%dsum_jk = 0.0; map%dsum_jkco = 0.0
+       map%div_jk  = 0.0; map%div_jkco  = 0.0
+    end if
 
     ! Frequency
     d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
@@ -134,8 +168,10 @@ contains
 
   end subroutine initialize_mapmaker
 
-
+  
   subroutine time2pix(tod, map, parfile, pinfo, jk_list)
+    ! Calculates which timestep correspond to which pixelnumber, and hitmaps
+    ! NOT USED ANYMORE FOR BINNING!!
     implicit none
     type(tod_type),   intent(inout) :: tod
     type(map_type),   intent(inout) :: map
@@ -238,76 +274,76 @@ contains
   end subroutine time2pix
 
 
-  subroutine time2pix_sim(tod, map, parfile, pinfo)
-    implicit none
-    type(tod_type),   intent(inout) :: tod
-    type(map_type),   intent(inout) :: map
-    character(len=*)                :: parfile
-    type(patch_info), intent(in)    :: pinfo
+!  subroutine time2pix_sim(tod, map, parfile, pinfo)
+!    implicit none
+!    type(tod_type),   intent(inout) :: tod
+!    type(map_type),   intent(inout) :: map
+!    character(len=*)                :: parfile
+!    type(patch_info), intent(in)    :: pinfo
 
-    integer(i4b) :: scan, i, j, p, q, sb, freq, det
-    real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
-    character(len=15) :: coord_system, object
-    real(sp), allocatable, dimension(:,:) :: sigma0
-    real(dp), dimension(3) :: pos
+!    integer(i4b) :: scan, i, j, p, q, sb, freq, det
+!    real(dp)     :: x_min, x_max, y_min, y_max, t1, t2
+!    character(len=15) :: coord_system, object
+!    real(sp), allocatable, dimension(:,:) :: sigma0
+!    real(dp), dimension(3) :: pos
 
-    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
-    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
-    call initialize_comap_ephem_mod(parfile)
+!    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+!    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+!    call initialize_comap_ephem_mod(parfile)
 
-    x_min = map%x(1); x_max = map%x(map%n_x)
-    y_min = map%y(1); y_max = map%y(map%n_y)
+!    x_min = map%x(1); x_max = map%x(map%n_x)
+!    y_min = map%y(1); y_max = map%y(map%n_y)
 
-    map%ndet = tod%ndet
-    if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
-    map%feeds = tod%feeds
+!    map%ndet = tod%ndet
+!    if (.not. allocated(map%feeds)) allocate(map%feeds(map%ndet))
+!    map%feeds = tod%feeds
     
-    ! Get position of a non-fixed object (assuming ~no movement during one subscan)
-    pos = 0.d0
-    !write(*,*) pinfo%fixed
-    if (.not. pinfo%fixed) pos = get_obj_info(object,tod%t(1))
-    !write(*,*) pos
+!    ! Get position of a non-fixed object (assuming ~no movement during one subscan)
+!    pos = 0.d0
+!    !write(*,*) pinfo%fixed
+!    if (.not. pinfo%fixed) pos = get_obj_info(object,tod%t(1))
+!    !write(*,*) pos
 
-    do j = 1, tod%ndet
-       det = tod%feeds(j)
-       if (.not. is_alive(det)) cycle
-       !write(*,*) j, det
-       do i = 1, tod%nsamp
-          if (tod%test(i) .eq. 1) cycle
-          !if (tod%point_tel(2,i,j) .lt. 35.d0) cycle
-          !if (tod%point_tel(2,i,j) .gt. 65.d0) cycle
+!    do j = 1, tod%ndet
+!       det = tod%feeds(j)
+!       if (.not. is_alive(det)) cycle
+!       !write(*,*) j, det
+!       do i = 1, tod%nsamp
+!          if (tod%test(i) .eq. 1) cycle
+!          !if (tod%point_tel(2,i,j) .lt. 35.d0) cycle
+!          !if (tod%point_tel(2,i,j) .gt. 65.d0) cycle
           !if (tod%point_tel(1,i,j) .lt. 40.d0) cycle
-          if (trim(coord_system) .eq. 'horizontal') then
-             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
-             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
-          else
-             !if (i .eq. 1) write(*,*) det, tod%point(1,i,det)
-             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
-             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
-             !p = min(max(nint((tod%point(1,i,det)-x_min)/map%dthetax),1),map%n_x)
-             !q = min(max(nint((tod%point(2,i,det)-y_min)/map%dthetay),1),map%n_y)
-          end if
-          if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
-             tod%pixel(i,det) = (q-1)*map%n_x + p
-             do sb = 1, tod%nsb
-                do freq = 1, tod%nfreq
-                   if (tod%freqmask(freq,sb,j) == 0) cycle
-                   ! Flipping sb 1 and 3
-                   if ((sb .eq. 1) .or. (sb .eq. 3)) then
-                      map%nhit_co(p,q,tod%nfreq-freq+1,sb)  = map%nhit_co(p,q,tod%nfreq-freq+1,sb)  + 1
-                   else
-                      map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
-                   end if
-                end do
-             end do
-          else
-             tod%pixel(i,det) = -200
-          end if
-       end do
-    end do
+!          if (trim(coord_system) .eq. 'horizontal') then
+!             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
+!             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
+!          else
+!             !if (i .eq. 1) write(*,*) det, tod%point(1,i,det)
+!             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
+!             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
+!             !p = min(max(nint((tod%point(1,i,det)-x_min)/map%dthetax),1),map%n_x)
+!             !q = min(max(nint((tod%point(2,i,det)-y_min)/map%dthetay),1),map%n_y)
+!          end if
+!          if ((p .ge. 1) .and. (p .le. map%n_x) .and. (q .ge. 1) .and. (q .le. map%n_y)) then!((1 <= p <= map%n_x) .and. (1 <= q <= map%n_y)) then   
+!             tod%pixel(i,det) = (q-1)*map%n_x + p
+!             do sb = 1, tod%nsb
+!                do freq = 1, tod%nfreq
+!                   if (tod%freqmask(freq,sb,j) == 0) cycle
+!                   ! Flipping sb 1 and 3
+!                   if ((sb .eq. 1) .or. (sb .eq. 3)) then
+!                      map%nhit_co(p,q,tod%nfreq-freq+1,sb)  = map%nhit_co(p,q,tod%nfreq-freq+1,sb)  + 1
+!                   else
+!                      map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1
+!                   end if
+!                end do
+!             end do
+!          else
+!             tod%pixel(i,det) = -200
+!          end if
+!       end do
+!    end do
 
 
-  end subroutine time2pix_sim
+!  end subroutine time2pix_sim
 
 
 
@@ -363,17 +399,18 @@ contains
   ! Naive Binning !
   !!!!!!!!!!!!!!!!!
 
-  subroutine binning(map, tod, scan, parfile, pinfo, jk_list)!(map_tot, map_scan, tod, alist, scan, parfile)
+  subroutine binning(map, tod, scan, parfile, pinfo, jk_list, jk_split)!(map_tot, map_scan, tod, alist, scan, parfile)
     implicit none
     type(tod_type),   intent(in)    :: tod
     type(patch_info), intent(in)    :: pinfo
     type(map_type),   intent(inout) :: map!_tot, map_scan
     !type(acceptlist), intent(in)    :: alist
     character(len=*)                :: parfile
-    integer(i4b), dimension(:,:), intent(in) :: jk_list
+    integer(i4b), dimension(:,:),   intent(in) :: jk_list
+    integer(i4b), dimension(:,:,:), intent(in) :: jk_split
 
-    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq
-    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
+    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc
+    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, jk
     real(dp)     :: x_min, x_max, y_min, y_max
     character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:) :: dsum, div
@@ -381,16 +418,19 @@ contains
 
     call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
     call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+    call initialize_comap_ephem_mod(parfile)
 
     x_min = map%x(1); x_max = map%x(map%n_x)
     y_min = map%y(1); y_max = map%y(map%n_y)
 
+    map%ndet = tod%ndet ! Has this been established earlier???
     ndet = map%ndet
     nsb = map%nsb 
     nfreq = map%nfreq
 
     pos = 0.d0
     if (.not. pinfo%fixed) pos = get_obj_info(object, tod%t(1))
+    !! Where does ephem_mod fit in ??????????
 
     !write(*,*) 'Beginning coadding'
 
@@ -401,7 +441,7 @@ contains
        do j = 1, ndet
           det = tod%feeds(j)
           if (.not. is_alive(det)) cycle
-          if (tod%pixel(i,det) .lt. 0) cycle
+          !if (tod%pixel(i,det) .lt. 0) cycle
           !if (tod%point_tel(2,i,det) > 30.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
              p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
@@ -409,9 +449,8 @@ contains
           else
              p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
              q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
-             !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
-             !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
           end if
+          if ((p .le. 1) .or. (p .ge. map%n_x) .or. (q .le. 1) .or. (q .ge. map%n_y)) cycle ! discard points outside of the set grid
           do sb = 1, nsb
              if (jk_list(sb,det) == 0) cycle
              do freq = 1, nfreq
@@ -423,15 +462,82 @@ contains
                 !write(*,*) tod%rms(i,freq,sb,det)
                 ! Flipping sb 1 and 3
                 if ((sb .eq. 1) .or. (sb .eq. 3)) then
-                   map%dsum(p,q,nfreq-freq+1,sb,det) = map%dsum(p,q,nfreq-freq+1,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div(p,q,nfreq-freq+1,sb,det)  = map%div(p,q,nfreq-freq+1,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
-                   map%dsum_co(p,q,nfreq-freq+1,sb)  = map%dsum_co(p,q,nfreq-freq+1,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div_co(p,q,nfreq-freq+1,sb)   = map%div_co(p,q,nfreq-freq+1,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
+                   map%nhit(p,q,nfreq-freq+1,sb,j)  = map%nhit(p,q,nfreq-freq+1,sb,j)  + 1.0
+                   map%nhit_co(p,q,nfreq-freq+1,sb) = map%nhit_co(p,q,nfreq-freq+1,sb) + 1.0
+                   map%dsum(p,q,nfreq-freq+1,sb,j)  = map%dsum(p,q,nfreq-freq+1,sb,j)  + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div(p,q,nfreq-freq+1,sb,j)   = map%div(p,q,nfreq-freq+1,sb,j)   + 1.0 / tod%rms(freq,sb,j)**2
+                   map%dsum_co(p,q,nfreq-freq+1,sb) = map%dsum_co(p,q,nfreq-freq+1,sb) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_co(p,q,nfreq-freq+1,sb)  = map%div_co(p,q,nfreq-freq+1,sb)  + 1.0 / tod%rms(freq,sb,j)**2
+
+                   ! Jackknives
+                   do jk = 1, map%njk
+                      nf = 1; nc = 1
+                      if (any(map%jk_feed == jk)) then
+                         if (jk_split(i,sb,det) == 0) then
+                            map%nhit_jk(p,q,nfreq-freq+1,sb,j,2*nf-1) = map%nhit_jk(p,q,nfreq-freq+1,sb,j,2*nf-1) + 1
+                            map%dsum_jk(p,q,nfreq-freq+1,sb,j,2*nf-1) = map%dsum_jk(p,q,nfreq-freq+1,sb,j,2*nf-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jk(p,q,nfreq-freq+1,sb,j,2*nf-1)  = map%div_jk(p,q,nfreq-freq+1,sb,j,2*nf-1)  + 1.0 / tod%rms(freq,sb,j)**2
+                         else
+                            map%nhit_jk(p,q,nfreq-freq+1,sb,j,2*nf) = map%nhit_jk(p,q,nfreq-freq+1,sb,j,2*nf) + 1
+                            map%dsum_jk(p,q,nfreq-freq+1,sb,j,2*nf) = map%dsum_jk(p,q,nfreq-freq+1,sb,j,2*nf) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jk(p,q,nfreq-freq+1,sb,j,2*nf)  = map%div_jk(p,q,nfreq-freq+1,sb,j,2*nf)  + 1.0 / tod%rms(freq,sb,j)**2
+                         end if
+                         nf = nf+1
+                      else
+                         if (jk_split(i,sb,det) == 0) then
+                            map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc-1) = map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc-1) + 1
+                            map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc-1) = map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jkco(p,q,nfreq-freq+1,sb,2*nc-1)  = map%div_jkco(p,q,nfreq-freq+1,sb,2*nc-1)  + 1.0 / tod%rms(freq,sb,j)**2
+                         else
+                            map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc) = map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc) + 1
+                            map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc) = map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jkco(p,q,nfreq-freq+1,sb,2*nc)  = map%div_jkco(p,q,nfreq-freq+1,sb,2*nc)  + 1.0 / tod%rms(freq,sb,j)**2
+                         end if
+                         nc = nc+1
+                      end if
+                   end do
+                   
+                   ! Simulations in here
+
+
                 else
-                   map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
+                   map%nhit(p,q,freq,sb,j) = map%nhit(p,q,freq,sb,j) + 1.d0
+                   map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1.d0
+                   map%dsum(p,q,freq,sb,j) = map%dsum(p,q,freq,sb,j) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div(p,q,freq,sb,j)  = map%div(p,q,freq,sb,j)  + 1.d0 / tod%rms(freq,sb,j)**2
                    map%dsum_co(p,q,freq,sb)  = map%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                    map%div_co(p,q,freq,sb)   = map%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
+
+                   ! Jackknives
+                   nf = 1; nc = 1
+                   do jk = 1, map%njk
+                      if (any(map%jk_feed == jk)) then
+                         if (jk_split(i,sb,det) == 0) then
+                            map%nhit_jk(p,q,freq,sb,j,2*nf-1) = map%nhit_jk(p,q,freq,sb,j,2*nf-1) + 1
+                            map%dsum_jk(p,q,freq,sb,j,2*nf-1) = map%dsum_jk(p,q,freq,sb,j,2*nf-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jk(p,q,freq,sb,j,2*nf-1)  = map%div_jk(p,q,freq,sb,j,2*nf-1)  + 1.0 / tod%rms(freq,sb,j)**2
+                         else
+                            map%nhit_jk(p,q,freq,sb,j,2*nf) = map%nhit_jk(p,q,freq,sb,j,2*nf) + 1
+                            map%dsum_jk(p,q,freq,sb,j,2*nf) = map%dsum_jk(p,q,freq,sb,j,2*nf) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jk(p,q,freq,sb,j,2*nf)  = map%div_jk(p,q,freq,sb,j,2*nf)  + 1.0 / tod%rms(freq,sb,j)**2
+                         end if
+                         nf = nf+1
+                      else
+                         if (jk_split(i,sb,det) == 0) then
+                            map%nhit_jkco(p,q,freq,sb,2*nc-1) = map%nhit_jkco(p,q,freq,sb,2*nc-1) + 1
+                            map%dsum_jkco(p,q,freq,sb,2*nc-1) = map%dsum_jkco(p,q,freq,sb,2*nc-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jkco(p,q,freq,sb,2*nc-1)  = map%div_jkco(p,q,freq,sb,2*nc-1)  + 1.0 / tod%rms(freq,sb,j)**2
+                         else
+                            map%nhit_jkco(p,q,freq,sb,2*nc) = map%nhit_jkco(p,q,freq,sb,2*nc) + 1
+                            map%dsum_jkco(p,q,freq,sb,2*nc) = map%dsum_jkco(p,q,freq,sb,2*nc) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                            map%div_jkco(p,q,freq,sb,2*nc)  = map%div_jkco(p,q,freq,sb,2*nc)  + 1.0 / tod%rms(freq,sb,j)**2
+                         end if
+                         nc = nc+1
+                      end if
+                   end do
+
+                   ! Simulations in here
+
                 end if
              end do
           end do
@@ -448,148 +554,91 @@ contains
   end subroutine binning
 
 
-  subroutine binning_sim(map_tot, map_scan, tod, scan, parfile, pinfo)!(map_tot, map_scan, tod, alist, scan, parfile)
-    implicit none
-    type(tod_type),   intent(in)    :: tod
-    type(patch_info), intent(in)    :: pinfo
-    type(map_type),   intent(inout) :: map_tot, map_scan
-    !type(acceptlist), intent(in)    :: alist
-    character(len=*)                :: parfile
+!  subroutine binning_sim(map_tot, map_scan, tod, scan, parfile, pinfo)!(map_tot, map_scan, tod, alist, scan, parfile)
+!    implicit none
+!    type(tod_type),   intent(in)    :: tod
+!    type(patch_info), intent(in)    :: pinfo
+!    type(map_type),   intent(inout) :: map_tot, map_scan
+!    !type(acceptlist), intent(in)    :: alist
+!    character(len=*)                :: parfile
 
-    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq
-    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
-    real(dp)     :: x_min, x_max, y_min, y_max
-    character(len=15) :: coord_system, object
-    real(dp), allocatable, dimension(:) :: dsum, div
-    real(dp), dimension(3) :: pos
+!    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq
+!    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix
+!    real(dp)     :: x_min, x_max, y_min, y_max
+!    character(len=15) :: coord_system, object
+!    real(dp), allocatable, dimension(:) :: dsum, div
+!    real(dp), dimension(3) :: pos
 
-    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
-    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+!    call get_parameter(0, parfile, 'COORDINATE_SYSTEM', par_string=coord_system)
+!    call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
 
-    x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
-    y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
+!    x_min = map_tot%x(1); x_max = map_tot%x(map_tot%n_x)
+!    y_min = map_tot%y(1); y_max = map_tot%y(map_tot%n_y)
 
-    ndet = map_tot%ndet
-    nsb = map_tot%nsb 
-    nfreq = map_tot%nfreq
+!    ndet = map_tot%ndet
+!    nsb = map_tot%nsb 
+!    nfreq = map_tot%nfreq
     
-    pos = 0.d0
-    if (.not. pinfo%fixed) pos = get_obj_info(object, tod%t(1))
+!    pos = 0.d0
+!    if (.not. pinfo%fixed) pos = get_obj_info(object, tod%t(1))
 
-    do i = 1, tod%nsamp
-       do j = 1, ndet
-          det = tod%feeds(j)
-          if (.not. is_alive(det)) cycle
-          if (tod%pixel(i,det) .lt. 0) cycle
-          !if (tod%point_tel(2,i,det) > 30.d0) cycle
-          if (trim(coord_system) .eq. 'horizontal') then
-             p = nint((tod%point_tel(1,i,j)-x_min)/map_tot%dthetax)
-             q = nint((tod%point_tel(2,i,j)-y_min)/map_tot%dthetay)
-          else
-             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map_tot%dthetax)
-             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map_tot%dthetay)
-             !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
-             !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
-          end if
-          do sb = 1, nsb
-             do freq = 1, nfreq
-                !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
-                if (tod%freqmask(freq,sb,j) == 0) cycle
-                if (tod%rms_sim(freq,sb,j) == 0.d0) cycle
-                !map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
-                !map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
-                ! Flipping sb 1 and 3
-                if ((sb .eq. 1) .or. (sb .eq. 3)) then
-                   map_scan%dsum_sim(p,q,nfreq-freq+1,sb)  = map_scan%dsum_sim(p,q,nfreq-freq+1,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
-                   map_scan%div_sim(p,q,nfreq-freq+1,sb)   = map_scan%div_sim(p,q,nfreq-freq+1,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
-                else
-                   map_scan%dsum_sim(p,q,freq,sb)  = map_scan%dsum_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
-                   map_scan%div_sim(p,q,freq,sb)   = map_scan%div_sim(p,q,freq,sb) + 1.d0 / tod%rms_sim(freq,sb,j)**2
-                end if
-             end do
-          end do
-       end do
-    end do
+!    do i = 1, tod%nsamp
+!       do j = 1, ndet
+!          det = tod%feeds(j)
+!          if (.not. is_alive(det)) cycle
+!          if (tod%pixel(i,det) .lt. 0) cycle
+!          !if (tod%point_tel(2,i,det) > 30.d0) cycle
+!          if (trim(coord_system) .eq. 'horizontal') then
+!             p = nint((tod%point_tel(1,i,j)-x_min)/map_tot%dthetax)
+!             q = nint((tod%point_tel(2,i,j)-y_min)/map_tot%dthetay)
+!          else
+!             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map_tot%dthetax)
+!             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map_tot%dthetay)
+!             !p = min(max(nint((tod%point(1,i,det)-x_min)/map_tot%dthetax),1),map_tot%n_x)
+!             !q = min(max(nint((tod%point(2,i,det)-y_min)/map_tot%dthetay),1),map_tot%n_y)
+!          end if
+!          do sb = 1, nsb
+!             do freq = 1, nfreq
+!                !if (tod%fknee(freq,sb,det) > 0.5d0) cycle
+!                if (tod%freqmask(freq,sb,j) == 0) cycle
+!                if (tod%rms_sim(freq,sb,j,1) == 0.d0) cycle
+!                !map_scan%dsum_sim(p,q,freq,sb,det) = map_scan%dsum_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j) 
+!                !map_scan%div_sim(p,q,freq,sb,det) = map_scan%div_sim(p,q,freq,sb,det) + 1.d0 / tod%rms_sim(freq,sb,j)**2 
+!                ! Flipping sb 1 and 3
+!                if ((sb .eq. 1) .or. (sb .eq. 3)) then
+!                   map_scan%dsum_sim(p,q,nfreq-freq+1,sb,1)  = map_scan%dsum_sim(p,q,nfreq-freq+1,sb,1) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
+!                   map_scan%div_sim(p,q,nfreq-freq+1,sb,1)   = map_scan%div_sim(p,q,nfreq-freq+1,sb,1) + 1.d0 / tod%rms_sim(freq,sb,j)**2
+!                else
+!                   map_scan%dsum_sim(p,q,freq,sb,1)  = map_scan%dsum_sim(p,q,freq,sb,1) + 1.d0 / tod%rms_sim(freq,sb,j)**2 * tod%d_sim(i,freq,sb,j)
+!                   map_scan%div_sim(p,q,freq,sb,1)   = map_scan%div_sim(p,q,freq,sb,1) + 1.d0 / tod%rms_sim(freq,sb,j)**2
+!                end if
+!             end do
+!          end do
+!       end do
+!    end do
 
-    ! Simulated data
-    map_tot%dsum_sim = map_tot%dsum_sim + map_scan%dsum_sim
-    map_tot%div_sim = map_tot%div_sim + map_scan%div_sim
+!    ! Simulated data
+!    map_tot%dsum_sim = map_tot%dsum_sim + map_scan%dsum_sim
+!    map_tot%div_sim = map_tot%div_sim + map_scan%div_sim
 
-    !write(*,*) 'Ending coadding'
+!    !write(*,*) 'Ending coadding'
 
-  end subroutine binning_sim
+!  end subroutine binning_sim
 
-
-  ! Sums over det, sb, and freq  to create one single map for a given subscan
-  subroutine finalize_scan_binning(map)
-    implicit none
-    type(map_type), intent(inout) :: map
-    
-    integer(i4b) :: p, q, sim
-
-   ! do p = 1, map%n_x
-   !    do q = 1, map%n_y
-   !       map%dsum(p,q,1,1,1) = sum(map%dsum(p,q,:,:,:))
-   !       map%div(p,q,1,1,1)  = sum(map%div(p,q,:,:,:))
-   !       map%nhit(p,q,1,1,1) = sum(map%nhit(p,q,:,:,:))
-
-   !       do sim = 1, map%nsim
-   !          ! Simulated data
-   !          map%dsum_sim(p,q,1,1,1,sim) = sum(map%dsum_sim(p,q,:,:,:,sim)) 
-   !          map%div_sim(p,q,1,1,1,sim)  = sum(map%div_sim(p,q,:,:,:,sim)) 
-   !       end do 
-   !    end do
-   ! end do
-
-    where(map%div > 0)
-       map%m   = map%dsum / map%div
-       map%rms = 1.d0 / sqrt(map%div)!sqrt(map%rms) ! overwrite
-    elsewhere
-       map%m   = 0.d0
-       map%rms = 0.d0
-    end where
-
-    ! Co-added feeds
-    where(map%div_co > 0)
-       map%m_co   = map%dsum_co / map%div_co
-       map%rms_co = 1.d0 / sqrt(map%div_co)
-    elsewhere
-       map%m_co   = 0.d0
-       map%rms_co = 0.d0
-    end where
-
-  end subroutine finalize_scan_binning
-
-
-  ! Sums over det, sb, and freq  to create one single map for a given scan
-  subroutine finalize_scan_binning_sim(map)
-    implicit none
-    type(map_type), intent(inout) :: map
-    
-    integer(i4b) :: p, q
-
-    ! Simulated data
-    where(map%div_sim > 0) 
-       map%m_sim = map%dsum_sim / map%div_sim 
-       map%rms_sim = 1.d0 / sqrt(map%div_sim)
-    elsewhere
-       map%m_sim   = 0.d0 
-       map%rms_sim = 0.d0
-    end where
-
-  end subroutine finalize_scan_binning_sim
 
 
   subroutine finalize_binning(map)
     implicit none
     type(map_type), intent(inout) :: map
+    
+    integer(i4b) :: det, sb, freq, p, q
 
     where(map%div > 0)
        map%m   = map%dsum / map%div
-       map%rms = 1.d0 / sqrt(map%div)
+       map%rms = 1.0 / sqrt(map%div)
     elsewhere
-       map%m   = 0.d0
-       map%rms = 0.d0
+       map%m   = 0.0
+       map%rms = 0.0
     end where
 
     ! Co-added feeds
@@ -609,6 +658,24 @@ contains
        map%m_sim   = 0.0 
        map%rms_sim = 0.0 
     end where
+
+    ! Jackknives
+
+    where(map%div_jk > 0)
+       map%m_jk   = map%dsum_jk / map%div_jk
+       map%rms_jk = 1.0 / sqrt(map%div_jk)
+    elsewhere
+       map%m_jk   = 0.0
+       map%rms_jk = 0.0
+    end where 
+
+    where(map%div_jkco > 0)
+       map%m_jkco   = map%dsum_jkco / map%div_jkco
+       map%rms_jkco = 1.0 / sqrt(map%div_jkco)
+    elsewhere
+       map%m_jkco   = 0.0
+       map%rms_jkco = 0.0
+    end where 
 
 
   end subroutine finalize_binning

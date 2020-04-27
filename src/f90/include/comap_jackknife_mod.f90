@@ -13,11 +13,11 @@ module comap_jackknife_mod
   !end interface
 
   type jk_type
-     integer(i4b) :: nscans, njk
-     character(len=4),   allocatable, dimension(:)     :: jk_name
-     integer(i4b),       allocatable, dimension(:)     :: scan_list
-     integer(i4b),       allocatable, dimension(:,:)   :: split
-     integer(i4b),       allocatable, dimension(:,:,:) :: jk_list, accept_list
+     integer(i4b) :: nscans, njk, n_feed, n_coadd
+     character(len=4),   allocatable, dimension(:)       :: jk_name              ! (njk)
+     integer(i4b),       allocatable, dimension(:)       :: scan_list, feedmap   ! (nscans) / (njk)
+     integer(i4b),       allocatable, dimension(:,:,:,:) :: split                ! (njk,nsb,nfeed,nscans)
+     integer(i4b),       allocatable, dimension(:,:,:)   :: jk_list, accept_list ! (nsb,nfeed,nscans)
   end type jk_type
 
   character(len=512) :: acceptlist, jk_definition
@@ -45,7 +45,7 @@ contains
     jk%jk_list = 1
     jk%accept_list = .true.
 
-    allocate(jk%split(jk%njk, jk%nscans))
+    allocate(jk%split(jk%njk, nsb, nfeed, jk%nscans))
     jk%split = 0
     
   end subroutine initialize_empty_jk
@@ -59,7 +59,7 @@ contains
 
     type(hdf_file)     :: h5file
     character(len=512) :: line
-    integer(i4b)       :: i, j, feed, sb, num, nfeed, nsb, temp, ext(3), unit 
+    integer(i4b)       :: i, j, feed, sb, num, nfeed, nsb, temp, ext(3), unit, feedmap 
     
     call free_jk_type(jk)
     
@@ -79,37 +79,42 @@ contains
     call close_hdf_file(h5file)
 
     ! Read jackknife definition file
+    jk%n_feed = 0; jk%n_coadd = 0
     unit = getlun()
     open(unit, file=jk_definition, action="read",status="old")
     read(unit,*) num
-    jk%njk = num-1; allocate(jk%jk_name(jk%njk))
+    jk%njk = num-1
+    allocate(jk%jk_name(jk%njk), jk%feedmap(jk%njk))
     read(unit,*) line
     do i = 2, num
-       read(unit,*) line
-       jk%jk_name(i-1) = line(1:4)
+       read(unit,*) jk%jk_name(i-1), jk%feedmap(i-1)!line
+       !jk%jk_name(i-1) = line(1:4)
+       if (jk%feedmap(i-1) == 0) then
+          jk%n_coadd = jk%n_coadd + 1
+       else
+          jk%n_feed = jk%n_feed + 1
+       end if
     end do
     close(unit)
+    !write(*,*) jk%n_coadd, jk%n_feed
+    !stop
 
-    allocate(jk%split(jk%njk, jk%nscans))
+    allocate(jk%split(jk%njk, nsb, nfeed, jk%nscans))
 
     ! Define jackknife splitting
     do j = 1, jk%nscans
         do feed = 1, nfeed
            do sb = 1, nsb
               temp = jk%jk_list(sb,feed,j)
-              !write(*,*) temp
-              if (temp > 0) go to 1!exit !go to 60
+              do i = jk%njk, 1, -1
+                 if (temp > 2**i) then 
+                    jk%split(i,sb,feed,j) = 1
+                    temp = temp - 2**i
+                 else
+                    jk%split(i,sb,feed,j) = 0
+                 end if
+              end do
            end do
-           !if (temp > 0) exit
-        end do
-        if (temp == 0) write(*,*) "Entire scan is rejected", jk%scan_list(j)
-1        do i = jk%njk, 1, -1
-           if (temp > 2**i) then 
-              jk%split(i,j) = 1
-              temp = temp - 2**i
-           else
-              jk%split(i,j) = 0
-           end if
         end do
      end do
      !write(*,*) jk%split
@@ -125,6 +130,7 @@ contains
     if (allocated(jk%scan_list))   deallocate(jk%scan_list)
     if (allocated(jk%accept_list)) deallocate(jk%accept_list)
     if (allocated(jk%jk_name))     deallocate(jk%jk_name)
+    if (allocated(jk%feedmap))     deallocate(jk%feedmap)
     if (allocated(jk%split))       deallocate(jk%split)
 
   end subroutine free_jk_type

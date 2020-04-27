@@ -122,70 +122,46 @@ program tod2comap
   !n1 = 0
   !n2 = 0
 
-  !if (myid==0) then
-  if (myid==0) write(*,*) "Initialising mapmaker"
-  !if (myid == 0) write(*,*) trim(jackknife)
-  call initialize_mapmaker(map_scan, parfile, pinfo)
-  call initialize_mapmaker(map_obs,  parfile, pinfo)
-  call initialize_mapmaker(map_tot,  parfile, pinfo)
-  call initialize_mapmaker(buffer,   parfile, pinfo)
-  call nullify_map_type(map_tot)
-
-  if (jk_info%njk .gt. 0) then
-     allocate(map_jk(2*jk_info%njk), buffer_jk(2*jk_info%njk))
-     do i = 1, 2*jk_info%njk
-        call initialize_mapmaker(map_jk(i), parfile, pinfo)
-        call initialize_mapmaker(buffer_jk(i), parfile, pinfo)
-     end do
-  end if
-  !if (split_mode) then 
-  !   call initialize_mapmaker(map_split1, parfile, pinfo)
-  !   call initialize_mapmaker(map_split2, parfile, pinfo)
-  !   call initialize_mapmaker(buffer1,    parfile, pinfo)
-  !   call initialize_mapmaker(buffer2,    parfile, pinfo)
-  !end if
-  !end if
-
-  !write(*,*) 'Making hitmap'
-  !prefix = trim(pre) // trim(object)
-  !l1file = '/mn/stornext/d16/cmbco/comap/pathfinder/ovro/2019-07/comap-0006973-2019-07-19-001914.hd5'
-  !call l12hitmap(trim(l1file), map_tot, parfile, pinfo)
-  !write(*,*) 'writing map', trim(prefix)
-  !call output_map_h5(trim(prefix), map_tot)
-  !call mpi_finalize(ierr)
+  !write(*,*) jk_info%split(:,1,2,75)
   !stop
 
 
+  if (myid==0) write(*,*) "Initialising mapmaker"
+  call initialize_mapmaker(map_scan, parfile, pinfo, jk_info)
+  call initialize_mapmaker(map_obs,  parfile, pinfo, jk_info)
+  call initialize_mapmaker(map_tot,  parfile, pinfo, jk_info)
+  call initialize_mapmaker(buffer,   parfile, pinfo, jk_info)
+  call nullify_map_type(map_tot); call nullify_map_type(buffer) ! Should not be necessary
 
-  ! This loop currently requiers that all scans are of the same patch
-  do i = 1+myid, nscan, nproc !i = 1+myid, nscan, nproc 
+  !!if (jk_info%njk .gt. 0) then
+  !!   allocate(map_jk(2*jk_info%njk), buffer_jk(2*jk_info%njk))
+  !!   do i = 1, 2*jk_info%njk
+  !!      call initialize_mapmaker(map_jk(i), parfile, pinfo, jk_info)
+  !!      call initialize_mapmaker(buffer_jk(i), parfile, pinfo, jk_info)
+  !!   end do
+  !!end if
+
+
+  ! This loop currently requiers that all obsIDs are of the same patch
+  do i = 1+myid, nscan, nproc 
      !write(*,*) myid, i, 'of', nscan
      !if (allocated(alist%status)) deallocate(alist%status)
      call get_scan_info(i,scan)
      !write(*,*) scan%id
-     !if (jackknife .eq. 'even')   split = scan%even
-     !if (jackknife .eq. 'day')    split = scan%day
-     !if (jackknife .eq. 'half')   split = scan%half
-     !if (jackknife .eq. 'meanel') split = scan%meanel
 
-     write(*,*) myid, scan%id!, scan%even, scan%day, scan%half, scan%meanel
-
+     write(*,*) myid, scan%id
+     call nullify_map_type(map_obs)
 
      nsub = scan%nsub
      do j = 2, nsub-1
         call nullify_map_type(map_scan)
      
-
         ! Get TOD / read level 2 file
         !nsub = scan%nsub
         !do j = 2, nsub-1
         !write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
-        filename = scan%ss(j)%l2file
-     
-        !write(*,*) trim(filename)
-        !call mpi_finalize(ierr)
-        !stop
-     
+        filename = scan%ss(j)%l2file !write(*,*) trim(filename)
+        
         call get_tod(trim(filename), tod, parfile)
         !elevation cuts here
         !if (tod%mean_el .lt. 35.d0) cycle
@@ -198,27 +174,25 @@ program tod2comap
            scan_index = findloc(jk_info%scan_list, scan%ss(j)%id, dim=1)
         else
            scan_index = 1
-        end if
-
-        
+        end if  
 
         !call nullify_map_type(map_scan)
-        call time2pix(tod, map_scan, parfile, pinfo, jk_info%jk_list(:,:,scan_index))
-        call time2pix(tod, map_tot, parfile, pinfo, jk_info%jk_list(:,:,scan_index))
+        !call time2pix(tod, map_scan, parfile, pinfo, jk_info%jk_list(:,:,scan_index))
+        !call time2pix(tod, map_tot, parfile, pinfo, jk_info%jk_list(:,:,scan_index))
         if (use_acc) then
            scan_index = findloc(jk_info%scan_list, scan%ss(j)%id, dim=1)
-           do k = 1, jk_info%njk
-              !write(*,*) 2*k, 2*k-1
-              if (jk_info%split(k,scan_index) .eq. 0) then
-                 call time2pix(tod, map_jk(2*k -1), parfile, pinfo, jk_info%jk_list(:,:,scan_index))
-              else
-                 !if (k==2) write(*,*) 'yes'
-                 call time2pix(tod, map_jk(2*k), parfile, pinfo, jk_info%jk_list(:,:,scan_index))
-              end if
-           end do
+        !   do k = 1, jk_info%njk
+        !      !write(*,*) 2*k, 2*k-1
+        !      if (jk_info%split(k,scan_index) .eq. 0) then
+        !         call time2pix(tod, map_jk(2*k -1), parfile, pinfo, jk_info%jk_list(:,:,scan_index))
+        !      else
+        !         !if (k==2) write(*,*) 'yes'
+        !         call time2pix(tod, map_jk(2*k), parfile, pinfo, jk_info%jk_list(:,:,scan_index))
+        !      end if
+        !   end do
         end if
         if (verbose) write(*,*) myid, "making maps, obsID", i, 'scan', scan%ss(j)%id
-        call binning(map_scan, tod, i, parfile, pinfo, jk_info%jk_list(:,:,scan_index))
+        call binning(map_scan, tod, i, parfile, pinfo, jk_info%jk_list(:,:,scan_index), jk_info%split(:,:,:,scan_index))
         !call finalize_scan_binning(map_scan)
         !prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
         !call output_submap_h5(trim(prefix), map_scan)
@@ -228,39 +202,56 @@ program tod2comap
 
         if (obs_map) then   
            ! Add to obsID maps
-           map_obs%dsum    = map_obs%dsum + map_scan%dsum
-           map_obs%div     = map_obs%div  + map_scan%div
-           map_obs%dsum_co = map_obs%dsum_co + map_scan%dsum_co
-           map_obs%div_co  = map_obs%div_co  + map_scan%div_co
+           map_obs%dsum      = map_obs%dsum + map_scan%dsum
+           map_obs%div       = map_obs%div  + map_scan%div
+           map_obs%nhit      = map_obs%nhit + map_scan%nhit
+           map_obs%dsum_co   = map_obs%dsum_co + map_scan%dsum_co
+           map_obs%div_co    = map_obs%div_co  + map_scan%div_co
+           map_obs%nhit_co   = map_obs%nhit_co + map_scan%nhit_co
+           map_obs%dsum_jk   = map_obs%dsum_jk + map_scan%dsum_jk 
+           map_obs%div_jk    = map_obs%div_jk  + map_scan%div_jk 
+           map_obs%nhit_jk   = map_obs%nhit_jk + map_scan%nhit_jk
+           map_obs%dsum_jkco = map_obs%dsum_jkco + map_scan%dsum_jkco 
+           map_obs%div_jkco  = map_obs%div_jkco  + map_scan%div_jkco
+           map_obs%nhit_jkco = map_obs%nhit_jkco + map_scan%nhit_jkco
         end if
 
         ! Add to total map
-        map_tot%dsum    = map_tot%dsum + map_scan%dsum
-        map_tot%div     = map_tot%div  + map_scan%div
-        map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
-        map_tot%div_co  = map_tot%div_co  + map_scan%div_co
+        map_tot%dsum      = map_tot%dsum + map_scan%dsum
+        map_tot%div       = map_tot%div  + map_scan%div
+        map_tot%nhit      = map_tot%nhit + map_scan%nhit
+        map_tot%dsum_co   = map_tot%dsum_co + map_scan%dsum_co
+        map_tot%div_co    = map_tot%div_co  + map_scan%div_co
+        map_tot%nhit_co   = map_tot%nhit_co + map_scan%nhit_co
+        map_tot%dsum_jk   = map_tot%dsum_jk + map_scan%dsum_jk
+        map_tot%div_jk    = map_tot%div_jk  + map_scan%div_jk
+        map_tot%nhit_jk   = map_tot%nhit_jk + map_scan%nhit_jk
+        map_tot%dsum_jkco = map_tot%dsum_jkco + map_scan%dsum_jkco
+        map_tot%div_jkco  = map_tot%div_jkco  + map_scan%div_jkco
+        map_tot%nhit_jkco = map_tot%nhit_jkco + map_scan%nhit_jkco
 
-        if (use_acc) then
-           ! Add to jackknives
-           do k = 1, jk_info%njk
-              if (jk_info%split(k,scan_index) .eq. 0) then
-                 map_jk(2*k-1)%dsum    = map_jk(2*k-1)%dsum    + map_scan%dsum
-                 map_jk(2*k-1)%div     = map_jk(2*k-1)%div     + map_scan%div
-                 map_jk(2*k-1)%dsum_co = map_jk(2*k-1)%dsum_co + map_scan%dsum_co
-                 map_jk(2*k-1)%div_co  = map_jk(2*k-1)%div_co  + map_scan%div_co
-                 !n1 = n1 + 1
-              else
-                 map_jk(2*k)%dsum    = map_jk(2*k)%dsum    + map_scan%dsum
-                 map_jk(2*k)%div     = map_jk(2*k)%div     + map_scan%div
-                 map_jk(2*k)%dsum_co = map_jk(2*k)%dsum_co + map_scan%dsum_co
-                 map_jk(2*k)%div_co  = map_jk(2*k)%div_co  + map_scan%div_co
-                 !n2 = n2 + 1
-              end if
-           end do
-        end if
+        !if (use_acc) then
+        !   ! Add to jackknives
+        !   do k = 1, jk_info%njk
+        !      if (jk_info%split(k,scan_index) .eq. 0) then
+        !         map_jk(2*k-1)%dsum    = map_jk(2*k-1)%dsum    + map_scan%dsum
+        !         map_jk(2*k-1)%div     = map_jk(2*k-1)%div     + map_scan%div
+        !         map_jk(2*k-1)%dsum_co = map_jk(2*k-1)%dsum_co + map_scan%dsum_co
+        !         map_jk(2*k-1)%div_co  = map_jk(2*k-1)%div_co  + map_scan%div_co
+        !         !n1 = n1 + 1
+        !      else
+        !         map_jk(2*k)%dsum    = map_jk(2*k)%dsum    + map_scan%dsum
+        !         map_jk(2*k)%div     = map_jk(2*k)%div     + map_scan%div
+        !         map_jk(2*k)%dsum_co = map_jk(2*k)%dsum_co + map_scan%dsum_co
+        !         map_jk(2*k)%div_co  = map_jk(2*k)%div_co  + map_scan%div_co
+        !         !n2 = n2 + 1
+        !      end if
+        !   end do
+        !end if
 
+        ! Maps per scan
         if (scan_map) then
-           call finalize_scan_binning(map_scan)
+           call finalize_binning(map_scan)
            call int2string(scan%ss(j)%id, scanid)
            prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
            map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
@@ -271,122 +262,118 @@ program tod2comap
 
      call int2string(scan%id, obsid)
 
+     ! Maps per obsID
      if (obs_map) then
-        call finalize_scan_binning(map_obs)
-
+        call finalize_binning(map_obs)
         prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
         map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
         call output_map_h5(map_filename, map_obs)
      end if
-     !call free_map_type(map_scan)
      call free_tod_type(tod)
 
+     ! THIS NEEDS TO BE UPDATED !!!
+     !do sim=1, nsim
+     !   call nullify_map_type(map_scan)
+     !   write(*,*) myid, "making sim", sim, 'of', nsim
+     !   do j = 2, nsub-1
 
-     do sim=1, nsim
-        call nullify_map_type(map_scan)
-        write(*,*) myid, "making sim", sim, 'of', nsim
-        do j = 2, nsub-1
+     !      filename = scan%ss(j)%l2file
 
-           filename = scan%ss(j)%l2file
+     !      call get_sim(trim(filename), tod, parfile, rng_handle)
+     !      call time2pix_sim(tod, map_scan, parfile, pinfo)
+     !      call time2pix_sim(tod, map_tot, parfile, pinfo)
+     !      call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
 
-           call get_sim(trim(filename), tod, parfile, rng_handle)
-           call time2pix_sim(tod, map_scan, parfile, pinfo)
-           call time2pix_sim(tod, map_tot, parfile, pinfo)
-           call binning_sim(map_tot, map_scan, tod, i, parfile, pinfo)
+     !   end do
+     !   if (obs_map) then 
+     !      call finalize_binning(map_scan)
 
-        end do
-        if (obs_map) then 
-           call finalize_scan_binning_sim(map_scan)
-
-           call int2string(sim, sim_string)
-           prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
-           sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
-           call output_submap_sim_h5(sim_filename, map_scan, sim)
-        end if
-        call free_tod_type(tod)
-     end do
-
-
+     !      call int2string(sim, sim_string)
+     !      prefix_sim = trim(pre_sim)//trim(scan%object)//'_'//trim(obsid)
+     !      sim_filename = trim(prefix_sim)//'_'//trim(sim_name)//'_'//trim(sim_string)//'.h5'
+     !      call output_submap_sim_h5(sim_filename, map_scan, sim)
+     !   end if
+     !   call free_tod_type(tod)
+     !end do
+     !write(*,*) maxval(map_tot%dsum), maxval(map_tot%dsum_jk)
+     !call mpi_finalize(ierr)
+     !stop
+     
   end do ! end loop over obsIDs
 
-
+  call free_map_type(map_scan)
+  call free_map_type(map_obs)
+  call free_jk_type(jk_info)
 
 
   !call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%div,     buffer%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum,    buffer%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit,    buffer%nhit,    size(map_tot%nhit),    MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  !call mpi_allreduce(map_tot%rms,     buffer%rms,     size(map_tot%rms),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+
+  ! Co-added over feeds 
   call mpi_allreduce(map_tot%div_co,  buffer%div_co,  size(map_tot%div_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum_co, buffer%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_co, buffer%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  !call mpi_allreduce(map_tot%rms_co,  buffer%rms_co,  size(map_tot%rms_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-  do i = 1, 2*jk_info%njk
-     call mpi_allreduce(map_jk(i)%div,     buffer_jk(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_jk(i)%dsum,    buffer_jk(i)%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_jk(i)%nhit,    buffer_jk(i)%nhit,    size(map_tot%nhit),    MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_jk(i)%div_co,  buffer_jk(i)%div_co,  size(map_tot%div_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_jk(i)%dsum_co, buffer_jk(i)%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_jk(i)%nhit_co, buffer_jk(i)%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  end do
 
-!  if (split_mode) then
-!     call mpi_allreduce(map_split1%div,     buffer1%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split1%dsum,    buffer1%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split1%nhit,    buffer1%nhit,    size(map_tot%nhit),    MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split1%div_co,  buffer1%div_co,  size(map_tot%div_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split1%dsum_co, buffer1%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split1%nhit_co, buffer1%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  ! Jackknives
+  call mpi_allreduce(map_tot%div_jk,  buffer%div_jk,  size(map_tot%div_jk),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum_jk, buffer%dsum_jk, size(map_tot%dsum_jk), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit_jk, buffer%nhit_jk, size(map_tot%nhit_jk), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%div_jkco,  buffer%div_jkco,  size(map_tot%div_jkco),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum_jkco, buffer%dsum_jkco, size(map_tot%dsum_jkco), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit_jkco, buffer%nhit_jkco, size(map_tot%nhit_jkco), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  !!do i = 1, 2*jk_info%njk
+  !!   call mpi_allreduce(map_jk(i)%div,     buffer_jk(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !!   call mpi_allreduce(map_jk(i)%dsum,    buffer_jk(i)%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !!   call mpi_allreduce(map_jk(i)%nhit,    buffer_jk(i)%nhit,    size(map_tot%nhit),    MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  !!   call mpi_allreduce(map_jk(i)%div_co,  buffer_jk(i)%div_co,  size(map_tot%div_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !!   call mpi_allreduce(map_jk(i)%dsum_co, buffer_jk(i)%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !!   call mpi_allreduce(map_jk(i)%nhit_co, buffer_jk(i)%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  !!end do
 
-!     call mpi_allreduce(map_split2%div,     buffer2%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split2%dsum,    buffer2%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split2%nhit,    buffer2%nhit,    size(map_tot%nhit),    MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split2%div_co,  buffer2%div_co,  size(map_tot%div_co),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split2%dsum_co, buffer2%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(map_split2%nhit_co, buffer2%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  ! Simulations
+  !call mpi_allreduce(map_tot%div_sim,  buffer%div_sim,  size(map_tot%div_sim),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !call mpi_allreduce(map_tot%dsum_sim, buffer%dsum_sim, size(map_tot%dsum_sim), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
 
-!     call mpi_allreduce(n1, nn1, 1, MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-!     call mpi_allreduce(n2, nn2, 1, MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-!  end if
 
   if (myid == 0) then
      map_tot%div  = buffer%div
      map_tot%dsum = buffer%dsum
      map_tot%nhit = buffer%nhit
-     map_tot%rms  = buffer%rms
+
+     ! Co-added over feeds
      map_tot%div_co  = buffer%div_co
      map_tot%dsum_co = buffer%dsum_co
      map_tot%nhit_co = buffer%nhit_co
-     map_tot%rms_co  = buffer%rms_co
      !write(*,*) 'sum', sum(abs(map_tot%dsum)), sum(abs(map_tot%div))
+
+     ! Jackknives
+     map_tot%div_jk  = buffer%div_jk
+     map_tot%dsum_jk = buffer%dsum_jk
+     map_tot%nhit_jk = buffer%nhit_jk
+     map_tot%div_jkco  = buffer%div_jkco
+     map_tot%dsum_jkco = buffer%dsum_jkco
+     map_tot%nhit_jkco = buffer%nhit_jkco
+
+     ! Simulations
+     !map_tot%div_sim  = buffer%div_sim
+     !map_tot%dsum_sim = buffer%dsum_sim
+
+
      write(*,*) "Finalising"
+     ! finalize_jk ???????????
      call finalize_binning(map_tot)
-     do i = 1, 2*jk_info%njk
-        map_jk(i)%div  = buffer_jk(i)%div 
-        map_jk(i)%dsum = buffer_jk(i)%dsum
-        map_jk(i)%nhit = buffer_jk(i)%nhit
-        map_jk(i)%rms  = buffer_jk(i)%rms
-        map_jk(i)%div_co  = buffer_jk(i)%div_co
-        map_jk(i)%dsum_co = buffer_jk(i)%dsum_co
-        map_jk(i)%nhit_co = buffer_jk(i)%nhit_co
-        map_jk(i)%rms_co  = buffer_jk(i)%rms_co
-        call finalize_binning(map_jk(i))
-     end do
-     !write(*,*) maxval(map_tot%m)
+
+     !write(*,*) maxval(map_tot%m), maxval(map_tot%m_jk)
      prefix = trim(pre)//trim(scan%object)
      map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
      call output_map_h5(map_filename, map_tot)
      call free_map_type(map_tot)
-     do i = 1, jk_info%njk
-        map_file1   = trim(prefix)//'_'//trim(jk_info%jk_name(i))//'_0_'//trim(map_name)//'.h5'
-        map_file2   = trim(prefix)//'_'//trim(jk_info%jk_name(i))//'_1_'//trim(map_name)//'.h5'
-        !write(*,*) 'split 1 vs 2:', nn1, nn2
-        call output_map_h5(map_file1, map_jk(2*i-1))
-        call output_map_h5(map_file2, map_jk(2*i))
-        call free_map_type(map_jk(2*i-1))
-        call free_map_type(map_jk(2*i))
-     end do
+
      if (allocated(map_jk)) deallocate(map_jk, buffer_jk)
+
+
   end if
 
   !deallocate(tod)
