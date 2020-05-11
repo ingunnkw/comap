@@ -132,14 +132,14 @@ contains
           hit_name = "jackknives/nhit_" // map%jk_def(i)
           nf = 1; nc = 1
           if (any(map%jk_feed == i)) then
-             call write_hdf(file, trim(map_name),  map%m_jk(:,:,:,:,:,2*i-1:2*i))
-             call write_hdf(file, trim(rms_name),  map%rms_jk(:,:,:,:,:,2*i-1:2*i))
-             call write_hdf(file, trim(hit_name), map%nhit_jk(:,:,:,:,:,2*i-1:2*i))
+             call write_hdf(file, trim(map_name), map%m_jk(:,:,:,:,:,2*nf-1:2*nf))
+             call write_hdf(file, trim(rms_name), map%rms_jk(:,:,:,:,:,2*nf-1:2*nf))
+             call write_hdf(file, trim(hit_name), map%nhit_jk(:,:,:,:,:,2*nf-1:2*nf))
              nf = nf + 1 
           else
-             call write_hdf(file, trim(map_name),  map%m_jkco(:,:,:,:,2*i-1:2*i))
-             call write_hdf(file, trim(rms_name),  map%rms_jkco(:,:,:,:,2*i-1:2*i))
-             call write_hdf(file, trim(hit_name), map%nhit_jkco(:,:,:,:,2*i-1:2*i))
+             call write_hdf(file, trim(map_name), map%m_jkco(:,:,:,:,2*nc-1:2*nc))
+             call write_hdf(file, trim(rms_name), map%rms_jkco(:,:,:,:,2*nc-1:2*nc))
+             call write_hdf(file, trim(hit_name), map%nhit_jkco(:,:,:,:,2*nc-1:2*nc))
              nc = nc + 1
           end if
        end do
