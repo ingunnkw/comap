@@ -409,8 +409,8 @@ contains
     integer(i4b), dimension(:,:),   intent(in) :: jk_list
     integer(i4b), dimension(:,:,:), intent(in) :: jk_split
 
-    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc
-    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, jk
+    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc, freq_new
+    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, jk, split
     real(dp)     :: x_min, x_max, y_min, y_max
     character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:) :: dsum, div
@@ -460,90 +460,44 @@ contains
                 !write(*,*) i, det, sb, freq
                 !if (any(alist%ascans(scan)%adet_sb(det,sb)%rejected == freq)) cycle
                 !write(*,*) tod%rms(i,freq,sb,det)
+                
+
                 ! Flipping sb 1 and 3
-                if ((sb .eq. 1) .or. (sb .eq. 3)) then
-                   map%nhit(p,q,nfreq-freq+1,sb,det)  = map%nhit(p,q,nfreq-freq+1,sb,det)  + 1.0
-                   map%nhit_co(p,q,nfreq-freq+1,sb) = map%nhit_co(p,q,nfreq-freq+1,sb) + 1.0
-                   map%dsum(p,q,nfreq-freq+1,sb,det)  = map%dsum(p,q,nfreq-freq+1,sb,det)  + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div(p,q,nfreq-freq+1,sb,det)   = map%div(p,q,nfreq-freq+1,sb,det)   + 1.0 / tod%rms(freq,sb,j)**2
-                   map%dsum_co(p,q,nfreq-freq+1,sb) = map%dsum_co(p,q,nfreq-freq+1,sb) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div_co(p,q,nfreq-freq+1,sb)  = map%div_co(p,q,nfreq-freq+1,sb)  + 1.0 / tod%rms(freq,sb,j)**2
-
-                   ! Jackknives
-                   do jk = 1, map%njk
-                      nf = 1; nc = 1
-                      if (any(map%jk_feed == jk)) then
-                         if (jk_split(i,sb,det) == 0) then
-                            map%nhit_jk(p,q,nfreq-freq+1,sb,det,2*nf-1) = map%nhit_jk(p,q,nfreq-freq+1,sb,det,2*nf-1) + 1
-                            map%dsum_jk(p,q,nfreq-freq+1,sb,det,2*nf-1) = map%dsum_jk(p,q,nfreq-freq+1,sb,det,2*nf-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jk(p,q,nfreq-freq+1,sb,det,2*nf-1)  = map%div_jk(p,q,nfreq-freq+1,sb,det,2*nf-1)  + 1.0 / tod%rms(freq,sb,j)**2
-                         else
-                            map%nhit_jk(p,q,nfreq-freq+1,sb,det,2*nf) = map%nhit_jk(p,q,nfreq-freq+1,sb,det,2*nf) + 1
-                            map%dsum_jk(p,q,nfreq-freq+1,sb,det,2*nf) = map%dsum_jk(p,q,nfreq-freq+1,sb,det,2*nf) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jk(p,q,nfreq-freq+1,sb,det,2*nf)  = map%div_jk(p,q,nfreq-freq+1,sb,det,2*nf)  + 1.0 / tod%rms(freq,sb,j)**2
-                         end if
-                         nf = nf+1
-                      else
-                         if (jk_split(i,sb,det) == 0) then
-                            map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc-1) = map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc-1) + 1
-                            map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc-1) = map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jkco(p,q,nfreq-freq+1,sb,2*nc-1)  = map%div_jkco(p,q,nfreq-freq+1,sb,2*nc-1)  + 1.0 / tod%rms(freq,sb,j)**2
-                         else
-                            map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc) = map%nhit_jkco(p,q,nfreq-freq+1,sb,2*nc) + 1
-                            map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc) = map%dsum_jkco(p,q,nfreq-freq+1,sb,2*nc) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jkco(p,q,nfreq-freq+1,sb,2*nc)  = map%div_jkco(p,q,nfreq-freq+1,sb,2*nc)  + 1.0 / tod%rms(freq,sb,j)**2
-                         end if
-                         nc = nc+1
-                      end if
-                   end do
-                   
-                   ! Simulations in here
-
-
-                else
-                   map%nhit(p,q,freq,sb,det) = map%nhit(p,q,freq,sb,det) + 1.d0
-                   map%nhit_co(p,q,freq,sb)  = map%nhit_co(p,q,freq,sb)  + 1.d0
-                   map%dsum(p,q,freq,sb,det) = map%dsum(p,q,freq,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div(p,q,freq,sb,det)  = map%div(p,q,freq,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
-                   map%dsum_co(p,q,freq,sb)  = map%dsum_co(p,q,freq,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div_co(p,q,freq,sb)   = map%div_co(p,q,freq,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
-
-                   ! Jackknives
-                   nf = 1; nc = 1
-                   do jk = 1, map%njk
-                      if (any(map%jk_feed == jk)) then
-                         if (jk_split(i,sb,det) == 0) then
-                            map%nhit_jk(p,q,freq,sb,det,2*nf-1) = map%nhit_jk(p,q,freq,sb,det,2*nf-1) + 1
-                            map%dsum_jk(p,q,freq,sb,det,2*nf-1) = map%dsum_jk(p,q,freq,sb,det,2*nf-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jk(p,q,freq,sb,det,2*nf-1)  = map%div_jk(p,q,freq,sb,det,2*nf-1)  + 1.0 / tod%rms(freq,sb,j)**2
-                         else
-                            map%nhit_jk(p,q,freq,sb,det,2*nf) = map%nhit_jk(p,q,freq,sb,det,2*nf) + 1
-                            map%dsum_jk(p,q,freq,sb,det,2*nf) = map%dsum_jk(p,q,freq,sb,det,2*nf) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jk(p,q,freq,sb,det,2*nf)  = map%div_jk(p,q,freq,sb,det,2*nf)  + 1.0 / tod%rms(freq,sb,j)**2
-                         end if
-                         nf = nf+1
-                      else
-                         if (jk_split(i,sb,det) == 0) then
-                            map%nhit_jkco(p,q,freq,sb,2*nc-1) = map%nhit_jkco(p,q,freq,sb,2*nc-1) + 1
-                            map%dsum_jkco(p,q,freq,sb,2*nc-1) = map%dsum_jkco(p,q,freq,sb,2*nc-1) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jkco(p,q,freq,sb,2*nc-1)  = map%div_jkco(p,q,freq,sb,2*nc-1)  + 1.0 / tod%rms(freq,sb,j)**2
-                         else
-                            map%nhit_jkco(p,q,freq,sb,2*nc) = map%nhit_jkco(p,q,freq,sb,2*nc) + 1
-                            map%dsum_jkco(p,q,freq,sb,2*nc) = map%dsum_jkco(p,q,freq,sb,2*nc) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                            map%div_jkco(p,q,freq,sb,2*nc)  = map%div_jkco(p,q,freq,sb,2*nc)  + 1.0 / tod%rms(freq,sb,j)**2
-                         end if
-                         nc = nc+1
-                      end if
-                   end do
+                freq_new = freq
+                if ((sb .eq. 1) .or. (sb .eq. 3)) freq_new = nfreq-freq+1
+                map%nhit(p,q,freq_new,sb,det) = map%nhit(p,q,freq_new,sb,det) + 1.d0
+                map%nhit_co(p,q,freq_new,sb)  = map%nhit_co(p,q,freq_new,sb)  + 1.d0
+                map%dsum(p,q,freq_new,sb,det) = map%dsum(p,q,freq_new,sb,det) + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map%div(p,q,freq_new,sb,det)  = map%div(p,q,freq_new,sb,det)  + 1.d0 / tod%rms(freq,sb,j)**2
+                map%dsum_co(p,q,freq_new,sb)  = map%dsum_co(p,q,freq_new,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map%div_co(p,q,freq_new,sb)   = map%div_co(p,q,freq_new,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
+                
+                ! Jackknives
+                nf = 1; nc = 1
+                do jk = 1, map%njk
+                   if (any(map%jk_feed == jk)) then
+                      !if (jk_split(i,sb,det) == 0) then
+                      split = 2*nf - 1 + jk_split(jk,sb,det)
+                      map%nhit_jk(p,q,freq_new,sb,det,split) = map%nhit_jk(p,q,freq_new,sb,det,split) + 1
+                      map%dsum_jk(p,q,freq_new,sb,det,split) = map%dsum_jk(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                      map%div_jk(p,q,freq_new,sb,det,split)  = map%div_jk(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
+                      nf = nf+1
+                   else
+                      split = 2*nc - 1 + jk_split(jk,sb,det)
+                      map%nhit_jkco(p,q,freq_new,sb,split) = map%nhit_jkco(p,q,freq_new,sb,split) + 1
+                      map%dsum_jkco(p,q,freq_new,sb,split) = map%dsum_jkco(p,q,freq_new,sb,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                      map%div_jkco(p,q,freq_new,sb,split)  = map%div_jkco(p,q,freq_new,sb,split)  + 1.0 / tod%rms(freq,sb,j)**2
+                      nc = nc+1
+                   end if
+                end do
 
                    ! Simulations in here
 
-                end if
              end do
           end do
        end do
     end do
-
+ 
     !map_tot%dsum    = map_tot%dsum + map_scan%dsum
     !map_tot%div     = map_tot%div  + map_scan%div
     !map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co
