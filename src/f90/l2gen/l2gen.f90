@@ -654,6 +654,8 @@ contains
 !    allocate(corr_prod(2 * nfreq-1, 2 * nfreq))
     allocate(subt(nsamp-1), median(nfreq))
     allocate(temp_freqmask(nfreq,nsb,ndet))
+
+    data_l2%diagnostics = 0.d0
     
     means = 0.d0
     vars = 0.d0
@@ -1198,6 +1200,7 @@ contains
     deallocate(dt, dv)
 
     allocate(data_l2%mean_tp(nfreq,nsb,ndet))
+    data_l2%mean_tp = 0.d0
     do i = 1, ndet
        if (.not. is_alive(data_l2%pixels(i))) cycle
        !write(*,*) '    Normalizing gains for det = ', i
@@ -1961,7 +1964,8 @@ contains
 !    close(58)
 !    call mpi_finalize(ierr)
 !    stop
-
+    
+    data_out%nu = 0.d0
     !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight,w)
     !$OMP DO SCHEDULE(guided)    
     do i = 1, nsamp_out

@@ -188,6 +188,7 @@ contains
     !    nsamp = nsamp_tot
     ! end if
     allocate(data%n_nan(nfreq,nsb,ndet))
+    data%n_nan = 0
     ! Update frequency mask with channels that are all NaNs
     do i = 1, ndet
        do j = 1, nsb
