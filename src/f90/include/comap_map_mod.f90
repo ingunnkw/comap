@@ -114,9 +114,9 @@ contains
        call write_hdf(file, "rms",  map%rms)
        call write_hdf(file, "nhit", map%nhit)
        ! Co-added over feeds
-       call write_hdf(file, "map_beam",  map%m_co)
-       call write_hdf(file, "rms_beam",  map%rms_co)
-       call write_hdf(file, "nhit_beam", map%nhit_co)
+       call write_hdf(file, "map_coadd",  map%m_co)
+       call write_hdf(file, "rms_coadd",  map%rms_co)
+       call write_hdf(file, "nhit_coadd", map%nhit_co)
     end if
     if (map%nsim > 0) then
        call write_hdf(file, "map_sim", map%m_sim)
@@ -246,9 +246,9 @@ contains
     call read_hdf(file, "njk",          map%njk)
 
     ! Read co-added over feeds
-    call read_hdf(file, "map_beam", map%m_co)
-    call read_hdf(file, "rms_beam", map%rms_co)
-    call read_hdf(file, "nhit_beam", map%nhit_co)
+    call read_hdf(file, "map_coadd", map%m_co)
+    call read_hdf(file, "rms_coadd", map%rms_co)
+    call read_hdf(file, "nhit_coadd", map%nhit_co)
     
     ! Read jackknives
     if (map%njk > 0) then
