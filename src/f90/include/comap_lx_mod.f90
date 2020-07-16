@@ -491,15 +491,23 @@ contains
     if(allocated(data%el_az_stats))   deallocate(data%el_az_stats)
   end subroutine
 
-  subroutine write_l2_file(scan, k, data)
+  subroutine write_l2_file(scan, k, data, name_append)
     implicit none
     type(comap_scan_info), intent(in) :: scan
     integer(i4b),     intent(in) :: k
+    character(len=*), intent(in), optional :: name_append
     type(lx_struct)              :: data
     type(hdf_file)               :: file, l1_file
     integer(i4b)                 :: n_hk(1), hk_start_ind, hk_end_ind
     real(dp), allocatable, dimension(:) :: hk_buffer
-    call open_hdf_file(scan%ss(k)%l2file, file, "w")
+    !write(*,*) "before all", name_append
+    
+    if (present(name_append)) then 
+       call open_hdf_file(scan%ss(k)%l2file(1:len(trim(scan%ss(k)%l2file))-3)//adjustl(trim(name_append))//adjustl(trim(".h5")), file, "w")
+    else
+       call open_hdf_file(scan%ss(k)%l2file, file, "w")
+    end if
+
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "mjd_start",         data%mjd_start)
     call write_hdf(file, "decimation_time",   data%decimation_time)
@@ -510,6 +518,7 @@ contains
     call write_hdf(file, "point_cel",         data%point_cel)
     call write_hdf(file, "point_tel",         data%point_tel)
     call write_hdf(file, "sb_mean",           data%sb_mean)
+    call write_hdf(file, "tod_mean",          data%tod_mean)
     !call write_hdf(file, "flag",              data%flag)
     !write(*,*) "right before", data%Tsys(1, 1, 1, 1)
     call write_hdf(file, "Tsys",              data%Tsys)
@@ -539,11 +548,14 @@ contains
     end if
     call write_hdf(file, "spike_data",        data%spike_data)
     call write_hdf(file, "mask_outliers",     data%mask_outliers)
+    !write(*,*) "middle", data%mask_outliers
     if (data%mask_outliers == 1) then
+       !write(*,*) data%mask_outliers
        call write_hdf(file, "acceptrate",     data%acceptrate)
        call write_hdf(file, "diagnostics",    data%diagnostics)
        call write_hdf(file, "cut_params",     data%cut_params)
     end if 
+    !write(*,*) "right after", data%Tsys(1, 1, 1, 1)
     
     ! scan-data
     ! call write_hdf(file, "l1file", teststr)
@@ -753,6 +765,11 @@ contains
     if(allocated(lx_in%tod))         then  
        allocate(lx_out%tod(size(lx_in%tod,1),size(lx_in%tod,2),size(lx_in%tod,3),size(lx_in%tod,4)))
        lx_out%tod = lx_in%tod
+    end if
+
+    if(allocated(lx_in%tod_mean))         then  
+       allocate(lx_out%tod_mean(size(lx_in%tod_mean,1),size(lx_in%tod_mean,2),size(lx_in%tod_mean,3)))
+       lx_out%tod_mean = lx_in%tod_mean
     end if
 
     if(allocated(lx_in%sb_mean))         then  

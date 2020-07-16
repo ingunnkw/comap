@@ -18,12 +18,12 @@ program l2gen
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-  logical(lgt)         :: process, is_sim, rem_el, verb
+  logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
   type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter
@@ -55,6 +55,7 @@ program l2gen
   call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
   call get_parameter(unit, parfile, 'REMOVE_ELEVATION_TEMP',     par_lgt=rem_el)
   call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
+  call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -173,10 +174,46 @@ program l2gen
            write(*,*) "Scan type: ", trim(scan%ss(k)%scanmode)
         end if
         
+        ! Write diagnostic l2_file to disc
+        if (diag_l2) then
+           polyorder_store = data_l2_fullres%polyorder
+           n_pca_store     = data_l2_fullres%n_pca_comp
+           data_l2_fullres%polyorder = -1
+           data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%mask_outliers = 0
+        
+           call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+           
+           ! Fit noise
+           call fit_noise(data_l2_decimated)
+           call mkdirs(trim(scan%ss(k)%l2file), .true.)
+           write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_1_before_norm"))
+           call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_1_before_norm")))
+           data_l2_fullres%polyorder = polyorder_store
+           data_l2_fullres%n_pca_comp = n_pca_store
+        end if
+        
         ! Normalize gain
         if (trim(pinfo%type) == 'gal' .or. trim(pinfo%type) == 'cosmo') then
            call normalize_gain(data_l2_fullres, nu_gain, alpha_gain, scan%id)
            call update_status(status, 'gain_norm')
+        end if
+        
+        ! Write diagnostic l2_file to disc
+        if (diag_l2) then
+           polyorder_store = data_l2_fullres%polyorder
+           n_pca_store     = data_l2_fullres%n_pca_comp
+           data_l2_fullres%polyorder = -1
+           data_l2_fullres%n_pca_comp = 0
+
+           call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+           
+           ! Fit noise
+           call fit_noise(data_l2_decimated)
+           write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_2_after_norm"))
+           call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_2_after_norm")))
+           data_l2_fullres%polyorder = polyorder_store
+           data_l2_fullres%n_pca_comp = n_pca_store
         end if
 
         if (rem_el) then
@@ -195,6 +232,24 @@ program l2gen
            call subtract_pointing_templates(data_l2_fullres, scan%ss(k), verb)
            call update_status(status, 'subtract_pointing_templates')
         end if
+        
+        ! Write diagnostic l2_file to disc
+        if (diag_l2) then
+           polyorder_store = data_l2_fullres%polyorder
+           n_pca_store     = data_l2_fullres%n_pca_comp
+           data_l2_fullres%polyorder = -1
+           data_l2_fullres%n_pca_comp = 0
+
+           call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+           
+           ! Fit noise
+           call fit_noise(data_l2_decimated)
+           write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_3_after_template_subtr"))
+           call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_3_after_template_subtr")))
+           data_l2_fullres%polyorder = polyorder_store
+           data_l2_fullres%n_pca_comp = n_pca_store
+        end if
+
         if (verb) then           
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
               write(*,*) "NaN in tod before filtering!", scan%ss(k)%id
@@ -220,6 +275,17 @@ program l2gen
            ! pca filter copied data
            call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter0')
+
+           if (diag_l2) then
+              data_l2_filter%mask_outliers = 0
+              call decimate_L2_data(samprate, numfreq, data_l2_filter, data_l2_decimated)
+              ! write(*,*) "done with decimation"
+              ! Fit noise
+              call fit_noise(data_l2_decimated)
+              write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_4_before_mask"))
+              call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_4_before_mask")))
+              data_l2_filter%mask_outliers = mask_outliers
+           end if
 
            ! flag correlations and variance
            call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
@@ -273,6 +339,21 @@ program l2gen
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
         call polyfilter_TOD(data_l2_fullres, bp_filter)
         call update_status(status, 'polyfilter')
+        
+        
+        ! Write diagnostic l2_file to disc
+        if (diag_l2) then
+           n_pca_store     = data_l2_fullres%n_pca_comp
+           data_l2_fullres%n_pca_comp = 0
+
+           call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+           
+           ! Fit noise
+           call fit_noise(data_l2_decimated)
+           write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_5_after_poly"))
+           call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_5_after_poly")))
+           data_l2_fullres%n_pca_comp = n_pca_store
+        end if
 
         if ((mask_outliers == 0) .and. (bp_filter > -1)) then
            call find_spikes(data_l2_fullres, verb)
@@ -285,7 +366,7 @@ program l2gen
            call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter')
         end if
-
+        
         if (trim(pinfo%type) == 'gal') then
            call copy_lx_struct(data_l2_fullres, data_l2_filter)
            
@@ -296,7 +377,7 @@ program l2gen
         
            call remove_pca_components(data_l2_filter, data_l2_fullres, pca_sig_rem)
         end if
-    
+
         ! Fourier transform frequency direction
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
@@ -1860,6 +1941,9 @@ contains
     call assert(data_out%decimation_nu >= 1, 'Cannot ask for more frequencies than in input files')
 
     nsamp_out = int(size(data_in%time)/data_out%decimation_time)
+
+    if (allocated(data_out%time)) call free_lx_struct(data_out)
+
  
     allocate(data_out%time(nsamp_out))
     allocate(data_out%nu(numfreq_out,nsb,ndet))
@@ -1941,16 +2025,18 @@ contains
     ! Compute variance per frequency channel
     !open(58,file='variance.dat')
 !    open(58,file='freqmask_2036.dat')
+    data_out%tod_mean = 0.d0
     do k = 1, ndet
        if (nsamp_out == 0) cycle
        if (.not. is_alive(data_out%pixels(k))) cycle
        do j = 1, nsb
-          data_out%tod_mean(:,j,k) = data_in%tod_mean(:,j,k)
           do i = 1, size(data_in%nu,1)
              if (data_out%freqmask_full(i,j,k) == 0) then
                 data_out%var_fullres(i,j,k) = 2.8d-5
                 cycle
              end if
+             data_out%tod_mean(i,j,k) = data_in%tod_mean(i,j,k)
+
              !if (.not. all(data_in%tod(:,i,j,k) == data_in%tod(:,i,j,k))) then
              !   write(*,*) "NaN in tod"
              !end if
@@ -2689,7 +2775,8 @@ contains
              x0 = tsys_time(1); x1 = tsys_time(2)
              y0 = data_l1%Tsys(1,k,j,i); y1 = data_l1%Tsys(2,k,j,i)
              interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
-             mean_tod = mean(data_l1%tod(:,k,j,i))  !!!! should be mean over scan, not obsid ???
+             mean_tod = data_l2_fullres%tod_mean(k,j,i)
+!             mean_tod = mean(data_l1%tod(:,k,j,i))  !!!! should be mean over scan, not obsid ???
              if (is_sim) then
                 data_l2_fullres%tod(:,k,j,i)  = sim_tsys * data_l2_fullres%tod(:,k,j,i)
                 !data_l2_fullres%Tsys(1,k,j,i) = sim_tsys
