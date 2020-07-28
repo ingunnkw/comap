@@ -2790,8 +2790,12 @@ contains
                 data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
                 data_l2_fullres%Tsys(1,k,j,i) = tsys
                 data_l2_fullres%Tsys(2,k,j,i) = tsys
+             else if (mean_tod == 0.d0) then
+                tsys = 100.d0
+                data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
+                data_l2_fullres%Tsys(1,k,j,i) = tsys
+                data_l2_fullres%Tsys(2,k,j,i) = tsys
              else
-                mean_tod = mean(data_l1%tod(:,k,j,i))
                 tsys = (t_hot-t_cold)/(interp1d_P_hot/mean_tod-1.d0)
                 data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
                 data_l2_fullres%Tsys(1,k,j,i) = tsys
