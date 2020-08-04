@@ -1885,6 +1885,7 @@ contains
     allocate(data_l2%freqmask_reason(size(data_l1%nu,1,1),nsb,ndet))
     !allocate(data_l2%flag(nsamp_tot))
     allocate(data_l2%Tsys(1,nfreq,nsb,ndet))
+    allocate(data_l2%n_nan(nfreq,nsb,ndet))
 
     ! Merge L1 data
     data_l2%decimation_time = 1
@@ -1900,7 +1901,7 @@ contains
     data_l2%freqmask_full   = data_l1%freqmask_full
     data_l2%freqmask_reason = data_l1%freqmask_reason
     data_l2%Tsys            = 0.d0 !data_l1%Tsys
-
+    data_l2%n_nan           = data_l1%n_nan
     do j = 1, ndet
        if (.not. is_alive(data_l2%pixels(j))) cycle
        do m = 1, nsb
