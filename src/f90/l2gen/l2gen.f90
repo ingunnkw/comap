@@ -2001,7 +2001,7 @@ contains
     data_out%Tsys          = data_in%Tsys
     data_out%sb_mean       = data_in%sb_mean
 !    data_out%spike_data    = data_in%spike_data
-    
+    data_out%n_nan         = data_in%n_nan
     data_out%n_pca_comp    = data_in%n_pca_comp
     if (data_in%n_pca_comp > 0) then
        allocate(data_out%pca_ampl(size(data_in%nu,1),nsb,ndet,size(data_in%pca_ampl,4)))
