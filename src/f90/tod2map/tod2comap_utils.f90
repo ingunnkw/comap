@@ -72,6 +72,7 @@ contains
     tod%sigma0 = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
+    tod%rms    = data%sigma0
     tod%freqmask = data%freqmask
     tod%mean_el = mean(data%point_tel(2,:,1)) ! Mean boresight
     tod%mean_az = mean(data%point_tel(1,:,1)) ! Mean boresight
@@ -93,8 +94,8 @@ contains
              if (nu_cut > 0.0) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
              ! Estimate RMS
-             var = variance(tod%d(2:,j,l,k) - tod%d(:tod%nsamp-1,j,l,k)) /2
-             tod%rms(j,l,k) = sqrt(var)!sqrt(variance(tod%d(:,j,l,k)))
+             !!var = variance(tod%d(2:,j,l,k) - tod%d(:tod%nsamp-1,j,l,k)) /2
+             !!tod%rms(j,l,k) = sqrt(var)!sqrt(variance(tod%d(:,j,l,k)))
           end do
        end do
     end do
@@ -155,6 +156,7 @@ contains
     !tod%g     = data%gain
     tod%feeds  = data%pixels
     tod%sigma0 = data%sigma0
+    tod%rms    = data%sigma0
     tod%fknee  = data%fknee
     tod%alpha  = data%alpha
     tod%freqmask = data%freqmask
