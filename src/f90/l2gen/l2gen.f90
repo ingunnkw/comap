@@ -81,7 +81,7 @@ program l2gen
         if (reprocess .or. .not. exist) process = .true.
      end do
      if (.not. process) then
-        write(*,fmt="(i3,a,2i5,i8)") myid, " skipping already finished obsid:", snum, scan%id
+        write(*,fmt="(i3,a,i8,i8)") myid, " skipping already finished obsid:", snum, scan%id
         cycle
      end if
 
