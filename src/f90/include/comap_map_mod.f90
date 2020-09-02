@@ -126,11 +126,11 @@ contains
        call create_hdf_group(file, "jackknives")
        call write_hdf(file, "jackknives/jk_def",  map%jk_def)
        call write_hdf(file, "jackknives/jk_feedmap",  map%jk_feed)
+       nf = 1; nc = 1
        do i = 1, map%njk
           map_name = "jackknives/map_"  // map%jk_def(i)
           rms_name = "jackknives/rms_"  // map%jk_def(i)
           hit_name = "jackknives/nhit_" // map%jk_def(i)
-          nf = 1; nc = 1
           if (any(map%jk_feed == i)) then
              call write_hdf(file, trim(map_name), map%m_jk(:,:,:,:,:,2*nf-1:2*nf))
              call write_hdf(file, trim(rms_name), map%rms_jk(:,:,:,:,:,2*nf-1:2*nf))
