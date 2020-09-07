@@ -220,12 +220,12 @@ contains
           !if (tod%point_tel(2,i,j) .gt. 65.d0) cycle
           !if (tod%point_tel(1,i,j) .lt. 40.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
-             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
-             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
+             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax) + 1
+             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay) + 1
           else
              !if (i .eq. 1) write(*,*) det, tod%point(1,i,det)
-             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
-             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax) + 1
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay) + 1
              !p = min(max(nint((tod%point(1,i,det)-x_min)/map%dthetax),1),map%n_x)
              !q = min(max(nint((tod%point(2,i,det)-y_min)/map%dthetay),1),map%n_y)
           end if
@@ -444,11 +444,11 @@ contains
           !if (tod%pixel(i,det) .lt. 0) cycle
           !if (tod%point_tel(2,i,det) > 30.d0) cycle
           if (trim(coord_system) .eq. 'horizontal') then
-             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax)
-             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay)
+             p = nint((tod%point_tel(1,i,j)-x_min)/map%dthetax) + 1
+             q = nint((tod%point_tel(2,i,j)-y_min)/map%dthetay) + 1
           else
-             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax)
-             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay)
+             p = nint((tod%point(1,i,j)-pos(1)-x_min)/map%dthetax) + 1
+             q = nint((tod%point(2,i,j)-pos(2)-y_min)/map%dthetay) + 1
           end if
           if ((p .le. 1) .or. (p .ge. map%n_x) .or. (q .le. 1) .or. (q .ge. map%n_y)) cycle ! discard points outside of the set grid
           do sb = 1, nsb
