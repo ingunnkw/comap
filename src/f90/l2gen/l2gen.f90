@@ -367,6 +367,16 @@ program l2gen
            call update_status(status, 'pca_filter')
         end if
         
+        ! Write diagnostic l2_file to disc
+        if (diag_l2) then
+            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+            
+            ! Fit noise
+            call fit_noise(data_l2_decimated)
+            write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_6_after_PCA"))
+            call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_6_after_PCA")))
+         end if
+        
         if (trim(pinfo%type) == 'gal') then
            call copy_lx_struct(data_l2_fullres, data_l2_filter)
            
