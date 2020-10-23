@@ -35,7 +35,7 @@ program tod2comap
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
   character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
-  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, jk_def_file, acc_id, map_file1, map_file2
+  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, jk_def_file, acc_id, map_file1, map_file2, jk_id
   character(len=6)      :: obsid
   character(len=8)      :: scanid
   character(len=5)      :: sim_string
@@ -78,9 +78,11 @@ program tod2comap
   if (use_acc) then 
      call get_parameter(0, parfile, 'ACCEPT_DATA_FOLDER', par_string=acceptfile)
      call get_parameter(0, parfile, 'ACCEPT_DATA_ID_STRING', par_string=acc_id)
+     call get_parameter(0, parfile, 'JK_DATA_STRING', par_string=jk_id)
      call get_parameter(0, parfile, 'JK_DEF_FILE', par_string=jk_def_file)
      if (trim(acc_id) .ne. '') acc_id = '_' // acc_id
-     acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // '_' // trim(object) // '.h5'
+     if (trim(jk_id) .ne. '') jk_id = '_' // jk_id
+     acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // trim(jk_id) // '_' // trim(object) // '.h5'
   end if
 
 
