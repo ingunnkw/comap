@@ -396,12 +396,13 @@ contains
     map%div_jkco  = 0.0
     map%nhit_jkco = 0
 
-    ! Sucsessive splits
+    ! Successive splits
     map%m_sucs    = 0.0
     map%rms_sucs  = 0.0
     map%dsum_sucs = 0.0
     map%div_sucs  = 0.0
     map%nhit_sucs = 0
+
     ! Simulated data
     map%m_sim    = 0.0
     map%rms_sim  = 0.0

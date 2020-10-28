@@ -152,16 +152,16 @@ contains
             & map%dsum_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%div_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
-            & map%m_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%rms_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%dsum_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%div_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%nhit_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
-       map%m_jk    = 0.0; map%m_jkco    = 0.0;  map%m_sucs     = 0.0
-       map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  map%rms_sucs   = 0.0
-       map%nhit_jk = 0;   map%nhit_jkco = 0;    map%nhit_sucs  = 0
-       map%dsum_jk = 0.0; map%dsum_jkco = 0.0;  map%dsum_sucs  = 0.0 
-       map%div_jk  = 0.0; map%div_jkco  = 0.0;  map%div_sucs   = 0.0
+            & map%m_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%rms_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%dsum_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%div_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%nhit_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
+       map%m_jk    = 0.0; map%m_jkco    = 0.0;  map%m_succ     = 0.0
+       map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  map%rms_succ   = 0.0
+       map%nhit_jk = 0;   map%nhit_jkco = 0;    map%nhit_succ  = 0
+       map%dsum_jk = 0.0; map%dsum_jkco = 0.0;  map%dsum_succ  = 0.0 
+       map%div_jk  = 0.0; map%div_jkco  = 0.0;  map%div_succ   = 0.0
     end if
 
     ! Frequency
@@ -497,7 +497,7 @@ contains
                       nc = nc+1
                    end if
                 end do
-                ! Sucsessive splits
+                ! Successive splits
                 split = 0
                 do k = map%nsplit, 1, -1
                    split = split + jk_split(map%njk + k,sb,det) * 2**(k - 1)
