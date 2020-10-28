@@ -133,7 +133,7 @@ contains
     map%nsplit = jk_info%nsplit
 
     if (map%njk > 0) then
-       njkfeed = sum(jk_info%feedmap); allocate(map%jk_feed(njkfeed))
+       njkfeed = sum(jk_info%feedmap(1:map%njk-map%nsplit)); allocate(map%jk_feed(njkfeed))
        n = 1
        do i = 1, map%njk
           if (jk_info%feedmap(i) .eq. 1) then
@@ -152,11 +152,11 @@ contains
             & map%dsum_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%div_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
-            & map%m_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
-            & map%rms_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
-            & map%dsum_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
-            & map%div_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
-            & map%nhit_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit))
+            & map%m_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%rms_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%dsum_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%div_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%nhit_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
        map%m_jk    = 0.0; map%m_jkco    = 0.0;  map%m_sucs     = 0.0
        map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  map%rms_sucs   = 0.0
        map%nhit_jk = 0;   map%nhit_jkco = 0;    map%nhit_sucs  = 0
@@ -416,7 +416,7 @@ contains
     integer(i4b), dimension(:,:),   intent(in) :: jk_list
     integer(i4b), dimension(:,:,:), intent(in) :: jk_split
 
-    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc, freq_new
+    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc, ns, freq_new
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, jk, split
     real(dp)     :: x_min, x_max, y_min, y_max
     character(len=15) :: coord_system, object
@@ -480,12 +480,11 @@ contains
                 map%div_co(p,q,freq_new,sb)   = map%div_co(p,q,freq_new,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
                 
                 ! Jackknives
-                nf = 1; nc = 1
+                nf = 1; nc = 1; ns = 1
                 do jk = 1, map%njk
                    if (any(map%jk_feed == jk)) then
                       !if (jk_split(i,sb,det) == 0) then
                       split = 2*nf - 1 + jk_split(jk,sb,det)
-                      print *, jk_split(jk,sb,det)
                       map%nhit_jk(p,q,freq_new,sb,det,split) = map%nhit_jk(p,q,freq_new,sb,det,split) + 1
                       map%dsum_jk(p,q,freq_new,sb,det,split) = map%dsum_jk(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                       map%div_jk(p,q,freq_new,sb,det,split)  = map%div_jk(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
@@ -498,6 +497,11 @@ contains
                       nc = nc+1
                    end if
                 end do
+                ! Sucsessive splits
+                split = 0
+                do k = map%nsplit, 1, -1
+                   split = split + jk_split(map%njk + k,sb,det) * 2**(k - 1)
+                   print *, split 
 
                    ! Simulations in here
 

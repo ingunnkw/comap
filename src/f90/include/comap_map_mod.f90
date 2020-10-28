@@ -15,7 +15,7 @@ module comap_map_mod
 
      character(len=4), allocatable, dimension(:) :: jk_def !(njk), jack0, jack1
 
-     integer(i4b), allocatable, dimension(:)           :: feeds, jk_feed
+     integer(i4b), allocatable, dimension(:)           :: feeds, jk_feed, sucs_split
      real(dp),     allocatable, dimension(:)           :: x, y, k                               ! (n_x or n_y or n_k)
      real(dp),     allocatable, dimension(:,:)         :: freq                                  ! (nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
@@ -26,7 +26,7 @@ module comap_map_mod
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
      integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_jkco                       ! (n_x, n_y, nfreq, nsb, ndet/2*njk)
      integer(i4b), allocatable, dimension(:,:,:,:)     :: nhit_co                               ! (n_x, n_y, nfreq, nsb)
-     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_suc                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_suc                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk/2**nsplit)
 
   end type map_type
 
@@ -438,10 +438,12 @@ contains
     if (allocated(map%nhit_jkco)) deallocate(map%nhit_jkco)
     if (allocated(map%div_jkco))  deallocate(map%div_jkco)
     if (allocated(map%dsum_jkco)) deallocate(map%dsum_jkco)
-    if (allocated(map%m_sucs))   deallocate(map%m_sucs)
-    if (allocated(map%rms_sucs))   deallocate(map%rms_sucs)
+
+    ! Sucsessive splits
+    if (allocated(map%m_sucs))      deallocate(map%m_sucs)
+    if (allocated(map%rms_sucs))    deallocate(map%rms_sucs)
     if (allocated(map%nhit_sucs))   deallocate(map%nhit_sucs)
-    if (allocated(map%div_sucs))   deallocate(map%div_sucs)
+    if (allocated(map%div_sucs))    deallocate(map%div_sucs)
     if (allocated(map%dsum_sucs))   deallocate(map%dsum_sucs)
     
     ! Simulated data 

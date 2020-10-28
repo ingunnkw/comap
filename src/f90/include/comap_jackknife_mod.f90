@@ -30,7 +30,7 @@ contains
     type(jk_type), intent(inout) :: jk
 
     integer(i4b) :: nfeed, nsb
-
+ 
     nfeed = 20
     nsb = 4
 

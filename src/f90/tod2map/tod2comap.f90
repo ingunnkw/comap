@@ -140,7 +140,7 @@ program tod2comap
   !!      call initialize_mapmaker(buffer_jk(i), parfile, pinfo, jk_info)
   !!   end do
   !!end if
-
+ 
 
   ! This loop currently requiers that all obsIDs are of the same patch
   do i = 1+myid, nscan, nproc 
