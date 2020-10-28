@@ -643,6 +643,13 @@ contains
        map%rms_jkco = 0.0
     end where 
 
+   where(map%div_succ > 0)
+       map%m_succ   = map%dsum_succ / map%div_succ
+       map%rms_succ = 1.0 / sqrt(map%div_succ)
+    elsewhere
+       map%m_succ   = 0.0
+       map%rms_succ = 0.0
+    end where
 
   end subroutine finalize_binning
 
