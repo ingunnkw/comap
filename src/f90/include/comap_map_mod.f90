@@ -7,7 +7,7 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, njk ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, njk, nsplit ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2), center(2)
@@ -21,7 +21,7 @@ module comap_map_mod
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)     :: m_co, rms_co, dsum_co, div_co         ! (n_x, n_y, nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_jk, rms_jk, dsum_jk, div_jk         ! (n_x, n_y, nfreq, nsb, ndet, 2*njk)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sucs, rms_suc, dsum_suc, div_suc    ! (n_x, n_y, nfreq, nsb, ndet, 2**n_split)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sucs, rms_suc, dsum_suc, div_suc    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_jkco, rms_jkco, dsum_jkco, div_jkco ! (n_x, n_y, nfreq, nsb, 2*njk)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
      integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_jkco                       ! (n_x, n_y, nfreq, nsb, ndet/2*njk)
@@ -438,7 +438,12 @@ contains
     if (allocated(map%nhit_jkco)) deallocate(map%nhit_jkco)
     if (allocated(map%div_jkco))  deallocate(map%div_jkco)
     if (allocated(map%dsum_jkco)) deallocate(map%dsum_jkco)
-
+    if (allocated(map%m_sucs))   deallocate(map%m_sucs)
+    if (allocated(map%rms_sucs))   deallocate(map%rms_sucs)
+    if (allocated(map%nhit_sucs))   deallocate(map%nhit_sucs)
+    if (allocated(map%div_sucs))   deallocate(map%div_sucs)
+    if (allocated(map%dsum_sucs))   deallocate(map%dsum_sucs)
+    
     ! Simulated data 
     if (allocated(map%m_sim))    deallocate(map%m_sim)
     if (allocated(map%rms_sim))  deallocate(map%rms_sim) 

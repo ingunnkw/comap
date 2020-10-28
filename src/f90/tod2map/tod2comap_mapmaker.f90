@@ -130,6 +130,8 @@ contains
 
     ! Jackknives
     map%njk = jk_info%njk
+    map%nsplit = jk_info%nsplit
+
     if (map%njk > 0) then
        njkfeed = sum(jk_info%feedmap); allocate(map%jk_feed(njkfeed))
        n = 1
@@ -149,12 +151,17 @@ contains
             & map%rms_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%dsum_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%div_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
-            & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd))
-       map%m_jk    = 0.0; map%m_jkco    = 0.0
-       map%rms_jk  = 0.0; map%rms_jkco  = 0.0
-       map%nhit_jk = 0;   map%nhit_jkco = 0
-       map%dsum_jk = 0.0; map%dsum_jkco = 0.0
-       map%div_jk  = 0.0; map%div_jkco  = 0.0
+            & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
+            & map%m_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
+            & map%rms_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
+            & map%dsum_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
+            & map%div_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit), &
+            & map%nhit_sucs(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**jk_info%nsplit))
+       map%m_jk    = 0.0; map%m_jkco    = 0.0;  map%m_sucs     = 0.0
+       map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  map%rms_sucs   = 0.0
+       map%nhit_jk = 0;   map%nhit_jkco = 0;    map%nhit_sucs  = 0
+       map%dsum_jk = 0.0; map%dsum_jkco = 0.0;  map%dsum_sucs  = 0.0 
+       map%div_jk  = 0.0; map%div_jkco  = 0.0;  map%div_sucs   = 0.0
     end if
 
     ! Frequency
@@ -478,6 +485,7 @@ contains
                    if (any(map%jk_feed == jk)) then
                       !if (jk_split(i,sb,det) == 0) then
                       split = 2*nf - 1 + jk_split(jk,sb,det)
+                      print *, jk_split(jk,sb,det)
                       map%nhit_jk(p,q,freq_new,sb,det,split) = map%nhit_jk(p,q,freq_new,sb,det,split) + 1
                       map%dsum_jk(p,q,freq_new,sb,det,split) = map%dsum_jk(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                       map%div_jk(p,q,freq_new,sb,det,split)  = map%div_jk(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
