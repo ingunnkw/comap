@@ -15,13 +15,13 @@ module comap_map_mod
 
      character(len=4), allocatable, dimension(:) :: jk_def !(njk), jack0, jack1
 
-     integer(i4b), allocatable, dimension(:)           :: feeds, jk_feed, sucs_split
+     integer(i4b), allocatable, dimension(:)           :: feeds, jk_feed, succ_split
      real(dp),     allocatable, dimension(:)           :: x, y, k                               ! (n_x or n_y or n_k)
      real(dp),     allocatable, dimension(:,:)         :: freq                                  ! (nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)     :: m_co, rms_co, dsum_co, div_co         ! (n_x, n_y, nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_jk, rms_jk, dsum_jk, div_jk         ! (n_x, n_y, nfreq, nsb, ndet, 2*njk)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sucs, rms_suc, dsum_suc, div_suc    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_succ, rms_suc, dsum_suc, div_suc    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_jkco, rms_jkco, dsum_jkco, div_jkco ! (n_x, n_y, nfreq, nsb, 2*njk)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
      integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_jkco                       ! (n_x, n_y, nfreq, nsb, ndet/2*njk)
@@ -397,11 +397,11 @@ contains
     map%nhit_jkco = 0
 
     ! Successive splits
-    map%m_sucs    = 0.0
-    map%rms_sucs  = 0.0
-    map%dsum_sucs = 0.0
-    map%div_sucs  = 0.0
-    map%nhit_sucs = 0
+    map%m_succ    = 0.0
+    map%rms_succ  = 0.0
+    map%dsum_succ = 0.0
+    map%div_succ  = 0.0
+    map%nhit_succ = 0
 
     ! Simulated data
     map%m_sim    = 0.0
@@ -446,12 +446,12 @@ contains
     if (allocated(map%div_jkco))  deallocate(map%div_jkco)
     if (allocated(map%dsum_jkco)) deallocate(map%dsum_jkco)
 
-    ! Sucsessive splits
-    if (allocated(map%m_sucs))      deallocate(map%m_sucs)
-    if (allocated(map%rms_sucs))    deallocate(map%rms_sucs)
-    if (allocated(map%nhit_sucs))   deallocate(map%nhit_sucs)
-    if (allocated(map%div_sucs))    deallocate(map%div_sucs)
-    if (allocated(map%dsum_sucs))   deallocate(map%dsum_sucs)
+    ! successive splits
+    if (allocated(map%m_succ))      deallocate(map%m_succ)
+    if (allocated(map%rms_succ))    deallocate(map%rms_succ)
+    if (allocated(map%nhit_succ))   deallocate(map%nhit_succ)
+    if (allocated(map%div_succ))    deallocate(map%div_succ)
+    if (allocated(map%dsum_succ))   deallocate(map%dsum_succ)
     
     ! Simulated data 
     if (allocated(map%m_sim))    deallocate(map%m_sim)
