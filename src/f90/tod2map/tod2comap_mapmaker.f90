@@ -498,10 +498,10 @@ contains
                    end if
                 end do
                 ! Successive splits
-                split = 0
-                do k = map%nsplit, 1, -1
-                   split = split + jk_split(map%njk + k,sb,det) * 2**(k - 1)
-                   print *, split 
+                !split = 0
+                !do k = map%nsplit, 1, -1
+                !   split = split + jk_split(map%njk + k,sb,det) * 2**(k - 1)
+                !   print *, split 
 
                    ! Simulations in here
 

@@ -21,12 +21,12 @@ module comap_map_mod
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)     :: m_co, rms_co, dsum_co, div_co         ! (n_x, n_y, nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_jk, rms_jk, dsum_jk, div_jk         ! (n_x, n_y, nfreq, nsb, ndet, 2*njk)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_succ, rms_suc, dsum_suc, div_suc    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_succ, rms_succ, dsum_succ, div_succ    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_jkco, rms_jkco, dsum_jkco, div_jkco ! (n_x, n_y, nfreq, nsb, 2*njk)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
      integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_jkco                       ! (n_x, n_y, nfreq, nsb, ndet/2*njk)
      integer(i4b), allocatable, dimension(:,:,:,:)     :: nhit_co                               ! (n_x, n_y, nfreq, nsb)
-     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_suc                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk/2**nsplit)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_succ                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk/2**nsplit)
 
   end type map_type
 
