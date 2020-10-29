@@ -102,7 +102,7 @@ contains
     !stop
 
     allocate(jk%split(jk%njk, nsb, nfeed, jk%nscans))
-
+    
     ! Define jackknife splitting
     do j = 1, jk%nscans
         do feed = 1, nfeed
@@ -119,6 +119,8 @@ contains
            end do
         end do
      end do
+     !jk%njk = jk%njk - jk%nsplit 
+
      !write(*,*) jk%split
   end subroutine read_acceptlist
 

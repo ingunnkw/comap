@@ -151,19 +151,26 @@ contains
             & map%rms_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%dsum_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%div_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
-            & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
-            & map%m_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd))
+       map%m_jk    = 0.0; map%m_jkco    = 0.0;  
+       map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  
+       map%nhit_jk = 0;   map%nhit_jkco = 0;          
+       map%dsum_jk = 0.0; map%dsum_jkco = 0.0;   
+       map%div_jk  = 0.0; map%div_jkco  = 0.0;  
+    end if
+
+    if (map%nsplit > 0) then
+       allocate(map%m_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
             & map%rms_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
             & map%dsum_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
             & map%div_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
             & map%nhit_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
-       map%m_jk    = 0.0; map%m_jkco    = 0.0;  map%m_succ     = 0.0
-       map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  map%rms_succ   = 0.0
-       map%nhit_jk = 0;   map%nhit_jkco = 0;    map%nhit_succ  = 0
-       map%dsum_jk = 0.0; map%dsum_jkco = 0.0;  map%dsum_succ  = 0.0 
-       map%div_jk  = 0.0; map%div_jkco  = 0.0;  map%div_succ   = 0.0
+       map%m_succ     = 0.0
+       map%rms_succ   = 0.0
+       map%nhit_succ  = 0
+       map%dsum_succ  = 0.0
+       map%div_succ   = 0.0
     end if
-
     ! Frequency
     d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
     do i = 1, map%nsb
@@ -443,7 +450,6 @@ contains
 
     !fs = 200 ! starting point
     !st = tod(scan)%nsamp - 200 ! ending point
-
     do i = 1, tod%nsamp
        do j = 1, ndet
           det = tod%feeds(j)
@@ -498,12 +504,19 @@ contains
                    end if
                 end do
                 ! Successive splits
-                !split = 0
-                !do k = map%nsplit, 1, -1
-                !   split = split + jk_split(map%njk + k,sb,det) * 2**(k - 1)
-                !   print *, split 
+                
+
+                split = 0
+                do k = map%nsplit - 1, 0, -1
+                   split = split +  jk_split(map%njk - k,sb,det) * 2**k
 
                    ! Simulations in here
+                end do
+                map%nhit_succ(p,q,freq_new,sb,det,split) = map%nhit_succ(p,q,freq_new,sb,det,split) + 1
+                map%dsum_succ(p,q,freq_new,sb,det,split) = map%dsum_succ(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                map%div_succ(p,q,freq_new,sb,det,split)  = map%div_succ(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
+
+                !print *, split, size(jk_split(:, sb, det))
 
              end do
           end do

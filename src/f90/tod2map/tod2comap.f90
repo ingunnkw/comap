@@ -48,7 +48,7 @@ program tod2comap
 
   type(planck_rng)      :: rng_handle
   integer(i4b)          :: seed
-
+ 
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
