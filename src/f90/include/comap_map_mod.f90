@@ -65,6 +65,14 @@ contains
        map2%rms_jkco  = map1%rms_jkco
        map2%nhit_jkco = map1%nhit_jkco
     end if
+    
+    if (allocated(map1%m_succ)) then
+       map2%m_succ    = map1%m_succ
+       map2%rms_succ  = map1%rms_succ
+       map2%nhit_succ = map1%nhit_succ
+    end if
+
+
     map2%nsim   = map1%nsim
     if (allocated(map1%m_sim)) then
        map2%m_sim   = map1%m_sim
@@ -89,7 +97,7 @@ contains
     integer(i4b), optional :: det, sb
     integer(i4b)       :: i, nf, nc
     
-    character(len=120) :: map_name, rms_name, hit_name 
+    character(len=120) :: map_name, rms_name, hit_name  
     type(hdf_file)     :: file
     
     call open_hdf_file(trim(filename), file, "w")
@@ -144,6 +152,12 @@ contains
              nc = nc + 1
           end if
        end do
+
+       if (map%nsplit > 0) then
+          call write_hdf(file, "jackknives/map_succ", map%m_succ)
+          call write_hdf(file, "jackknives/rms_succ", map%rms_succ)
+          call write_hdf(file, "jackknives/nhit_succ", map%nhit_succ)
+       end if
     end if
 
     call close_hdf_file(file)
