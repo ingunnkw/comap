@@ -459,13 +459,14 @@ contains
     if (allocated(map%nhit_jkco)) deallocate(map%nhit_jkco)
     if (allocated(map%div_jkco))  deallocate(map%div_jkco)
     if (allocated(map%dsum_jkco)) deallocate(map%dsum_jkco)
-
+    
     ! successive splits
     if (allocated(map%m_succ))      deallocate(map%m_succ)
     if (allocated(map%rms_succ))    deallocate(map%rms_succ)
     if (allocated(map%nhit_succ))   deallocate(map%nhit_succ)
     if (allocated(map%div_succ))    deallocate(map%div_succ)
     if (allocated(map%dsum_succ))   deallocate(map%dsum_succ)
+    
     
     ! Simulated data 
     if (allocated(map%m_sim))    deallocate(map%m_sim)

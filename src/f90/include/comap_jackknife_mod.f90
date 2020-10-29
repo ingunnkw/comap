@@ -119,7 +119,7 @@ contains
            end do
         end do
      end do
-     !jk%njk = jk%njk - jk%nsplit 
+     jk%njk = jk%njk - jk%nsplit 
 
      !write(*,*) jk%split
   end subroutine read_acceptlist

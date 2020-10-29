@@ -133,7 +133,7 @@ contains
     map%nsplit = jk_info%nsplit
 
     if (map%njk > 0) then
-       njkfeed = sum(jk_info%feedmap(1:map%njk-map%nsplit)); allocate(map%jk_feed(njkfeed))
+       njkfeed = sum(jk_info%feedmap(1:map%njk)); allocate(map%jk_feed(njkfeed))
        n = 1
        do i = 1, map%njk
           if (jk_info%feedmap(i) .eq. 1) then
@@ -505,18 +505,17 @@ contains
                 end do
                 ! Successive splits
                 
+                if (map%nsplit > 0) then
+                   split = 0
+                   do k = 1, map%nsplit
+                      split = split +  jk_split(map%njk + k,sb,det) * 2**(k - 1)
 
-                split = 0
-                do k = map%nsplit - 1, 0, -1
-                   split = split +  jk_split(map%njk - k,sb,det) * 2**k
-
-                   ! Simulations in here
-                end do
-                map%nhit_succ(p,q,freq_new,sb,det,split) = map%nhit_succ(p,q,freq_new,sb,det,split) + 1
-                map%dsum_succ(p,q,freq_new,sb,det,split) = map%dsum_succ(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                map%div_succ(p,q,freq_new,sb,det,split)  = map%div_succ(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
-
-                !print *, split, size(jk_split(:, sb, det))
+                      ! Simulations in here
+                   end do
+                   map%nhit_succ(p,q,freq_new,sb,det,split) = map%nhit_succ(p,q,freq_new,sb,det,split) + 1
+                   map%dsum_succ(p,q,freq_new,sb,det,split) = map%dsum_succ(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_succ(p,q,freq_new,sb,det,split)  = map%div_succ(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
+                end if
 
              end do
           end do
