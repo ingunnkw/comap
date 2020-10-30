@@ -13,11 +13,11 @@ module comap_jackknife_mod
   !end interface
 
   type jk_type
-     integer(i4b) :: nscans, njk, n_feed, n_coadd
-     character(len=4),   allocatable, dimension(:)       :: jk_name              ! (njk)
-     integer(i4b),       allocatable, dimension(:)       :: scan_list, feedmap   ! (nscans) / (njk)
-     integer(i4b),       allocatable, dimension(:,:,:,:) :: split                ! (njk,nsb,nfeed,nscans)
-     integer(i4b),       allocatable, dimension(:,:,:)   :: jk_list, accept_list ! (nsb,nfeed,nscans)
+     integer(i4b) :: nscans, njk, n_feed, n_coadd, nsplit
+     character(len=4),   allocatable, dimension(:)       :: jk_name                 ! (njk)
+     integer(i4b),       allocatable, dimension(:)       :: scan_list, feedmap      ! (nscans) / (njk)
+     integer(i4b),       allocatable, dimension(:,:,:,:) :: split                   ! (njk,nsb,nfeed,nscans)
+     integer(i4b),       allocatable, dimension(:,:,:)   :: jk_list, accept_list    ! (nsb,nfeed,nscans)
   end type jk_type
 
   character(len=512) :: acceptlist, jk_definition
@@ -30,7 +30,7 @@ contains
     type(jk_type), intent(inout) :: jk
 
     integer(i4b) :: nfeed, nsb
-
+ 
     nfeed = 20
     nsb = 4
 
@@ -59,7 +59,7 @@ contains
 
     type(hdf_file)     :: h5file
     character(len=512) :: line
-    integer(i4b)       :: i, j, feed, sb, num, nfeed, nsb, temp, ext(3), unit, feedmap 
+    integer(i4b)       :: i, j, feed, sb, num, nfeed, nsb, temp, ext(3), unit, feedmap
     
     call free_jk_type(jk)
     
@@ -79,7 +79,7 @@ contains
     call close_hdf_file(h5file)
 
     ! Read jackknife definition file
-    jk%n_feed = 0; jk%n_coadd = 0
+    jk%n_feed = 0; jk%n_coadd = 0; jk%nsplit = 0
     unit = getlun()
     open(unit, file=jk_definition, action="read",status="old")
     read(unit,*) num
@@ -91,6 +91,8 @@ contains
        !jk%jk_name(i-1) = line(1:4)
        if (jk%feedmap(i-1) == 0) then
           jk%n_coadd = jk%n_coadd + 1
+       else if (jk%feedmap(i-1) == 2) then
+          jk%nsplit = jk%nsplit + 1
        else
           jk%n_feed = jk%n_feed + 1
        end if
@@ -100,7 +102,7 @@ contains
     !stop
 
     allocate(jk%split(jk%njk, nsb, nfeed, jk%nscans))
-
+    
     ! Define jackknife splitting
     do j = 1, jk%nscans
         do feed = 1, nfeed
@@ -117,6 +119,8 @@ contains
            end do
         end do
      end do
+     jk%njk = jk%njk - jk%nsplit 
+
      !write(*,*) jk%split
   end subroutine read_acceptlist
 

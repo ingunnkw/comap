@@ -48,7 +48,7 @@ program tod2comap
 
   type(planck_rng)      :: rng_handle
   integer(i4b)          :: seed
-
+ 
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
@@ -142,7 +142,7 @@ program tod2comap
   !!      call initialize_mapmaker(buffer_jk(i), parfile, pinfo, jk_info)
   !!   end do
   !!end if
-
+ 
 
   ! This loop currently requiers that all obsIDs are of the same patch
   do i = 1+myid, nscan, nproc 
@@ -216,6 +216,9 @@ program tod2comap
            map_obs%dsum_jkco = map_obs%dsum_jkco + map_scan%dsum_jkco 
            map_obs%div_jkco  = map_obs%div_jkco  + map_scan%div_jkco
            map_obs%nhit_jkco = map_obs%nhit_jkco + map_scan%nhit_jkco
+           map_obs%dsum_split = map_obs%dsum_split + map_scan%dsum_split 
+           map_obs%div_split  = map_obs%div_split  + map_scan%div_split
+           map_obs%nhit_split = map_obs%nhit_split + map_scan%nhit_split
         end if
 
         ! Add to total map
@@ -231,7 +234,9 @@ program tod2comap
         map_tot%dsum_jkco = map_tot%dsum_jkco + map_scan%dsum_jkco
         map_tot%div_jkco  = map_tot%div_jkco  + map_scan%div_jkco
         map_tot%nhit_jkco = map_tot%nhit_jkco + map_scan%nhit_jkco
-
+        map_tot%dsum_split = map_tot%dsum_split + map_scan%dsum_split
+        map_tot%div_split  = map_tot%div_split  + map_scan%div_split
+        map_tot%nhit_split = map_tot%nhit_split + map_scan%nhit_split
         !if (use_acc) then
         !   ! Add to jackknives
         !   do k = 1, jk_info%njk
@@ -325,6 +330,10 @@ program tod2comap
   call mpi_allreduce(map_tot%div_jkco,  buffer%div_jkco,  size(map_tot%div_jkco),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum_jkco, buffer%dsum_jkco, size(map_tot%dsum_jkco), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_jkco, buffer%nhit_jkco, size(map_tot%nhit_jkco), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%div_split,  buffer%div_split,  size(map_tot%div_split),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum_split, buffer%dsum_split, size(map_tot%dsum_split), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit_split, buffer%nhit_split, size(map_tot%nhit_split), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+
   !!do i = 1, 2*jk_info%njk
   !!   call mpi_allreduce(map_jk(i)%div,     buffer_jk(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   !!   call mpi_allreduce(map_jk(i)%dsum,    buffer_jk(i)%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
@@ -357,6 +366,9 @@ program tod2comap
      map_tot%div_jkco  = buffer%div_jkco
      map_tot%dsum_jkco = buffer%dsum_jkco
      map_tot%nhit_jkco = buffer%nhit_jkco
+     map_tot%div_split  = buffer%div_split
+     map_tot%dsum_split = buffer%dsum_split
+     map_tot%nhit_split = buffer%nhit_split
 
      ! Simulations
      !map_tot%div_sim  = buffer%div_sim

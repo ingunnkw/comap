@@ -130,8 +130,10 @@ contains
 
     ! Jackknives
     map%njk = jk_info%njk
+    map%nsplit = jk_info%nsplit
+
     if (map%njk > 0) then
-       njkfeed = sum(jk_info%feedmap); allocate(map%jk_feed(njkfeed))
+       njkfeed = sum(jk_info%feedmap(1:map%njk)); allocate(map%jk_feed(njkfeed))
        n = 1
        do i = 1, map%njk
           if (jk_info%feedmap(i) .eq. 1) then
@@ -150,13 +152,25 @@ contains
             & map%dsum_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%div_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd), &
             & map%nhit_jkco(map%n_x, map%n_y, map%nfreq, map%nsb, 2*jk_info%n_coadd))
-       map%m_jk    = 0.0; map%m_jkco    = 0.0
-       map%rms_jk  = 0.0; map%rms_jkco  = 0.0
-       map%nhit_jk = 0;   map%nhit_jkco = 0
-       map%dsum_jk = 0.0; map%dsum_jkco = 0.0
-       map%div_jk  = 0.0; map%div_jkco  = 0.0
+       map%m_jk    = 0.0; map%m_jkco    = 0.0;  
+       map%rms_jk  = 0.0; map%rms_jkco  = 0.0;  
+       map%nhit_jk = 0;   map%nhit_jkco = 0;          
+       map%dsum_jk = 0.0; map%dsum_jkco = 0.0;   
+       map%div_jk  = 0.0; map%div_jkco  = 0.0;  
     end if
 
+    if (map%nsplit > 0) then
+       allocate(map%m_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%rms_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%dsum_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%div_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%nhit_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
+       map%m_split     = 0.0
+       map%rms_split   = 0.0
+       map%nhit_split  = 0
+       map%dsum_split  = 0.0
+       map%div_split   = 0.0
+    end if
     ! Frequency
     d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
     do i = 1, map%nsb
@@ -409,7 +423,7 @@ contains
     integer(i4b), dimension(:,:),   intent(in) :: jk_list
     integer(i4b), dimension(:,:,:), intent(in) :: jk_split
 
-    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc, freq_new
+    integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc, ns, freq_new
     integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, jk, split
     real(dp)     :: x_min, x_max, y_min, y_max
     character(len=15) :: coord_system, object
@@ -436,7 +450,6 @@ contains
 
     !fs = 200 ! starting point
     !st = tod(scan)%nsamp - 200 ! ending point
-
     do i = 1, tod%nsamp
        do j = 1, ndet
           det = tod%feeds(j)
@@ -473,7 +486,7 @@ contains
                 map%div_co(p,q,freq_new,sb)   = map%div_co(p,q,freq_new,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
                 
                 ! Jackknives
-                nf = 1; nc = 1
+                nf = 1; nc = 1; ns = 1
                 do jk = 1, map%njk
                    if (any(map%jk_feed == jk)) then
                       !if (jk_split(i,sb,det) == 0) then
@@ -490,8 +503,19 @@ contains
                       nc = nc+1
                    end if
                 end do
+                ! Successive splits
+                
+                if (map%nsplit > 0) then
+                   split = 1
+                   do k = 1, map%nsplit
+                      split = split +  jk_split(map%njk + k,sb,det) * 2**(k - 1)
 
-                   ! Simulations in here
+                      ! Simulations in here
+                   end do
+                   map%nhit_split(p,q,freq_new,sb,det,split) = map%nhit_split(p,q,freq_new,sb,det,split) + 1
+                   map%dsum_split(p,q,freq_new,sb,det,split) = map%dsum_split(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_split(p,q,freq_new,sb,det,split)  = map%div_split(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
+                end if
 
              end do
           end do
@@ -631,6 +655,13 @@ contains
        map%rms_jkco = 0.0
     end where 
 
+   where(map%div_split > 0)
+       map%m_split   = map%dsum_split / map%div_split
+       map%rms_split = 1.0 / sqrt(map%div_split)
+    elsewhere
+       map%m_split   = 0.0
+       map%rms_split = 0.0
+    end where
 
   end subroutine finalize_binning
 
