@@ -160,16 +160,16 @@ contains
     end if
 
     if (map%nsplit > 0) then
-       allocate(map%m_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%rms_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%dsum_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%div_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%nhit_succ(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
-       map%m_succ     = 0.0
-       map%rms_succ   = 0.0
-       map%nhit_succ  = 0
-       map%dsum_succ  = 0.0
-       map%div_succ   = 0.0
+       allocate(map%m_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%rms_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%dsum_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%div_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
+            & map%nhit_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
+       map%m_split     = 0.0
+       map%rms_split   = 0.0
+       map%nhit_split  = 0
+       map%dsum_split  = 0.0
+       map%div_split   = 0.0
     end if
     ! Frequency
     d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
@@ -506,15 +506,15 @@ contains
                 ! Successive splits
                 
                 if (map%nsplit > 0) then
-                   split = 0
+                   split = 1
                    do k = 1, map%nsplit
                       split = split +  jk_split(map%njk + k,sb,det) * 2**(k - 1)
 
                       ! Simulations in here
                    end do
-                   map%nhit_succ(p,q,freq_new,sb,det,split) = map%nhit_succ(p,q,freq_new,sb,det,split) + 1
-                   map%dsum_succ(p,q,freq_new,sb,det,split) = map%dsum_succ(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div_succ(p,q,freq_new,sb,det,split)  = map%div_succ(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
+                   map%nhit_split(p,q,freq_new,sb,det,split) = map%nhit_split(p,q,freq_new,sb,det,split) + 1
+                   map%dsum_split(p,q,freq_new,sb,det,split) = map%dsum_split(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_split(p,q,freq_new,sb,det,split)  = map%div_split(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
                 end if
 
              end do
@@ -655,12 +655,12 @@ contains
        map%rms_jkco = 0.0
     end where 
 
-   where(map%div_succ > 0)
-       map%m_succ   = map%dsum_succ / map%div_succ
-       map%rms_succ = 1.0 / sqrt(map%div_succ)
+   where(map%div_split > 0)
+       map%m_split   = map%dsum_split / map%div_split
+       map%rms_split = 1.0 / sqrt(map%div_split)
     elsewhere
-       map%m_succ   = 0.0
-       map%rms_succ = 0.0
+       map%m_split   = 0.0
+       map%rms_split = 0.0
     end where
 
   end subroutine finalize_binning
