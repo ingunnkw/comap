@@ -153,11 +153,11 @@ contains
           end if
        end do
 
-       if (map%nmultisplit > 0) then
-          call write_hdf(file, "splits/map_split", map%m_multisplit)
-          call write_hdf(file, "splits/rms_split", map%rms_multisplit)
-          call write_hdf(file, "splits/nhit_split", map%nhit_multisplit)
-       end if
+    end if
+    if (map%nmultisplit > 0) then
+       call write_hdf(file, "splits/map_split", map%m_multisplit)
+       call write_hdf(file, "splits/rms_split", map%rms_multisplit)
+       call write_hdf(file, "splits/nhit_split", map%nhit_multisplit)
     end if
 
     call close_hdf_file(file)
