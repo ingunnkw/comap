@@ -7,7 +7,7 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, njk, nsplit ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, njk, nmultisplit ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2), center(2)
@@ -21,12 +21,12 @@ module comap_map_mod
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)     :: m_co, rms_co, dsum_co, div_co         ! (n_x, n_y, nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_jk, rms_jk, dsum_jk, div_jk         ! (n_x, n_y, nfreq, nsb, ndet, 2*njk)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_split, rms_split, dsum_split, div_split    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_multisplit, rms_multisplit, dsum_multisplit, div_multisplit    ! (n_x, n_y, nfreq, nsb, ndet, 2**nmultisplit)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_jkco, rms_jkco, dsum_jkco, div_jkco ! (n_x, n_y, nfreq, nsb, 2*njk)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
      integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_jkco                       ! (n_x, n_y, nfreq, nsb, ndet/2*njk)
      integer(i4b), allocatable, dimension(:,:,:,:)     :: nhit_co                               ! (n_x, n_y, nfreq, nsb)
-     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_split                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk/2**nsplit)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_multisplit                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk/2**nmultisplit)
 
   end type map_type
 
@@ -66,10 +66,10 @@ contains
        map2%nhit_jkco = map1%nhit_jkco
     end if
     
-    if (allocated(map1%m_split)) then
-       map2%m_split    = map1%m_split
-       map2%rms_split  = map1%rms_split
-       map2%nhit_split = map1%nhit_split
+    if (allocated(map1%m_multisplit)) then
+       map2%m_multisplit    = map1%m_multisplit
+       map2%rms_multisplit  = map1%rms_multisplit
+       map2%nhit_multisplit = map1%nhit_multisplit
     end if
 
 
@@ -153,10 +153,10 @@ contains
           end if
        end do
 
-       if (map%nsplit > 0) then
-          call write_hdf(file, "jackknives/map_split", map%m_split)
-          call write_hdf(file, "jackknives/rms_split", map%rms_split)
-          call write_hdf(file, "jackknives/nhit_split", map%nhit_split)
+       if (map%nmultisplit > 0) then
+          call write_hdf(file, "jackknives/map_split", map%m_multisplit)
+          call write_hdf(file, "jackknives/rms_split", map%rms_multisplit)
+          call write_hdf(file, "jackknives/nhit_split", map%nhit_multisplit)
        end if
     end if
 
@@ -411,11 +411,11 @@ contains
     map%nhit_jkco = 0
 
     ! Successive splits
-    map%m_split    = 0.0
-    map%rms_split  = 0.0
-    map%dsum_split = 0.0
-    map%div_split  = 0.0
-    map%nhit_split = 0
+    map%m_multisplit    = 0.0
+    map%rms_multisplit  = 0.0
+    map%dsum_multisplit = 0.0
+    map%div_multisplit  = 0.0
+    map%nhit_multisplit = 0
 
     ! Simulated data
     map%m_sim    = 0.0
@@ -461,11 +461,11 @@ contains
     if (allocated(map%dsum_jkco)) deallocate(map%dsum_jkco)
     
     ! successive splits
-    if (allocated(map%m_split))      deallocate(map%m_split)
-    if (allocated(map%rms_split))    deallocate(map%rms_split)
-    if (allocated(map%nhit_split))   deallocate(map%nhit_split)
-    if (allocated(map%div_split))    deallocate(map%div_split)
-    if (allocated(map%dsum_split))   deallocate(map%dsum_split)
+    if (allocated(map%m_multisplit))      deallocate(map%m_multisplit)
+    if (allocated(map%rms_multisplit))    deallocate(map%rms_multisplit)
+    if (allocated(map%nhit_multisplit))   deallocate(map%nhit_multisplit)
+    if (allocated(map%div_multisplit))    deallocate(map%div_multisplit)
+    if (allocated(map%dsum_multisplit))   deallocate(map%dsum_multisplit)
     
     
     ! Simulated data 

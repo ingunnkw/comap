@@ -13,7 +13,7 @@ module comap_jackknife_mod
   !end interface
 
   type jk_type
-     integer(i4b) :: nscans, njk, n_feed, n_coadd, nsplit
+     integer(i4b) :: nscans, njk, n_feed, n_coadd, nmultisplit
      character(len=4),   allocatable, dimension(:)       :: jk_name                 ! (njk)
      integer(i4b),       allocatable, dimension(:)       :: scan_list, feedmap      ! (nscans) / (njk)
      integer(i4b),       allocatable, dimension(:,:,:,:) :: split                   ! (njk,nsb,nfeed,nscans)
@@ -79,7 +79,7 @@ contains
     call close_hdf_file(h5file)
 
     ! Read jackknife definition file
-    jk%n_feed = 0; jk%n_coadd = 0; jk%nsplit = 0
+    jk%n_feed = 0; jk%n_coadd = 0; jk%nmultisplit = 0
     unit = getlun()
     open(unit, file=jk_definition, action="read",status="old")
     read(unit,*) num
@@ -92,7 +92,7 @@ contains
        if (jk%feedmap(i-1) == 0) then
           jk%n_coadd = jk%n_coadd + 1
        else if (jk%feedmap(i-1) == 2) then
-          jk%nsplit = jk%nsplit + 1
+          jk%nmultisplit = jk%nmultisplit + 1
        else
           jk%n_feed = jk%n_feed + 1
        end if
@@ -119,7 +119,7 @@ contains
            end do
         end do
      end do
-     jk%njk = jk%njk - jk%nsplit 
+     jk%njk = jk%njk - jk%nmultisplit 
 
      !write(*,*) jk%split
   end subroutine read_acceptlist

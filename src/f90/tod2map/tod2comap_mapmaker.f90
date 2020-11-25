@@ -130,7 +130,7 @@ contains
 
     ! Jackknives
     map%njk = jk_info%njk
-    map%nsplit = jk_info%nsplit
+    map%nmultisplit = jk_info%nmultisplit
 
     if (map%njk > 0) then
        njkfeed = sum(jk_info%feedmap(1:map%njk)); allocate(map%jk_feed(njkfeed))
@@ -159,17 +159,17 @@ contains
        map%div_jk  = 0.0; map%div_jkco  = 0.0;  
     end if
 
-    if (map%nsplit > 0) then
-       allocate(map%m_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%rms_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%dsum_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%div_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit), &
-            & map%nhit_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nsplit))
-       map%m_split     = 0.0
-       map%rms_split   = 0.0
-       map%nhit_split  = 0
-       map%dsum_split  = 0.0
-       map%div_split   = 0.0
+    if (map%nmultisplit > 0) then
+       allocate(map%m_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
+            & map%rms_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
+            & map%dsum_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
+            & map%div_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
+            & map%nhit_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit))
+       map%m_multisplit     = 0.0
+       map%rms_multisplit   = 0.0
+       map%nhit_multisplit  = 0
+       map%dsum_multisplit  = 0.0
+       map%div_multisplit   = 0.0
     end if
     ! Frequency
     d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
@@ -505,16 +505,16 @@ contains
                 end do
                 ! Successive splits
                 
-                if (map%nsplit > 0) then
+                if (map%nmultisplit > 0) then
                    split = 1
-                   do k = 1, map%nsplit
+                   do k = 1, map%nmultisplit
                       split = split +  jk_split(map%njk + k,sb,det) * 2**(k - 1)
 
                       ! Simulations in here
                    end do
-                   map%nhit_split(p,q,freq_new,sb,det,split) = map%nhit_split(p,q,freq_new,sb,det,split) + 1
-                   map%dsum_split(p,q,freq_new,sb,det,split) = map%dsum_split(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div_split(p,q,freq_new,sb,det,split)  = map%div_split(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
+                   map%nhit_multisplit(p,q,freq_new,sb,det,split) = map%nhit_multisplit(p,q,freq_new,sb,det,split) + 1
+                   map%dsum_multisplit(p,q,freq_new,sb,det,split) = map%dsum_multisplit(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
+                   map%div_multisplit(p,q,freq_new,sb,det,split)  = map%div_multisplit(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
                 end if
 
              end do
@@ -655,12 +655,12 @@ contains
        map%rms_jkco = 0.0
     end where 
 
-   where(map%div_split > 0)
-       map%m_split   = map%dsum_split / map%div_split
-       map%rms_split = 1.0 / sqrt(map%div_split)
+   where(map%div_multisplit > 0)
+       map%m_multisplit   = map%dsum_multisplit / map%div_multisplit
+       map%rms_multisplit = 1.0 / sqrt(map%div_multisplit)
     elsewhere
-       map%m_split   = 0.0
-       map%rms_split = 0.0
+       map%m_multisplit   = 0.0
+       map%rms_multisplit = 0.0
     end where
 
   end subroutine finalize_binning
