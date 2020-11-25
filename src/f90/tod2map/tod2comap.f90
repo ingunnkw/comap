@@ -3,7 +3,7 @@ program tod2comap
   use comap_map_mod
   use comap_scan_mod
   use comap_acceptlist_mod
-  use comap_jackknife_mod
+  use comap_split_mod
   use comap_patch_mod
   use comap_ephem_mod
   use quiet_fft_mod
@@ -35,7 +35,7 @@ program tod2comap
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
   character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
-  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, jackknife, split_def_file, acc_id, map_file1, map_file2, split_id
+  character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, split_string, split_def_file, acc_id, map_file1, map_file2, split_id
   character(len=6)      :: obsid
   character(len=8)      :: scanid
   character(len=5)      :: sim_string
@@ -69,7 +69,7 @@ program tod2comap
   call get_parameter(0, parfile, 'SIM_NAME', par_string=sim_name)
   call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
   call get_parameter(0, parfile, 'SEED', par_int=seed)
-  !call get_parameter(0, parfile, 'JACKKNIVES', par_string=jackknife)
+  !call get_parameter(0, parfile, 'JACKKNIVES', par_string=split_tring)
   !call get_parameter(0, parfile, 'NUMBER_JK', par_int=nsplit)
   call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
   call get_parameter(0, parfile, 'SCAN_MAPS', par_lgt=scan_map)
@@ -116,7 +116,7 @@ program tod2comap
   !allocate(alist%status(tod(i)%nfreq, tod(i)%ndet))
   !alist%status = 0
 
-  !if (jackknife .ne. 'none') then
+  !if (split_string .ne. 'none') then
   !   split_mode = .true.
   !else
   !   split_mode = .false.
@@ -238,7 +238,7 @@ program tod2comap
         map_tot%div_multisplit  = map_tot%div_multisplit  + map_scan%div_multisplit
         map_tot%nhit_multisplit = map_tot%nhit_multisplit + map_scan%nhit_multisplit
         !if (use_acc) then
-        !   ! Add to jackknives
+        !   ! Add to splits
         !   do k = 1, split_info%nsplit
         !      if (split_info%split(k,scan_index) .eq. 0) then
         !         map_split(2*k-1)%dsum    = map_split(2*k-1)%dsum    + map_scan%dsum
@@ -323,7 +323,7 @@ program tod2comap
   call mpi_allreduce(map_tot%dsum_co, buffer%dsum_co, size(map_tot%dsum_co), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_co, buffer%nhit_co, size(map_tot%nhit_co), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
 
-  ! Jackknives
+  ! Splits
   call mpi_allreduce(map_tot%div_split,  buffer%div_split,  size(map_tot%div_split),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum_split, buffer%dsum_split, size(map_tot%dsum_split), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_split, buffer%nhit_split, size(map_tot%nhit_split), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
@@ -359,7 +359,7 @@ program tod2comap
      map_tot%nhit_co = buffer%nhit_co
      !write(*,*) 'sum', sum(abs(map_tot%dsum)), sum(abs(map_tot%div))
 
-     ! Jackknives
+     ! splits
      map_tot%div_split  = buffer%div_split
      map_tot%dsum_split = buffer%dsum_split
      map_tot%nhit_split = buffer%nhit_split

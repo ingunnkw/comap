@@ -1,6 +1,6 @@
-! A new jackknife module, which also includes some kind of accept lists.
+! A new split module, which also includes some kind of accept lists.
 
-module comap_jackknife_mod
+module comap_split_mod
   use quiet_utils
   use quiet_hdf_mod
   !use comap_scan_mod
@@ -78,7 +78,7 @@ contains
 
     call close_hdf_file(h5file)
 
-    ! Read jackknife definition file
+    ! Read split definition file
     split%n_feed = 0; split%n_coadd = 0; split%nmultisplit = 0
     unit = getlun()
     open(unit, file=split_definition, action="read",status="old")
@@ -104,7 +104,7 @@ contains
 
     allocate(split%split(split%nsplit, nsb, nfeed, split%nscans))
     
-    ! Define jackknife splitting
+    ! Define split
     do j = 1, split%nscans
         do feed = 1, nfeed
            do sb = 1, nsb
@@ -141,4 +141,4 @@ contains
   end subroutine free_split_type
 
 
-end module comap_jackknife_mod
+end module comap_split_mod

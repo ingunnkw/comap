@@ -132,14 +132,14 @@ contains
        call write_hdf(file, "rms_sim", map%rms_sim)
     end if
     if (map%nsplit > 0) then
-       call create_hdf_group(file, "jackknives")
-       call write_hdf(file, "jackknives/split_def",  map%split_def)
-       call write_hdf(file, "jackknives/split_feedmap",  map%split_feed)
+       call create_hdf_group(file, "splits")
+       call write_hdf(file, "splts/split_def",  map%split_def)
+       call write_hdf(file, "splits/split_feedmap",  map%split_feed)
        nf = 1; nc = 1
        do i = 1, map%nsplit
-          map_name = "jackknives/map_"  // map%split_def(i)
-          rms_name = "jackknives/rms_"  // map%split_def(i)
-          hit_name = "jackknives/nhit_" // map%split_def(i)
+          map_name = "splits/map_"  // map%split_def(i)
+          rms_name = "splits/rms_"  // map%split_def(i)
+          hit_name = "splits/nhit_" // map%split_def(i)
           if (any(map%split_feed == i)) then
              call write_hdf(file, trim(map_name), map%m_split(:,:,:,:,:,2*nf-1:2*nf))
              call write_hdf(file, trim(rms_name), map%rms_split(:,:,:,:,:,2*nf-1:2*nf))
@@ -154,9 +154,9 @@ contains
        end do
 
        if (map%nmultisplit > 0) then
-          call write_hdf(file, "jackknives/map_split", map%m_multisplit)
-          call write_hdf(file, "jackknives/rms_split", map%rms_multisplit)
-          call write_hdf(file, "jackknives/nhit_split", map%nhit_multisplit)
+          call write_hdf(file, "splits/map_split", map%m_multisplit)
+          call write_hdf(file, "splits/rms_split", map%rms_multisplit)
+          call write_hdf(file, "splits/nhit_split", map%nhit_multisplit)
        end if
     end if
 
@@ -398,7 +398,7 @@ contains
     map%div_co  = 0.0
     map%nhit_co = 0
 
-    ! Jackknives
+    ! Splits
     map%m_split      = 0.0
     map%rms_split    = 0.0
     map%dsum_split   = 0.0
@@ -448,7 +448,7 @@ contains
     if (allocated(map%div_co))  deallocate(map%div_co)
     if (allocated(map%dsum_co)) deallocate(map%dsum_co)
 
-    ! Jackknives
+    ! Splits
     if (allocated(map%m_split))    deallocate(map%m_split)
     if (allocated(map%rms_split))  deallocate(map%rms_split)
     if (allocated(map%nhit_split)) deallocate(map%nhit_split)
@@ -460,7 +460,7 @@ contains
     if (allocated(map%div_splitco))  deallocate(map%div_splitco)
     if (allocated(map%dsum_splitco)) deallocate(map%dsum_splitco)
     
-    ! successive splits
+    ! Successive splits
     if (allocated(map%m_multisplit))      deallocate(map%m_multisplit)
     if (allocated(map%rms_multisplit))    deallocate(map%rms_multisplit)
     if (allocated(map%nhit_multisplit))   deallocate(map%nhit_multisplit)

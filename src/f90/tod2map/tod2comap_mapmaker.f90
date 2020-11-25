@@ -6,7 +6,7 @@ module tod2comap_mapmaker
   use comap_ephem_mod
   !use quiet_fft_mod
   use tod2comap_utils
-  use comap_jackknife_mod
+  use comap_split_mod
   implicit none
 
 
@@ -128,7 +128,7 @@ contains
        map%rms_sim  = 0.0
     end if
 
-    ! Jackknives
+    ! Splits
     map%nsplit = split_info%nsplit
     map%nmultisplit = split_info%nmultisplit
 
@@ -485,7 +485,7 @@ contains
                 map%dsum_co(p,q,freq_new,sb)  = map%dsum_co(p,q,freq_new,sb)  + 1.d0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                 map%div_co(p,q,freq_new,sb)   = map%div_co(p,q,freq_new,sb)   + 1.d0 / tod%rms(freq,sb,j)**2
                 
-                ! Jackknives
+                ! Splits
                 nf = 1; nc = 1; ns = 1
                 do sp = 1, map%nsplit
                    if (any(map%split_feed == split)) then
@@ -637,7 +637,7 @@ contains
        map%rms_sim = 0.0 
     end where
 
-    ! Jackknives
+    ! Splits
 
     where(map%div_split > 0)
        map%m_split   = map%dsum_split / map%div_split
