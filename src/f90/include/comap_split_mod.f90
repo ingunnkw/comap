@@ -13,7 +13,7 @@ module comap_split_mod
   !end interface
 
   type split_type
-     integer(i4b) :: nscans, nsplit, n_feed, n_coadd, nmultisplit
+     integer(i4b) :: nscans, nsplit, n_feed, n_coadd, nmultisplit, n_ctrl, n_test
      character(len=4),   allocatable, dimension(:)       :: split_name                 ! (nsplit)
      integer(i4b),       allocatable, dimension(:)       :: scan_list, feedmap      ! (nscans) / (nsplit)
      integer(i4b),       allocatable, dimension(:,:,:,:) :: split                   ! (nsplit,nsb,nfeed,nscans)
@@ -80,6 +80,7 @@ contains
 
     ! Read split definition file
     split%n_feed = 0; split%n_coadd = 0; split%nmultisplit = 0
+    split%n_ctrl = 0; split%n_test = 0
     unit = getlun()
     open(unit, file=split_definition, action="read",status="old")
     read(unit,*) num
@@ -88,17 +89,20 @@ contains
     read(unit,*) line
     do i = 2, num
        read(unit,*) split%split_name(i-1), split%feedmap(i-1)!line
-       print *, split%split_name(i-1), split%feedmap(i-1)
        !split%split_name(i-1) = line(1:4)
        if (split%feedmap(i-1) == 0) then
           split%n_coadd = split%n_coadd + 1
        else if (split%feedmap(i-1) == 2) then
           split%nmultisplit = split%nmultisplit + 1
+          split%n_test = split%n_test + 1
+      else if (split%feedmap(i-1) == 3) then
+          split%n_ctrl = split%n_ctrl + 1
        else
           split%n_feed = split%n_feed + 1
        end if
     end do
     close(unit)
+
     !write(*,*) split%n_coadd, split%n_feed
     !stop
 
@@ -120,7 +124,7 @@ contains
            end do
         end do
      end do
-     split%nsplit = split%nsplit - split%nmultisplit 
+     split%nsplit = split%nsplit - split%n_test - split%n_ctrl
 
      !write(*,*) split%split
   end subroutine read_acceptlist

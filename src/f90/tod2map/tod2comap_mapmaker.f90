@@ -22,7 +22,7 @@ contains
     type(split_type),    intent(in)    :: split_info
     character(len=*)                :: parfile
 
-    integer(i4b) :: i, j, k, l, p, q, fs, st, ierr, nsplitfeed, n
+    integer(i4b) :: i, j, k, l, p, q, fs, st, ierr, nsplitfeed, n, h
     real(dp)     :: x_min, x_max, y_min, y_max, pad, temp, mean_dec, d1, d2
     character(len=15)   :: coord_system
     real(8), parameter :: PI = 4*atan(1.d0)
@@ -131,6 +131,8 @@ contains
     ! Splits
     map%nsplit = split_info%nsplit
     map%nmultisplit = split_info%nmultisplit
+    map%n_ctrl = split_info%n_ctrl
+    map%n_test = split_info%n_test
 
     if (map%nsplit > 0) then
        nsplitfeed = sum(split_info%feedmap(1:map%nsplit)); allocate(map%split_feed(nsplitfeed))
@@ -141,7 +143,11 @@ contains
              n = n + 1
           end if
        end do
+       
        map%split_def = split_info%split_name
+       
+       
+       
        allocate(map%m_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*split_info%n_feed), &
             & map%rms_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*split_info%n_feed), &
             & map%dsum_split(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2*split_info%n_feed), &
@@ -159,18 +165,21 @@ contains
        map%div_split  = 0.0; map%div_splitco  = 0.0;  
     end if
 
-    if (map%nmultisplit > 0) then
-       allocate(map%m_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
-            & map%rms_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
-            & map%dsum_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
-            & map%div_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit), &
-            & map%nhit_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, 2**map%nmultisplit))
+    if (map%n_test > 0) then
+       map%split_def = split_info%split_name
+       
+       allocate(map%m_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%n_test, 2**(map%n_ctrl + 1)), &
+            & map%rms_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%n_test, 2**(map%n_ctrl + 1)), &
+            & map%dsum_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%n_test, 2**(map%n_ctrl + 1)), &
+            & map%div_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%n_test, 2**(map%n_ctrl + 1)), &
+            & map%nhit_multisplit(map%n_x, map%n_y, map%nfreq, map%nsb, map%ndet_tot, map%n_test, 2**(map%n_ctrl + 1)))
        map%m_multisplit     = 0.0
        map%rms_multisplit   = 0.0
        map%nhit_multisplit  = 0
        map%dsum_multisplit  = 0.0
        map%div_multisplit   = 0.0
     end if
+
     ! Frequency
     d1 = 1.d0/64.d0; d2 = 2.d0/64.d0
     do i = 1, map%nsb
@@ -424,7 +433,7 @@ contains
     integer(i4b), dimension(:,:,:), intent(in) :: split_array
 
     integer(i4b) :: det, sb, freq, sim, ndet, nsb, nfreq, nf, nc, ns, freq_new
-    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, sp, split
+    integer(i4b) :: i, j, k, l, p, q, fs, st, scan, pix, spt, split
     real(dp)     :: x_min, x_max, y_min, y_max
     character(len=15) :: coord_system, object
     real(dp), allocatable, dimension(:) :: dsum, div
@@ -487,16 +496,16 @@ contains
                 
                 ! Splits
                 nf = 1; nc = 1; ns = 1
-                do sp = 1, map%nsplit
-                   if (any(map%split_feed == split)) then
+                do spt = 1, map%nsplit
+                   if (any(map%split_feed == spt)) then
                       !if (split_array(i,sb,det) == 0) then
-                      split = 2*nf - 1 + split_array(sp,sb,det)
+                      split = 2*nf - 1 + split_array(spt,sb,det)
                       map%nhit_split(p,q,freq_new,sb,det,split) = map%nhit_split(p,q,freq_new,sb,det,split) + 1
                       map%dsum_split(p,q,freq_new,sb,det,split) = map%dsum_split(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                       map%div_split(p,q,freq_new,sb,det,split)  = map%div_split(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
                       nf = nf+1
                    else
-                      split = 2*nc - 1 + split_array(sp,sb,det)
+                      split = 2*nc - 1 + split_array(spt,sb,det)
                       map%nhit_splitco(p,q,freq_new,sb,split) = map%nhit_splitco(p,q,freq_new,sb,split) + 1
                       map%dsum_splitco(p,q,freq_new,sb,split) = map%dsum_splitco(p,q,freq_new,sb,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
                       map%div_splitco(p,q,freq_new,sb,split)  = map%div_splitco(p,q,freq_new,sb,split)  + 1.0 / tod%rms(freq,sb,j)**2
@@ -505,23 +514,24 @@ contains
                 end do
                 ! Successive splits
                 
-                if (map%nmultisplit > 0) then
-                   split = 1
-                   do k = 1, map%nmultisplit
-                      split = split +  split_array(map%nsplit + k,sb,det) * 2**(k - 1)
-
-                      ! Simulations in here
+                if (map%n_test > 0) then
+                   
+                   do spt = 1, map%n_test
+                      split = 1
+                      split = split + split_array(map%nsplit + map%n_ctrl +  spt, sb, det) * 2**map%n_ctrl
+                      do k = 1, map%n_ctrl
+                         split = split + split_array(map%nsplit + map%n_ctrl - k, sb, det) * 2**(map%n_ctrl - k)
+                      end do
+                   
+                      map%nhit_multisplit(p, q, freq_new, sb, det, spt, split) = map%nhit_multisplit(p, q, freq_new, sb, det, spt, split) + 1
+                      map%dsum_multisplit(p, q, freq_new, sb, det, spt, split) = map%dsum_multisplit(p, q, freq_new, sb, det, spt, split) + 1.0 / tod%rms(freq, sb, j)**2 * tod%d(i, freq, sb, j)
+                      map%div_multisplit(p, q, freq_new, sb, det, spt, split)  = map%div_multisplit(p, q, freq_new, sb, det, spt, split)  + 1.0 / tod%rms(freq, sb, j)**2
                    end do
-                   map%nhit_multisplit(p,q,freq_new,sb,det,split) = map%nhit_multisplit(p,q,freq_new,sb,det,split) + 1
-                   map%dsum_multisplit(p,q,freq_new,sb,det,split) = map%dsum_multisplit(p,q,freq_new,sb,det,split) + 1.0 / tod%rms(freq,sb,j)**2 * tod%d(i,freq,sb,j)
-                   map%div_multisplit(p,q,freq_new,sb,det,split)  = map%div_multisplit(p,q,freq_new,sb,det,split)  + 1.0 / tod%rms(freq,sb,j)**2
                 end if
-
              end do
           end do
        end do
     end do
- 
     !map_tot%dsum    = map_tot%dsum + map_scan%dsum
     !map_tot%div     = map_tot%div  + map_scan%div
     !map_tot%dsum_co = map_tot%dsum_co + map_scan%dsum_co

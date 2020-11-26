@@ -7,7 +7,7 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, nsplit, nmultisplit ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, nsplit, nmultisplit, n_test, n_ctrl ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2), center(2)
@@ -21,12 +21,13 @@ module comap_map_mod
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)     :: m_co, rms_co, dsum_co, div_co         ! (n_x, n_y, nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_split, rms_split, dsum_split, div_split         ! (n_x, n_y, nfreq, nsb, ndet, 2*nsplit)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_multisplit, rms_multisplit, dsum_multisplit, div_multisplit    ! (n_x, n_y, nfreq, nsb, ndet, 2**nmultisplit)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:,:) :: m_multisplit, rms_multisplit, dsum_multisplit, div_multisplit    ! (n_x, n_y, nfreq, nsb, ndet, n_test, 2**(n_ctrl + 1))
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_splitco, rms_splitco, dsum_splitco, div_splitco ! (n_x, n_y, nfreq, nsb, 2*nsplit)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
      integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_splitco                       ! (n_x, n_y, nfreq, nsb, ndet/2*nsplit)
      integer(i4b), allocatable, dimension(:,:,:,:)     :: nhit_co                               ! (n_x, n_y, nfreq, nsb)
-     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_split, nhit_multisplit                    ! (n_x, n_y, nfreq, nsb, ndet, 2*nsplit/2**nmultisplit)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_split                    ! (n_x, n_y, nfreq, nsb, ndet, 2*nsplit)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:,:) :: nhit_multisplit                    ! (n_x, n_y, nfreq, nsb, ndet, n_test, 2**(n_ctrl + 1))
 
   end type map_type
 
@@ -152,12 +153,20 @@ contains
              nc = nc + 1
           end if
        end do
-
     end if
-    if (map%nmultisplit > 0) then
-       call write_hdf(file, "splits/map_split", map%m_multisplit)
-       call write_hdf(file, "splits/rms_split", map%rms_multisplit)
-       call write_hdf(file, "splits/nhit_split", map%nhit_multisplit)
+    
+    if (map%n_test > 0) then
+       call create_hdf_group(file, "multisplits")
+
+       do i = 1, map%n_test
+          map_name = "multisplits/map_"  // map%split_def(map%nsplit + map%n_ctrl + i)
+          rms_name = "multisplits/rms_"  // map%split_def(map%nsplit + map%n_ctrl + i)
+          hit_name = "multisplits/nhit_" // map%split_def(map%nsplit + map%n_ctrl + i)
+        
+          call write_hdf(file, trim(map_name), map%m_multisplit(:, :, :, :, :, i, :))
+          call write_hdf(file, trim(rms_name), map%rms_multisplit(:, :, :, :, :, i, :))
+          call write_hdf(file, trim(hit_name), map%nhit_multisplit(:, :, :, :, :, i, :))
+       end do
     end if
 
     call close_hdf_file(file)
