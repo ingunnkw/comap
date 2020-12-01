@@ -7,26 +7,27 @@ module comap_map_mod
   real(dp), parameter :: MAP_BASE_PIXSIZE = 1.d0 ! Arcmin
 
   type map_type
-     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, njk, nsplit ! 2^ntheta
+     integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, nsplit, nmultisplit, n_test, n_ctrl ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2), center(2)
      character(len=512) :: name
 
-     character(len=4), allocatable, dimension(:) :: jk_def !(njk), jack0, jack1
+     character(len=4), allocatable, dimension(:) :: split_def !(nsplit), jack0, jack1
 
-     integer(i4b), allocatable, dimension(:)           :: feeds, jk_feed, split_split
+     integer(i4b), allocatable, dimension(:)           :: feeds, split_feed, split_split
      real(dp),     allocatable, dimension(:)           :: x, y, k                               ! (n_x or n_y or n_k)
      real(dp),     allocatable, dimension(:,:)         :: freq                                  ! (nfreq, nsb)
      real(sp),     allocatable, dimension(:,:,:,:,:)   :: m, rms, dsum, div                     ! (n_x, n_y, nfreq, nsb, ndet)
      real(sp),     allocatable, dimension(:,:,:,:)     :: m_co, rms_co, dsum_co, div_co         ! (n_x, n_y, nfreq, nsb)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_jk, rms_jk, dsum_jk, div_jk         ! (n_x, n_y, nfreq, nsb, ndet, 2*njk)
-     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_split, rms_split, dsum_split, div_split    ! (n_x, n_y, nfreq, nsb, ndet, 2**nsplit)
-     real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_jkco, rms_jkco, dsum_jkco, div_jkco ! (n_x, n_y, nfreq, nsb, 2*njk)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_split, rms_split, dsum_split, div_split         ! (n_x, n_y, nfreq, nsb, ndet, 2*nsplit)
+     real(sp),     allocatable, dimension(:,:,:,:,:,:,:) :: m_multisplit, rms_multisplit, dsum_multisplit, div_multisplit    ! (n_x, n_y, nfreq, nsb, ndet, n_test, 2**(n_ctrl + 1))
+     real(sp),     allocatable, dimension(:,:,:,:,:)   :: m_splitco, rms_splitco, dsum_splitco, div_splitco ! (n_x, n_y, nfreq, nsb, 2*nsplit)
      real(sp),     allocatable, dimension(:,:,:,:,:,:) :: m_sim, rms_sim, dsum_sim, div_sim     ! (n_x, n_y, nfreq, nsb, ndet, nsim)
-     integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_jkco                       ! (n_x, n_y, nfreq, nsb, ndet/2*njk)
+     integer(i4b), allocatable, dimension(:,:,:,:,:)   :: nhit, nhit_splitco                       ! (n_x, n_y, nfreq, nsb, ndet/2*nsplit)
      integer(i4b), allocatable, dimension(:,:,:,:)     :: nhit_co                               ! (n_x, n_y, nfreq, nsb)
-     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_jk, nhit_split                    ! (n_x, n_y, nfreq, nsb, ndet, 2*njk/2**nsplit)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:) :: nhit_split                    ! (n_x, n_y, nfreq, nsb, ndet, 2*nsplit)
+     integer(i4b), allocatable, dimension(:,:,:,:,:,:,:) :: nhit_multisplit                    ! (n_x, n_y, nfreq, nsb, ndet, n_test, 2**(n_ctrl + 1))
 
   end type map_type
 
@@ -55,21 +56,21 @@ contains
     map2%m_co    = map1%m_co
     map2%rms_co  = map1%rms_co
     map2%nhit_co = map1%nhit_co
-    map2%njk     = map1%njk
-    if (allocated(map1%m_jk)) then
-       map2%jk_def    = map1%jk_def
-       map2%m_jk      = map1%m_jk
-       map2%rms_jk    = map1%rms_jk
-       map2%nhit_jk   = map1%nhit_jk
-       map2%m_jkco    = map1%m_jkco
-       map2%rms_jkco  = map1%rms_jkco
-       map2%nhit_jkco = map1%nhit_jkco
+    map2%nsplit     = map1%nsplit
+    if (allocated(map1%m_split)) then
+       map2%split_def    = map1%split_def
+       map2%m_split      = map1%m_split
+       map2%rms_split    = map1%rms_split
+       map2%nhit_split   = map1%nhit_split
+       map2%m_splitco    = map1%m_splitco
+       map2%rms_splitco  = map1%rms_splitco
+       map2%nhit_splitco = map1%nhit_splitco
     end if
     
-    if (allocated(map1%m_split)) then
-       map2%m_split    = map1%m_split
-       map2%rms_split  = map1%rms_split
-       map2%nhit_split = map1%nhit_split
+    if (allocated(map1%m_multisplit)) then
+       map2%m_multisplit    = map1%m_multisplit
+       map2%rms_multisplit  = map1%rms_multisplit
+       map2%nhit_multisplit = map1%nhit_multisplit
     end if
 
 
@@ -112,7 +113,7 @@ contains
     call write_hdf(file, "mean_el",      map%mean_el)
     call write_hdf(file, "time",         map%time)
     call write_hdf(file, "feeds",        map%feeds)
-    call write_hdf(file, "njk",          map%njk)
+    call write_hdf(file, "nsplit",          map%nsplit)
     call write_hdf(file, "nsim",         map%nsim)
     if (present(det)) then
        call write_hdf(file, "map",  map%m(:,:,:,sb:sb,det:det))
@@ -131,33 +132,41 @@ contains
        call write_hdf(file, "map_sim", map%m_sim)
        call write_hdf(file, "rms_sim", map%rms_sim)
     end if
-    if (map%njk > 0) then
-       call create_hdf_group(file, "jackknives")
-       call write_hdf(file, "jackknives/jk_def",  map%jk_def)
-       call write_hdf(file, "jackknives/jk_feedmap",  map%jk_feed)
+    if (map%nsplit > 0) then
+       call create_hdf_group(file, "splits")
+       call write_hdf(file, "splts/split_def",  map%split_def)
+       call write_hdf(file, "splits/split_feedmap",  map%split_feed)
        nf = 1; nc = 1
-       do i = 1, map%njk
-          map_name = "jackknives/map_"  // map%jk_def(i)
-          rms_name = "jackknives/rms_"  // map%jk_def(i)
-          hit_name = "jackknives/nhit_" // map%jk_def(i)
-          if (any(map%jk_feed == i)) then
-             call write_hdf(file, trim(map_name), map%m_jk(:,:,:,:,:,2*nf-1:2*nf))
-             call write_hdf(file, trim(rms_name), map%rms_jk(:,:,:,:,:,2*nf-1:2*nf))
-             call write_hdf(file, trim(hit_name), map%nhit_jk(:,:,:,:,:,2*nf-1:2*nf))
+       do i = 1, map%nsplit
+          map_name = "splits/map_"  // map%split_def(i)
+          rms_name = "splits/rms_"  // map%split_def(i)
+          hit_name = "splits/nhit_" // map%split_def(i)
+          if (any(map%split_feed == i)) then
+             call write_hdf(file, trim(map_name), map%m_split(:,:,:,:,:,2*nf-1:2*nf))
+             call write_hdf(file, trim(rms_name), map%rms_split(:,:,:,:,:,2*nf-1:2*nf))
+             call write_hdf(file, trim(hit_name), map%nhit_split(:,:,:,:,:,2*nf-1:2*nf))
              nf = nf + 1 
           else
-             call write_hdf(file, trim(map_name), map%m_jkco(:,:,:,:,2*nc-1:2*nc))
-             call write_hdf(file, trim(rms_name), map%rms_jkco(:,:,:,:,2*nc-1:2*nc))
-             call write_hdf(file, trim(hit_name), map%nhit_jkco(:,:,:,:,2*nc-1:2*nc))
+             call write_hdf(file, trim(map_name), map%m_splitco(:,:,:,:,2*nc-1:2*nc))
+             call write_hdf(file, trim(rms_name), map%rms_splitco(:,:,:,:,2*nc-1:2*nc))
+             call write_hdf(file, trim(hit_name), map%nhit_splitco(:,:,:,:,2*nc-1:2*nc))
              nc = nc + 1
           end if
        end do
+    end if
+    
+    if (map%n_test > 0) then
+       call create_hdf_group(file, "multisplits")
 
-       if (map%nsplit > 0) then
-          call write_hdf(file, "jackknives/map_split", map%m_split)
-          call write_hdf(file, "jackknives/rms_split", map%rms_split)
-          call write_hdf(file, "jackknives/nhit_split", map%nhit_split)
-       end if
+       do i = 1, map%n_test
+          map_name = "multisplits/map_"  // map%split_def(map%nsplit + map%n_ctrl + i)
+          rms_name = "multisplits/rms_"  // map%split_def(map%nsplit + map%n_ctrl + i)
+          hit_name = "multisplits/nhit_" // map%split_def(map%nsplit + map%n_ctrl + i)
+        
+          call write_hdf(file, trim(map_name), map%m_multisplit(:, :, :, :, :, i, :))
+          call write_hdf(file, trim(rms_name), map%rms_multisplit(:, :, :, :, :, i, :))
+          call write_hdf(file, trim(hit_name), map%nhit_multisplit(:, :, :, :, :, i, :))
+       end do
     end if
 
     call close_hdf_file(file)
@@ -258,7 +267,7 @@ contains
     call read_hdf(file, "patch_center", map%center)
     call read_hdf(file, "nside",        map%nside)
     call read_hdf(file, "nsim",         map%nsim)
-    call read_hdf(file, "njk",          map%njk)
+    call read_hdf(file, "njk",          map%nsplit)
 
     ! Read co-added over feeds
     call read_hdf(file, "map_coadd", map%m_co)
@@ -266,32 +275,32 @@ contains
     call read_hdf(file, "nhit_coadd", map%nhit_co)
     
     ! Read jackknives
-    if (map%njk > 0) then
+    if (map%nsplit > 0) then
        call get_size_hdf(file, "jackknives", ext)
-       n_feed = ext(1); n_coadd = map%njk - n_feed
-       allocate(map%jk_def(map%njk), map%jk_feed(n_feed))       
-       call read_hdf(file, "jackknives/jk_def",  map%jk_def)
-       call read_hdf(file, "jackknives/jk_feedmap",  map%jk_feed)
-       allocate(map%m_jkco(nx,ny,nfreq,nsb,2*n_coadd), &
-            & map%rms_jkco(nx,ny,nfreq,nsb,2*n_coadd), &
-            & map%nhit_jkco(nx,ny,nfreq,nsb,2*n_coadd), &
-            & map%m_jk(nx,ny,nfreq,nsb,ndet,2*n_feed), &
-            & map%rms_jk(nx,ny,nfreq,nsb,ndet,2*n_feed), &
-            & map%nhit_jk(nx,ny,nfreq,nsb,ndet,2*n_feed))
+       n_feed = ext(1); n_coadd = map%nsplit - n_feed
+       allocate(map%split_def(map%nsplit), map%split_feed(n_feed))       
+       call read_hdf(file, "jackknives/jk_def",  map%split_def)
+       call read_hdf(file, "jackknives/jk_feedmap",  map%split_feed)
+       allocate(map%m_splitco(nx,ny,nfreq,nsb,2*n_coadd), &
+            & map%rms_splitco(nx,ny,nfreq,nsb,2*n_coadd), &
+            & map%nhit_splitco(nx,ny,nfreq,nsb,2*n_coadd), &
+            & map%m_split(nx,ny,nfreq,nsb,ndet,2*n_feed), &
+            & map%rms_split(nx,ny,nfreq,nsb,ndet,2*n_feed), &
+            & map%nhit_split(nx,ny,nfreq,nsb,ndet,2*n_feed))
        nf = 1; nc = 1
-       do i = 1, map%njk
-          map_name = "jackknives/map_"  // map%jk_def(i)
-          rms_name = "jackknives/rms_"  // map%jk_def(i)
-          hit_name = "jackknives/nhit_" // map%jk_def(i)
-          if (any(map%jk_feed == i)) then
-             call read_hdf(file, trim(map_name), map%m_jk(:,:,:,:,:,2*nf-1:2*nf))
-             call read_hdf(file, trim(rms_name), map%rms_jk(:,:,:,:,:,2*nf-1:2*nf))
-             call read_hdf(file, trim(hit_name), map%nhit_jk(:,:,:,:,:,2*nf-1:2*nf))
+       do i = 1, map%nsplit
+          map_name = "jackknives/map_"  // map%split_def(i)
+          rms_name = "jackknives/rms_"  // map%split_def(i)
+          hit_name = "jackknives/nhit_" // map%split_def(i)
+          if (any(map%split_feed == i)) then
+             call read_hdf(file, trim(map_name), map%m_split(:,:,:,:,:,2*nf-1:2*nf))
+             call read_hdf(file, trim(rms_name), map%rms_split(:,:,:,:,:,2*nf-1:2*nf))
+             call read_hdf(file, trim(hit_name), map%nhit_split(:,:,:,:,:,2*nf-1:2*nf))
              nf = nf + 1
           else
-             call read_hdf(file, trim(map_name), map%m_jkco(:,:,:,:,2*nc-1:2*nc))
-             call read_hdf(file, trim(rms_name), map%rms_jkco(:,:,:,:,2*nc-1:2*nc))
-             call read_hdf(file, trim(hit_name), map%nhit_jkco(:,:,:,:,2*nc-1:2*nc))
+             call read_hdf(file, trim(map_name), map%m_splitco(:,:,:,:,2*nc-1:2*nc))
+             call read_hdf(file, trim(rms_name), map%rms_splitco(:,:,:,:,2*nc-1:2*nc))
+             call read_hdf(file, trim(hit_name), map%nhit_splitco(:,:,:,:,2*nc-1:2*nc))
              nc = nc + 1
           end if
        end do
@@ -398,24 +407,24 @@ contains
     map%div_co  = 0.0
     map%nhit_co = 0
 
-    ! Jackknives
-    map%m_jk      = 0.0
-    map%rms_jk    = 0.0
-    map%dsum_jk   = 0.0
-    map%div_jk    = 0.0
-    map%nhit_jk   = 0
-    map%m_jkco    = 0.0
-    map%rms_jkco  = 0.0
-    map%dsum_jkco = 0.0
-    map%div_jkco  = 0.0
-    map%nhit_jkco = 0
+    ! Splits
+    map%m_split      = 0.0
+    map%rms_split    = 0.0
+    map%dsum_split   = 0.0
+    map%div_split    = 0.0
+    map%nhit_split   = 0
+    map%m_splitco    = 0.0
+    map%rms_splitco  = 0.0
+    map%dsum_splitco = 0.0
+    map%div_splitco  = 0.0
+    map%nhit_splitco = 0
 
     ! Successive splits
-    map%m_split    = 0.0
-    map%rms_split  = 0.0
-    map%dsum_split = 0.0
-    map%div_split  = 0.0
-    map%nhit_split = 0
+    map%m_multisplit    = 0.0
+    map%rms_multisplit  = 0.0
+    map%dsum_multisplit = 0.0
+    map%div_multisplit  = 0.0
+    map%nhit_multisplit = 0
 
     ! Simulated data
     map%m_sim    = 0.0
@@ -448,24 +457,24 @@ contains
     if (allocated(map%div_co))  deallocate(map%div_co)
     if (allocated(map%dsum_co)) deallocate(map%dsum_co)
 
-    ! Jackknives
-    if (allocated(map%m_jk))    deallocate(map%m_jk)
-    if (allocated(map%rms_jk))  deallocate(map%rms_jk)
-    if (allocated(map%nhit_jk)) deallocate(map%nhit_jk)
-    if (allocated(map%div_jk))  deallocate(map%div_jk)
-    if (allocated(map%dsum_jk)) deallocate(map%dsum_jk)
-    if (allocated(map%m_jkco))    deallocate(map%m_jkco)
-    if (allocated(map%rms_jkco))  deallocate(map%rms_jkco)
-    if (allocated(map%nhit_jkco)) deallocate(map%nhit_jkco)
-    if (allocated(map%div_jkco))  deallocate(map%div_jkco)
-    if (allocated(map%dsum_jkco)) deallocate(map%dsum_jkco)
+    ! Splits
+    if (allocated(map%m_split))    deallocate(map%m_split)
+    if (allocated(map%rms_split))  deallocate(map%rms_split)
+    if (allocated(map%nhit_split)) deallocate(map%nhit_split)
+    if (allocated(map%div_split))  deallocate(map%div_split)
+    if (allocated(map%dsum_split)) deallocate(map%dsum_split)
+    if (allocated(map%m_splitco))    deallocate(map%m_splitco)
+    if (allocated(map%rms_splitco))  deallocate(map%rms_splitco)
+    if (allocated(map%nhit_splitco)) deallocate(map%nhit_splitco)
+    if (allocated(map%div_splitco))  deallocate(map%div_splitco)
+    if (allocated(map%dsum_splitco)) deallocate(map%dsum_splitco)
     
-    ! successive splits
-    if (allocated(map%m_split))      deallocate(map%m_split)
-    if (allocated(map%rms_split))    deallocate(map%rms_split)
-    if (allocated(map%nhit_split))   deallocate(map%nhit_split)
-    if (allocated(map%div_split))    deallocate(map%div_split)
-    if (allocated(map%dsum_split))   deallocate(map%dsum_split)
+    ! Successive splits
+    if (allocated(map%m_multisplit))      deallocate(map%m_multisplit)
+    if (allocated(map%rms_multisplit))    deallocate(map%rms_multisplit)
+    if (allocated(map%nhit_multisplit))   deallocate(map%nhit_multisplit)
+    if (allocated(map%div_multisplit))    deallocate(map%div_multisplit)
+    if (allocated(map%dsum_multisplit))   deallocate(map%dsum_multisplit)
     
     
     ! Simulated data 
