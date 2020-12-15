@@ -228,15 +228,21 @@ program tod2comap
         map_tot%dsum_co   = map_tot%dsum_co + map_scan%dsum_co
         map_tot%div_co    = map_tot%div_co  + map_scan%div_co
         map_tot%nhit_co   = map_tot%nhit_co + map_scan%nhit_co
-        map_tot%dsum_split   = map_tot%dsum_split + map_scan%dsum_split
-        map_tot%div_split    = map_tot%div_split  + map_scan%div_split
-        map_tot%nhit_split   = map_tot%nhit_split + map_scan%nhit_split
-        map_tot%dsum_splitco = map_tot%dsum_splitco + map_scan%dsum_splitco
-        map_tot%div_splitco  = map_tot%div_splitco  + map_scan%div_splitco
-        map_tot%nhit_splitco = map_tot%nhit_splitco + map_scan%nhit_splitco
-        map_tot%dsum_multisplit = map_tot%dsum_multisplit + map_scan%dsum_multisplit
-        map_tot%div_multisplit  = map_tot%div_multisplit  + map_scan%div_multisplit
-        map_tot%nhit_multisplit = map_tot%nhit_multisplit + map_scan%nhit_multisplit
+        
+        if (map_tot%nsplit > 0) then 
+            map_tot%dsum_split   = map_tot%dsum_split + map_scan%dsum_split
+            map_tot%div_split    = map_tot%div_split  + map_scan%div_split
+            map_tot%nhit_split   = map_tot%nhit_split + map_scan%nhit_split
+            map_tot%dsum_splitco = map_tot%dsum_splitco + map_scan%dsum_splitco
+            map_tot%div_splitco  = map_tot%div_splitco  + map_scan%div_splitco
+            map_tot%nhit_splitco = map_tot%nhit_splitco + map_scan%nhit_splitco
+        end if 
+        
+        if (map_tot%n_test > 0) then
+            map_tot%dsum_multisplit = map_tot%dsum_multisplit + map_scan%dsum_multisplit
+            map_tot%div_multisplit  = map_tot%div_multisplit  + map_scan%div_multisplit
+            map_tot%nhit_multisplit = map_tot%nhit_multisplit + map_scan%nhit_multisplit
+        end if
         !if (use_acc) then
         !   ! Add to splits
         !   do k = 1, split_info%nsplit
