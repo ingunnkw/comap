@@ -11,7 +11,7 @@ import tqdm
 
 def convolve(pixind):
     theta, phi = hp.pix2ang(nside, pixind)
-    r = hp.rotator.Rotator(rot=(0, theta, phi), deg=False, eulertype='X')
+    r = hp.rotator.Rotator(rot=(phi, -theta, 0), deg=False, eulertype='ZYX')
     beam2 = r.rotate_map_pixel(beam)
     return sum(beam2*pickup)/sum(beam2)
 
