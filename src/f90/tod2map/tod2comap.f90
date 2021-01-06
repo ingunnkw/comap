@@ -48,7 +48,8 @@ program tod2comap
 
   type(planck_rng)      :: rng_handle
   integer(i4b)          :: seed
- 
+  integer(i4b)          :: d 
+
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
@@ -317,8 +318,7 @@ program tod2comap
   call free_map_type(map_scan)
   call free_map_type(map_obs)
   call free_split_type(split_info)
-
-
+  
   !call mpi_reduce(map_tot%div, buffer%div, size(map_tot%div), MPI_DOUBLE_PRECISION, MPI_SUM, 0, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%div,     buffer%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum,    buffer%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
@@ -336,10 +336,13 @@ program tod2comap
   call mpi_allreduce(map_tot%div_splitco,  buffer%div_splitco,  size(map_tot%div_splitco),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%dsum_splitco, buffer%dsum_splitco, size(map_tot%dsum_splitco), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_splitco, buffer%nhit_splitco, size(map_tot%nhit_splitco), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%div_multisplit,  buffer%div_multisplit,  size(map_tot%div_multisplit),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%dsum_multisplit, buffer%dsum_multisplit, size(map_tot%dsum_multisplit), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-  call mpi_allreduce(map_tot%nhit_multisplit, buffer%nhit_multisplit, size(map_tot%nhit_multisplit), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-
+  
+  do d = 1, map_tot%n_test
+     call mpi_allreduce(map_tot%div_multisplit(:, :, :, :, :, d, :),  buffer%div_multisplit(:, :, :, :, :, d, :),  size(map_tot%div_multisplit(:, :, :, :, :, d, :)),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+     call mpi_allreduce(map_tot%dsum_multisplit(:, :, :, :, :, d, :), buffer%dsum_multisplit(:, :, :, :, :, d, :), size(map_tot%dsum_multisplit(:, :, :, :, :, d, :)), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+     call mpi_allreduce(map_tot%nhit_multisplit(:, :, :, :, :, d, :), buffer%nhit_multisplit(:, :, :, :, :, d, :), size(map_tot%nhit_multisplit(:, :, :, :, :, d, :)), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  end do
+  
   !!do i = 1, 2*split_info%nsplit
   !!   call mpi_allreduce(map_split(i)%div,     buffer_split(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   !!   call mpi_allreduce(map_split(i)%dsum,    buffer_split(i)%dsum,    size(map_tot%dsum),    MPI_REAL, MPI_SUM, mpi_comm_world, ierr)

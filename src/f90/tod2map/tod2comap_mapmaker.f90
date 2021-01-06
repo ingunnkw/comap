@@ -512,8 +512,8 @@ contains
                       nc = nc+1
                    end if
                 end do
+
                 ! Successive splits
-                
                 if (map%n_test > 0) then
                    
                    do spt = 1, map%n_test
