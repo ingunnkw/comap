@@ -143,7 +143,6 @@ program tod2comap
   !!      call initialize_mapmaker(buffer_split(i), parfile, pinfo, split_info)
   !!   end do
   !!end if
- 
 
   ! This loop currently requiers that all obsIDs are of the same patch
   do i = 1+myid, nscan, nproc 
@@ -178,7 +177,7 @@ program tod2comap
         else
            scan_index = 1
         end if  
-
+        
         !call nullify_map_type(map_scan)
         !call time2pix(tod, map_scan, parfile, pinfo, split_info%split_list(:,:,scan_index))
         !call time2pix(tod, map_tot, parfile, pinfo, split_info%split_list(:,:,scan_index))
@@ -262,7 +261,7 @@ program tod2comap
         !      end if
         !   end do
         !end if
-
+        
         ! Maps per scan
         if (scan_map) then
            call finalize_binning(map_scan)
@@ -275,7 +274,7 @@ program tod2comap
      end do ! end loop over scans
 
      call int2string(scan%id, obsid)
-
+     
      ! Maps per obsID
      if (obs_map) then
         call finalize_binning(map_obs)
@@ -314,7 +313,7 @@ program tod2comap
      !stop
      
   end do ! end loop over obsIDs
-
+  
   call free_map_type(map_scan)
   call free_map_type(map_obs)
   call free_split_type(split_info)
@@ -337,11 +336,14 @@ program tod2comap
   call mpi_allreduce(map_tot%dsum_splitco, buffer%dsum_splitco, size(map_tot%dsum_splitco), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_splitco, buffer%nhit_splitco, size(map_tot%nhit_splitco), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   
-  do d = 1, map_tot%n_test
-     call mpi_allreduce(map_tot%div_multisplit(:, :, :, :, :, d, :),  buffer%div_multisplit(:, :, :, :, :, d, :),  size(map_tot%div_multisplit(:, :, :, :, :, d, :)),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_tot%dsum_multisplit(:, :, :, :, :, d, :), buffer%dsum_multisplit(:, :, :, :, :, d, :), size(map_tot%dsum_multisplit(:, :, :, :, :, d, :)), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_tot%nhit_multisplit(:, :, :, :, :, d, :), buffer%nhit_multisplit(:, :, :, :, :, d, :), size(map_tot%nhit_multisplit(:, :, :, :, :, d, :)), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  end do
+  !do d = 1, map_tot%n_test
+  !   call mpi_allreduce(map_tot%div_multisplit(:, :, :, :, :, d, :),  buffer%div_multisplit(:, :, :, :, :, d, :),  size(map_tot%div_multisplit(:, :, :, :, :, d, :)),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !   call mpi_allreduce(map_tot%dsum_multisplit(:, :, :, :, :, d, :), buffer%dsum_multisplit(:, :, :, :, :, d, :), size(map_tot%dsum_multisplit(:, :, :, :, :, d, :)), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !   call mpi_allreduce(map_tot%nhit_multisplit(:, :, :, :, :, d, :), buffer%nhit_multisplit(:, :, :, :, :, d, :), size(map_tot%nhit_multisplit(:, :, :, :, :, d, :)), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  !end do
+  call mpi_allreduce(map_tot%div_multisplit,  buffer%div_multisplit,  size(map_tot%div_multisplit),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum_multisplit, buffer%dsum_multisplit, size(map_tot%dsum_multisplit), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit_multisplit, buffer%nhit_multisplit, size(map_tot%nhit_multisplit), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   
   !!do i = 1, 2*split_info%nsplit
   !!   call mpi_allreduce(map_split(i)%div,     buffer_split(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
@@ -355,8 +357,7 @@ program tod2comap
   ! Simulations
   !call mpi_allreduce(map_tot%div_sim,  buffer%div_sim,  size(map_tot%div_sim),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   !call mpi_allreduce(map_tot%dsum_sim, buffer%dsum_sim, size(map_tot%dsum_sim), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-
-
+  
   if (myid == 0) then
      map_tot%div  = buffer%div
      map_tot%dsum = buffer%dsum
@@ -381,8 +382,7 @@ program tod2comap
 
      ! Simulations
      !map_tot%div_sim  = buffer%div_sim
-     !map_tot%dsum_sim = buffer%dsum_sim
-
+     !map_tot%dsum_sim = buffer%dsum_sim  
 
      write(*,*) "Finalising"
      ! finalize_split ???????????
@@ -395,10 +395,8 @@ program tod2comap
      call free_map_type(map_tot)
 
      if (allocated(map_split)) deallocate(map_split, buffer_split)
-
-
   end if
-
+  
   !deallocate(tod)
   if (myid == 0) write(*,*) 'Done'
   call mpi_finalize(ierr)
