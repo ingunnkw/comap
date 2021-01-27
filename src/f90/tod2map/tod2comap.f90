@@ -50,8 +50,8 @@ program tod2comap
   integer(i4b)          :: seed
   integer(i4b)          :: d 
 
-  character(len=512)    :: param_dir
-  character(len=1024)   :: param_name, param_name_raw
+  character(len=512)    :: param_dir, runlist_in
+  character(len=1024)   :: param_name, param_name_raw, runlist_name, runlist_name_raw
   logical               :: exist
 
   call mpi_init(ierr)
@@ -70,6 +70,7 @@ program tod2comap
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
   call get_parameter(0, parfile, 'SIM_DIR', par_string=pre_sim)
   call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+  call get_parameter(0, parfile, 'RUNLIST',  par_string=runlist_in)
   call get_parameter(0, parfile, 'MAP_NAME', par_string=map_name)
   call get_parameter(0, parfile, 'SIM_NAME', par_string=sim_name)
   call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
@@ -102,10 +103,14 @@ program tod2comap
    param_name_raw = trim(param_dir)//"/param_"
    param_name = trim(param_name_raw)//trim(map_name)//".txt"
    
+   runlist_name_raw = trim(param_dir)//"/runlist_"
+   runlist_name = trim(runlist_name_raw)//trim(map_name)//".txt"
+   
    inquire(file=trim(param_name), exist=exist)
    
    if (.not. exist) then
       call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
    end if
    
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)

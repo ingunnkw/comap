@@ -18,8 +18,8 @@ program l2gen
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
   character(len=10)    :: target_name
-  character(len=512)   :: param_dir
-  character(len=1024)  :: param_name, param_name_raw
+  character(len=512)   :: param_dir, runlist_in
+  character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
@@ -60,7 +60,8 @@ program l2gen
   call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
   call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
   call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
-
+  call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
+  
   ! Copy parameter file and runlists to l2-file output directory 
    param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
    inquire(directory=trim(param_dir), exist=exist)
@@ -69,22 +70,27 @@ program l2gen
    end if 
 
    param_name_raw = trim(param_dir)//"/param_"
+   runlist_name_raw = trim(param_dir)//"/runlist_"
    write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+   write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
    
    inquire(file=trim(param_name), exist=exist)
    
    if (.not. exist) then
       call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
       irun = irun + 1
    else     
       irun = 1
       exist = .true.
       do while (exist)
          write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+         write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
          inquire(file=trim(param_name), exist=exist)
          irun = irun + 1
       end do      
       call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
    end if
    print *, "Run number: ", irun - 1
   
