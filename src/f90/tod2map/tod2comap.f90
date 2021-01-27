@@ -50,6 +50,10 @@ program tod2comap
   integer(i4b)          :: seed
   integer(i4b)          :: d 
 
+  character(len=512)    :: param_dir
+  character(len=1024)   :: param_name, param_name_raw
+  logical               :: exist
+
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
@@ -86,7 +90,24 @@ program tod2comap
      acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // trim(split_id) // '_' // trim(object) // '.h5'
   end if
 
+   ! Copy parameter file to map-file output directory
+   param_dir = "param4map"
+   param_dir = trim(pre)//trim(param_dir)
+   inquire(directory=trim(param_dir), exist=exist)
 
+   if (.not. exist) then 
+      call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+   end if 
+
+   param_name_raw = trim(param_dir)//"/param_"
+   param_name = trim(param_name_raw)//trim(map_name)//".txt"
+   
+   inquire(file=trim(param_name), exist=exist)
+   
+   if (.not. exist) then
+      call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+   end if
+   
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
