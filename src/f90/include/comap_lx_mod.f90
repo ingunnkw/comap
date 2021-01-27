@@ -54,6 +54,7 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
      real(sp),     allocatable, dimension(:,:,:,:,:) :: el_az_stats ! (g/a, n_chunks, freq, sb, feed)
+     integer(lgt)                                    :: import_freqmask, import_sigma ! bool whether to import freqmask from existing l2 file
      
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
@@ -309,10 +310,10 @@ contains
     call read_hdf(file, "point_cel",        data%point_cel)
     !call read_hdf(file, "flag",             data%flag)
     nfreq_full = nfreq*data%decimation_nu
-    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet))
+    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet), data%freqmask_reason(nfreq_full,nsb,ndet))
     call read_hdf(file, "freqmask",         data%freqmask)    
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
-    !call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
+    call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
     call read_hdf(file, "mean_tp",          data%mean_tp)
     allocate(data%tsys(2,nfreq_full,nsb,ndet), data%tsys_lowres(nfreq,nsb,ndet))
     call read_hdf(file, "Tsys",             data%tsys)
@@ -526,9 +527,12 @@ contains
     if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
     if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
     if (allocated(data%fknee))     call write_hdf(file, "fknee",             data%fknee)   
+       print *, "SIGMA0 SHAPE 2", shape(data%sigma0), allocated(data%sigma0)
+    
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     call write_hdf(file, "freqmask_reason",   data%freqmask_reason)
+    
     call write_hdf(file, "n_nan",             data%n_nan)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     if (allocated(data%chi2)) call write_hdf(file, "chi2",           data%chi2)
@@ -597,6 +601,7 @@ contains
     call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
     
     call close_hdf_file(file)
+
   end subroutine
 
 !!$  subroutine write_l3_file(filename, data)
