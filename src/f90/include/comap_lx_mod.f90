@@ -35,6 +35,7 @@ module comap_lx_mod
      integer(i4b)                                    :: n_pca_comp    ! Number of leading pca-components to subtract
      integer(i4b)                                    :: decimation_time, decimation_nu
      integer(i4b)                                    :: mask_outliers
+     integer(i4b)                                    :: irun          ! Run number identification
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
      integer(i4b), allocatable, dimension(:,:,:)     :: freqmask_reason ! the (first) reason for masking a specific frequency
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
@@ -507,7 +508,8 @@ contains
     else
        call open_hdf_file(scan%ss(k)%l2file, file, "w")
     end if
-
+    
+    call write_hdf(file, "runID",             data%irun)
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "mjd_start",         data%mjd_start)
     call write_hdf(file, "decimation_time",   data%decimation_time)
@@ -595,7 +597,7 @@ contains
     
     call read_hdf(l1_file, "hk/array/weather/windSpeed", hk_buffer)
     call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
-    
+       
     call close_hdf_file(file)
   end subroutine
 
