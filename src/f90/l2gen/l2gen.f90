@@ -69,8 +69,8 @@ program l2gen
       print *, "mkdir "//trim(param_dir)//"/param_and_runlist"
       call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
    end if 
+
    
-   stop
 
   
   check_existing = .true.
