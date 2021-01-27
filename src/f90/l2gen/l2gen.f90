@@ -17,6 +17,7 @@ program l2gen
   
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
+  character(len=512)   :: param_dir
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
@@ -57,6 +58,21 @@ program l2gen
   call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
   call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
 
+  ! Copy parameter file and runlists to l2-file output directory
+   param_dir = "/param_and_runlist"
+   param_dir = trim(l2dir)//trim(param_dir)
+   inquire(directory=trim(param_dir), exist=exist)
+   if (exist) then 
+      print *, "Exists"
+   else 
+      print *, "Does not exist"
+      print *, "mkdir "//trim(param_dir)//"/param_and_runlist"
+      call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+   end if 
+   
+   stop
+
+  
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
