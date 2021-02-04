@@ -278,10 +278,8 @@ program l2gen
               sigma_import_name = trim(sigma_import_dir)//trim(sigma_import_name)
               
               call read_l2_file(sigma_import_name, data_l2_import)
-              print *, "SIGMA0 SHAPE 3", allocated(data_l2_fullres%sigma0), allocated(data_l2_import%sigma0), allocated(data_l2_fullres%var_fullres), allocated(data_l2_import%var_fullres)
 
               call transfer_imported_sigma(data_l2_import, data_l2_fullres)
-              print *, "SIGMA0 SHAPE 3.5", allocated(data_l2_fullres%sigma0), allocated(data_l2_import%sigma0), allocated(data_l2_fullres%var_fullres), allocated(data_l2_import%var_fullres)
 
               call update_status(status, 'imported_sigma0')
               
@@ -301,10 +299,8 @@ program l2gen
               freq_import_name = trim(freq_import_dir)//trim(freq_import_name)
               
               call read_l2_file(freq_import_name, data_l2_import)
-              print *, "SIGMA0 SHAPE 3", shape(data_l2_import%sigma0), allocated(data_l2_fullres%sigma0), allocated(data_l2_import%sigma0), allocated(data_l2_fullres%var_fullres), allocated(data_l2_import%var_fullres)
 
               call transfer_diagnostics(data_l2_import, data_l2_fullres)
-              print *, "SIGMA0 SHAPE 3.5", shape(data_l2_import%sigma0), allocated(data_l2_fullres%sigma0), allocated(data_l2_import%sigma0), allocated(data_l2_fullres%var_fullres), allocated(data_l2_import%var_fullres)
 
               call update_status(status, 'imported_freqmask')
 
@@ -456,10 +452,8 @@ program l2gen
         end if
         
         ! If necessary, decimate L2 file in both time and frequency
-        print *, "HEI"
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
         call update_status(status, 'decimate')
-        print *, "HEI2"
         !write(*,*) 'c'
 
         ! Fit noise
@@ -653,7 +647,7 @@ contains
             &size(data_l2_in%spike_data,3),size(data_l2_in%spike_data,4),size(data_l2_in%spike_data,5)))
     data_l2_out%spike_data = data_l2_in%spike_data
     
-    if (data_l2_in%import_freqmask) then 
+    if (data_l2_out%import_freqmask) then
        if (.not. allocated(data_l2_out%freqmask)) allocate(data_l2_out%freqmask(ndet,nsb,nfreq))
        data_l2_out%freqmask = data_l2_in%freqmask
 
@@ -701,8 +695,6 @@ contains
 
     if (.not. allocated(data_l2_out%var_fullres)) allocate(data_l2_out%var_fullres(nfreq,nsb,ndet))
     data_l2_out%var_fullres = data_l2_in%var_fullres
-
-    print *, "SIGMA0 SHAPE", shape(data_l2_out%sigma0), allocated(data_l2_out%sigma0), allocated(data_l2_in%sigma0), allocated(data_l2_out%var_fullres), allocated(data_l2_in%var_fullres)
 
     call free_lx_struct(data_l2_in)
   end subroutine 
@@ -2153,7 +2145,6 @@ contains
        write(*,*) "Using imported tod variance"
        data_out%tod_mean    = data_in%tod_mean
        data_out%var_fullres = data_in%var_fullres
-       print *, "HEI2"
     else
        do k = 1, ndet
           if (nsamp_out == 0) cycle
@@ -2180,7 +2171,6 @@ contains
 !    close(58)
 !    call mpi_finalize(ierr)
 !    stop
-    print *, "HEI3"
     
     data_out%nu = 0.d0
     !$OMP PARALLEL PRIVATE(i,j,k,l,n,m,weight,w)
@@ -2196,7 +2186,7 @@ contains
           data_out%point_cel(2,i,j) = mean(data_in%point_cel(2,(i-1)*dt+1:i*dt,j)) ! Theta
           data_out%point_cel(3,i,j) = mean(data_in%point_cel(3,(i-1)*dt+1:i*dt,j)) ! Psi
        end do
-
+       
        do j = 1, nsb
           do k = 1, numfreq_out
              do l = 1, ndet           ! Time-ordered data
@@ -2228,7 +2218,6 @@ contains
     end do
     !$OMP END DO
     !$OMP END PARALLEL
-    print *, "HEI4"
     
     data_out%Tsys_lowres = 0.d0
     ! Calculate properly weighted lowres tsys
@@ -2257,9 +2246,7 @@ contains
              end if
           end do
        end do
-    end do
-    print *, "HEI5"
-    
+    end do    
     
     if (data_in%import_freqmask) then 
        data_out%chi2 = data_in%chi2
@@ -2282,7 +2269,6 @@ contains
           end do
        end do
     end if
-    print *, "HEI6"
     
     ! Polyfiltered TOD
     data_out%polyorder = data_in%polyorder
@@ -2311,7 +2297,6 @@ contains
     allocate(data_out%sec(nsamp_out))
     data_out%mjd_start = minval(data_out%time)  ! Starting MJD
     data_out%sec       = (data_out%time - data_out%mjd_start) * 24.d0 * 3600.d0
-    print *, "HEI7"
   
   end subroutine decimate_L2_data
 
