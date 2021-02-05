@@ -93,7 +93,9 @@ program l2gen
       call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
    end if
    print *, "Run number: ", irun - 1
-  
+   print *, myid 
+   stop
+
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
