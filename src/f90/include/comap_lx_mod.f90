@@ -524,10 +524,10 @@ contains
     !write(*,*) "right before", data%Tsys(1, 1, 1, 1)
     call write_hdf(file, "Tsys",              data%Tsys)
     call write_hdf(file, "Tsys_lowres",       data%Tsys_lowres)
+    
     if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
     if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
     if (allocated(data%fknee))     call write_hdf(file, "fknee",             data%fknee)   
-       print *, "SIGMA0 SHAPE 2", shape(data%sigma0), allocated(data%sigma0)
     
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
