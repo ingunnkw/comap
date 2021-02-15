@@ -65,7 +65,7 @@ program l2gen
   else if (import_sigma) then
      call get_parameter(unit, parfile, 'SIGMA0_L2_FOLDER',       par_string=sigma_import_dir)
   end if 
-   
+  
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
@@ -299,12 +299,10 @@ program l2gen
               freq_import_name = trim(freq_import_dir)//trim(freq_import_name)
               
               call read_l2_file(freq_import_name, data_l2_import)
-
               call transfer_diagnostics(data_l2_import, data_l2_fullres)
-
               call update_status(status, 'imported_freqmask')
 
-              call free_lx_struct(data_l2_import)             
+              call free_lx_struct(data_l2_import)     
            else
                if (verb) then
                   write(*,*) 'Making frequency mask', scan%ss(k)%id
@@ -357,7 +355,6 @@ program l2gen
                 & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
                 & / 4.d0 / 1024.d0 
         end if
-
         !!! All channels masked!!
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
            if (verb) then
@@ -371,8 +368,10 @@ program l2gen
            call update_status(status, 'decimate')
         
            ! Fit noise
-           if (.not. import_freqmask) then 
+           if (.not. import_freqmask .and. .not. import_sigma) then 
               call fit_noise(data_l2_decimated)
+           else
+              call transfer_imported_sigma(data_l2_fullres, data_l2_decimated)
            end if
            ! Write L2 file to disk
            if (verb) then
@@ -391,7 +390,6 @@ program l2gen
         call polyfilter_TOD(data_l2_fullres, bp_filter)
         call update_status(status, 'polyfilter')
         
-        
         ! Write diagnostic l2_file to disc
         if (diag_l2) then
            n_pca_store     = data_l2_fullres%n_pca_comp
@@ -405,7 +403,7 @@ program l2gen
            call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_5_after_poly")))
            data_l2_fullres%n_pca_comp = n_pca_store
         end if
-
+        
         if ((mask_outliers == 0) .and. (bp_filter > -1)) then
            call find_spikes(data_l2_fullres, verb)
            call update_status(status, 'find_spikes')
@@ -438,7 +436,7 @@ program l2gen
         
            call remove_pca_components(data_l2_filter, data_l2_fullres, pca_sig_rem)
         end if
-
+        
         ! Fourier transform frequency direction
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
@@ -450,21 +448,23 @@ program l2gen
               write(*,*) "NaN in tod after filtering!"
            end if
         end if
-        
         ! If necessary, decimate L2 file in both time and frequency
+
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+
         call update_status(status, 'decimate')
         !write(*,*) 'c'
 
         ! Fit noise
         if (.not. import_freqmask .and. .not. import_sigma) then 
            call fit_noise(data_l2_decimated)
-        else 
+        else
            call transfer_imported_sigma(data_l2_fullres, data_l2_decimated)
         end if
 
         ! Replace TOD with simulated data
         if (.false.) call simulate_gain_data(rng_handle, data_l2_decimated)
+
 
         ! Write L2 file to disk
         if (verb) then
@@ -646,7 +646,7 @@ contains
     if (.not. allocated(data_l2_out%spike_data)) allocate(data_l2_out%spike_data(size(data_l2_in%spike_data,1),size(data_l2_in%spike_data,2),&
             &size(data_l2_in%spike_data,3),size(data_l2_in%spike_data,4),size(data_l2_in%spike_data,5)))
     data_l2_out%spike_data = data_l2_in%spike_data
-    
+        
     if (data_l2_out%import_freqmask) then
        if (.not. allocated(data_l2_out%freqmask)) allocate(data_l2_out%freqmask(ndet,nsb,nfreq))
        data_l2_out%freqmask = data_l2_in%freqmask
@@ -666,8 +666,6 @@ contains
        if (.not. allocated(data_l2_out%var_fullres)) allocate(data_l2_out%var_fullres(nfreq,nsb,ndet))
        data_l2_out%var_fullres = data_l2_in%var_fullres
     end if 
-
-     
 
     call free_lx_struct(data_l2_in)
 
