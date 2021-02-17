@@ -66,6 +66,11 @@ program l2gen
      call get_parameter(unit, parfile, 'SIGMA0_L2_FOLDER',       par_string=sigma_import_dir)
   end if 
   
+  ! Require that outliers are masked if mask is to be imported
+  if (import_freqmask .and. .not. mask_outliers) then 
+     mask_outliers = .true. 
+  end if 
+
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
