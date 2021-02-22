@@ -35,6 +35,7 @@ module comap_lx_mod
      integer(i4b)                                    :: n_pca_comp    ! Number of leading pca-components to subtract
      integer(i4b)                                    :: decimation_time, decimation_nu
      integer(i4b)                                    :: mask_outliers
+     integer(i4b)                                    :: irun          ! Run number identification
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
      integer(i4b), allocatable, dimension(:,:,:)     :: freqmask_reason ! the (first) reason for masking a specific frequency
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
@@ -55,6 +56,9 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
      real(sp),     allocatable, dimension(:,:,:,:,:) :: el_az_stats ! (g/a, n_chunks, freq, sb, feed)
      integer(lgt)                                    :: import_freqmask, import_sigma ! bool whether to import freqmask from existing l2 file
+     
+     ! Baseline Template file
+     real(sp),    allocatable, dimension(:, :, :, :) :: tod_baseline ! (time, freq, sideband, detector) Baseline template of tod
      
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
@@ -359,6 +363,21 @@ contains
     !write(*,*) nfreq,nsb,ndet
   end subroutine read_l2_file
 
+  subroutine read_baselines(filename, data)
+  implicit none
+    character(len=*), intent(in) :: filename
+    type(lx_struct)              :: data
+    type(hdf_file)               :: file
+    integer(i4b)                 :: nsamp, nfreq, nsb, ndet, ext(4)
+    ! Reading in baseline fit of tod from file.
+    call free_lx_struct(data)
+    call open_hdf_file(filename, file, "r")
+    call get_size_hdf(file, "tod_baseline", ext)
+    nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
+    allocate(data%tod_baseline(nsamp,nfreq,nsb,ndet))
+    call read_hdf(file, "tod_baseline", data%tod_baseline)
+    call close_hdf_file(file)
+  end subroutine
 
   ! ! Where should this sub logically be?
   ! subroutine decimate(time, time_full, tod, tod_full, point, point_full, dec)
@@ -490,6 +509,7 @@ contains
     if(allocated(data%amb_state))     deallocate(data%amb_state)
     if(allocated(data%amb_time))      deallocate(data%amb_time)
     if(allocated(data%el_az_stats))   deallocate(data%el_az_stats)
+    if(allocated(data%tod_baseline))   deallocate(data%tod_baseline)
   end subroutine
 
   subroutine write_l2_file(scan, k, data, name_append)
@@ -508,7 +528,8 @@ contains
     else
        call open_hdf_file(scan%ss(k)%l2file, file, "w")
     end if
-
+    
+    call write_hdf(file, "runID",             data%irun)
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "mjd_start",         data%mjd_start)
     call write_hdf(file, "decimation_time",   data%decimation_time)
@@ -599,7 +620,7 @@ contains
     
     call read_hdf(l1_file, "hk/array/weather/windSpeed", hk_buffer)
     call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
-    
+       
     call close_hdf_file(file)
 
   end subroutine

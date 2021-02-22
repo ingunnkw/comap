@@ -9,18 +9,20 @@ module tod2comap_utils
      real(dp)     :: samprate, Tsys
      integer(i4b) :: nsamp, ndet, nfreq, nsb, nsim
      real(dp)     :: fmin, fmax, df, mean_el, mean_az
+     logical      :: fit_baselines
 
      integer(i4b), allocatable, dimension(:)   :: feeds, test             ! active feeds
      real(sp), allocatable, dimension(:,:,:)   :: freqmask                ! (freq, sb, det)
      real(dp), allocatable, dimension(:)       :: t                       ! (time) 
      real(dp), allocatable, dimension(:,:,:,:) :: d, d_long, d_raw, g     ! (time, freq,  sb, det)
+     real(dp), allocatable, dimension(:,:,:,:) :: baselines               ! (time, freq,  sb, det)
      real(dp), allocatable, dimension(:,:,:,:) :: d_sim, d_raw_sim        ! (time, freq,  sb, det)
      real(dp), allocatable, dimension(:,:,:)   :: rms                     ! (freq,  sb, det)
      real(dp), allocatable, dimension(:,:,:)   :: rms_sim                 ! (freq,  sb, det)   
      real(dp), allocatable, dimension(:,:,:)   :: sigma0, fknee, alpha, f ! (freq, sb, det)
      real(dp), allocatable, dimension(:,:)     :: pixel                   ! (sb, freq) or (time, det)
      real(dp), allocatable, dimension(:,:,:)   :: point, point_tel        ! (det, 3, time)
-
+  
   end type tod_type
 
 contains
@@ -79,33 +81,60 @@ contains
     !write(*,*) shape(data%point), tod%nsamp
     tod%pixel = -200
     tod%test  = 0
+    
+    if (tod%fit_baselines) then
+       tod%d = data%tod 
+    else 
+       do k = 1, tod%ndet
+          do l = 1, tod%nsb
+             do j = 1, tod%nfreq
+                if (tod%freqmask(j,l,k) == 0) cycle
+                !do j = 6, 6
+                do i = 1, tod%nsamp
+                   tod%d_raw(i,j,l,k) = data%tod(i,j,l,k)
+                end do
+                ! Apply high pass filter
+                tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) !- 1.d0 ! remove at some point
+                !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
+                if (nu_cut > 0.0) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
 
-    do k = 1, tod%ndet
-       do l = 1, tod%nsb
-          do j = 1, tod%nfreq
-             if (tod%freqmask(j,l,k) == 0) cycle
-             !do j = 6, 6
-             do i = 1, tod%nsamp
-                tod%d_raw(i,j,l,k) = data%tod(i,j,l,k)
+                ! Estimate RMS
+                !!var = variance(tod%d(2:,j,l,k) - tod%d(:tod%nsamp-1,j,l,k)) /2
+                !!tod%rms(j,l,k) = sqrt(var)!sqrt(variance(tod%d(:,j,l,k)))
              end do
-             ! Apply high pass filter
-             tod%d(:,j,l,k) = tod%d_raw(:,j,l,k) !- 1.d0 ! remove at some point
-             !tod%d(:,j,l,k) = tod%d(:,j,l,k) - mean(tod%d(:,j,l,k))
-             if (nu_cut > 0.0) call hp_filter(nu_cut, tod%d(:,j,l,k),tod%samprate)
-
-             ! Estimate RMS
-             !!var = variance(tod%d(2:,j,l,k) - tod%d(:tod%nsamp-1,j,l,k)) /2
-             !!tod%rms(j,l,k) = sqrt(var)!sqrt(variance(tod%d(:,j,l,k)))
           end do
        end do
-    end do
-
+    end if
     ! Perform tests
     call turnaround_test(tod%point_tel,tod%test)
 
     call free_lx_struct(data)
 
-  end subroutine get_tod
+    end subroutine get_tod
+
+  subroutine get_baselines(baselinefile, tod, parfile)
+  implicit none
+    character(len=*), intent(in)    :: baselinefile, parfile
+    type(tod_type),   intent(inout) :: tod
+
+    type(lx_struct) :: data
+    
+    ! Read baseline tod data
+    call read_baselines(baselinefile, data)
+
+    tod%nsamp = size(tod%d,1)
+    tod%nfreq = size(tod%d,2)
+    tod%nsb   = size(tod%d,3)
+    tod%ndet  = size(tod%d,4)
+    
+    allocate(tod%baselines(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet - 1))
+
+    tod%baselines = data%tod_baseline
+   
+    call free_lx_struct(data)
+
+  end subroutine get_baselines
+  
 
   subroutine get_sim(l2file, tod, parfile, rng_handle)
     implicit none
@@ -388,6 +417,9 @@ contains
     if (allocated(tod%d_sim))     deallocate(tod%d_sim)
     if (allocated(tod%d_raw_sim)) deallocate(tod%d_raw_sim) 
     if (allocated(tod%rms_sim))   deallocate(tod%rms_sim)
+
+    ! Imported baseline tod
+    if (allocated(tod%baselines)) deallocate(tod%baselines)
 
 
   end subroutine free_tod_type

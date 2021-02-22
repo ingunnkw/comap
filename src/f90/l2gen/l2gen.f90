@@ -19,6 +19,9 @@ program l2gen
   character(len=9)     :: id_old
   character(len = 1024)  :: freq_import_name, sigma_import_name
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
+  character(len=10)    :: target_name
+  character(len=512)   :: param_dir, runlist_in
+  character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
@@ -59,17 +62,50 @@ program l2gen
   call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
   call get_parameter(unit, parfile, 'IMPORT_FREQMASK',           par_lgt=import_freqmask)
   call get_parameter(unit, parfile, 'IMPORT_SIGMA0',             par_lgt=import_sigma)
-  
+  call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
+  call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
   if (import_freqmask) then 
      call get_parameter(unit, parfile, 'FREQMASK_L2_FOLDER',     par_string=freq_import_dir)
   else if (import_sigma) then
      call get_parameter(unit, parfile, 'SIGMA0_L2_FOLDER',       par_string=sigma_import_dir)
   end if 
-  
   ! Require that outliers are masked if mask is to be imported
   if (import_freqmask .and. .not. mask_outliers) then 
      mask_outliers = .true. 
   end if 
+  ! Copy parameter file and runlists to l2-file output directory 
+   param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
+   inquire(directory=trim(param_dir), exist=exist)
+   if (.not. exist) then 
+      call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+   end if 
+
+   param_name_raw = trim(param_dir)//"/param_"
+   runlist_name_raw = trim(param_dir)//"/runlist_"
+   write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+   write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+   
+   inquire(file=trim(param_name), exist=exist)
+   
+   if (.not. exist) then
+      call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+      irun = irun + 1
+   else     
+      irun = 1
+      exist = .true.
+      do while (exist)
+         write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+         write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+         inquire(file=trim(param_name), exist=exist)
+         irun = irun + 1
+      end do      
+      call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+   end if
+   print *, "Run number: ", irun - 1
+   print *, myid 
+   stop
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -476,6 +512,7 @@ program l2gen
            write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
         end if
 
+        data_l2_decimated%irun = irun - 1
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
         call write_l2_file(scan, k, data_l2_decimated)
         call update_status(status, 'write_l2')
