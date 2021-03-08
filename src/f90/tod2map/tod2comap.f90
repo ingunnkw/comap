@@ -41,7 +41,7 @@ program tod2comap
   character(len=5)      :: sim_string
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split, scan_index
 
-  integer(i4b)          :: myid, nproc, ierr, root
+  integer(i4b)          :: myid, nproc, ierr, root, irun
   logical               :: binning_split, found, obs_map, scan_map, split_mode, verbose, use_acc
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
@@ -91,28 +91,7 @@ program tod2comap
      acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // trim(split_id) // '_' // trim(object) // '.h5'
   end if
 
-   ! Copy parameter file to map-file output directory
-   param_dir = "param4map"
-   param_dir = trim(pre)//trim(param_dir)
-   inquire(directory=trim(param_dir), exist=exist)
-
-   if (.not. exist) then 
-      call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
-   end if 
-
-   param_name_raw = trim(param_dir)//"/param_"
-   param_name = trim(param_name_raw)//trim(map_name)//".txt"
-   
-   runlist_name_raw = trim(param_dir)//"/runlist_"
-   runlist_name = trim(runlist_name_raw)//trim(map_name)//".txt"
-   
-   inquire(file=trim(param_name), exist=exist)
-   
-   if (.not. exist) then
-      call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
-      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
-   end if
-   
+  
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
@@ -154,6 +133,45 @@ program tod2comap
   !write(*,*) split_info%split(:,1,2,75)
   !stop
 
+   if (myid == 0) then 
+     ! Copy parameter file and runlists to l2-file output directory 
+     ! Copy parameter file to map-file output directory
+      param_dir = "param4map"
+      param_dir = trim(pre)//trim(param_dir)
+      inquire(directory=trim(param_dir), exist=exist)
+
+      if (.not. exist) then 
+         call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+      end if 
+      
+      param_name_raw = trim(param_dir)//"/param_"
+      runlist_name_raw = trim(param_dir)//"/runlist_"
+      param_name_raw = trim(param_name_raw)//trim(map_name)
+      runlist_name_raw = trim(runlist_name_raw)//trim(map_name)
+      
+      write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+      write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+      
+      inquire(file=trim(param_name), exist=exist)
+      
+      if (.not. exist) then
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+         irun = irun + 1
+      else     
+         irun = 1
+         exist = .true.
+         do while (exist)
+            write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+            write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+            inquire(file=trim(param_name), exist=exist)
+            irun = irun + 1
+         end do      
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+      end if
+      print *, "Run number: ", irun - 1
+   end if
 
   if (myid==0) write(*,*) "Initialising mapmaker"
   call initialize_mapmaker(map_scan, parfile, pinfo, split_info)

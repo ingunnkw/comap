@@ -62,37 +62,6 @@ program l2gen
   call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
   call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
   
-  ! Copy parameter file and runlists to l2-file output directory 
-   param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
-   inquire(directory=trim(param_dir), exist=exist)
-   if (.not. exist) then 
-      call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
-   end if 
-
-   param_name_raw = trim(param_dir)//"/param_"
-   runlist_name_raw = trim(param_dir)//"/runlist_"
-   write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
-   write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
-   
-   inquire(file=trim(param_name), exist=exist)
-   
-   if (.not. exist) then
-      call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
-      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
-      irun = irun + 1
-   else     
-      irun = 1
-      exist = .true.
-      do while (exist)
-         write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
-         write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
-         inquire(file=trim(param_name), exist=exist)
-         irun = irun + 1
-      end do      
-      call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
-      call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
-   end if
-   print *, "Run number: ", irun - 1
   
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
@@ -107,6 +76,40 @@ program l2gen
   !call dset(id=myid,level=debug)
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
+
+   if (myid == 0) then 
+     ! Copy parameter file and runlists to l2-file output directory 
+      param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
+      inquire(directory=trim(param_dir), exist=exist)
+      if (.not. exist) then 
+         call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+      end if 
+
+      param_name_raw = trim(param_dir)//"/param_"
+      runlist_name_raw = trim(param_dir)//"/runlist_"
+      write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+      write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+      
+      inquire(file=trim(param_name), exist=exist)
+      
+      if (.not. exist) then
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+         irun = irun + 1
+      else     
+         irun = 1
+         exist = .true.
+         do while (exist)
+            write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+            write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+            inquire(file=trim(param_name), exist=exist)
+            irun = irun + 1
+         end do      
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+      end if
+      print *, "Run number: ", irun - 1
+   end if
 
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
