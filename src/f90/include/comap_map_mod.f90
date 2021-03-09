@@ -8,6 +8,7 @@ module comap_map_mod
 
   type map_type
      integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, nsplit, nmultisplit, n_test, n_ctrl ! 2^ntheta
+     integer(i4b) :: irun ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2), center(2)
@@ -101,6 +102,7 @@ contains
     character(len=120) :: map_name, rms_name, hit_name  
     type(hdf_file)     :: file
     call open_hdf_file(trim(filename), file, "w")
+    call write_hdf(file, "runID",          map%irun - 1)
     call write_hdf(file, "n_x",          map%n_x)
     call write_hdf(file, "n_y",          map%n_y)
     call write_hdf(file, "x",            map%x)
