@@ -18,7 +18,7 @@ program l2gen
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile, freq_import_dir, freq_dir, sigma_import_dir, sigma_dir
   character(len=9)     :: id_old
   character(len = 1024)  :: freq_import_name, sigma_import_name
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
   character(len=10)    :: target_name
   character(len=512)   :: param_dir, runlist_in
   character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw
@@ -104,8 +104,7 @@ program l2gen
       call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
    end if
    print *, "Run number: ", irun - 1
-   print *, myid 
-   stop
+   
 
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
