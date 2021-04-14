@@ -24,7 +24,7 @@ program l2gen
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
-  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys
+  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
@@ -56,6 +56,7 @@ program l2gen
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
   call get_parameter(unit, parfile, 'IS_SIM',                    par_lgt=is_sim)
   call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
+  call get_parameter(unit, parfile, 'Max_TSYS',                  par_dp=max_tsys)
   call get_parameter(unit, parfile, 'REMOVE_ELEVATION_TEMP',     par_lgt=rem_el)
   call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
   call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
@@ -346,7 +347,7 @@ program l2gen
            call transfer_diagnostics(data_l2_filter, data_l2_fullres)
            
 
-           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, verb)
+           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, .false.)
            call update_status(status, 'made_freqmask')
 
            call free_lx_struct(data_l2_filter)
@@ -354,12 +355,6 @@ program l2gen
 
 !        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
  !       write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
-        if (verb) then
-           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, &
-                & sum(data_l2_fullres%freqmask_full) &
-                & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
-                & / 4.d0 / 1024.d0 
-        end if
 
         !!! All channels masked!!
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
@@ -445,13 +440,25 @@ program l2gen
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
         ! Apply absolute calibration
-        call calibrate_tod(data_l2_fullres)
+        call calibrate_tod(data_l2_fullres, max_tsys)
+        
+        ! Update freqmask after max_tsys cut
+        call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, verb)
+
+        if (verb) then
+           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, &
+                & sum(data_l2_fullres%freqmask_full) &
+                & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
+                & / 4.d0 / 1024.d0 
+        end if
+
         
         if (verb) then
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
               write(*,*) "NaN in tod after filtering!"
            end if
         end if
+        
         
         ! If necessary, decimate L2 file in both time and frequency
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
@@ -645,6 +652,10 @@ contains
     if (.not. allocated(data_l2_out%spike_data)) allocate(data_l2_out%spike_data(size(data_l2_in%spike_data,1),size(data_l2_in%spike_data,2),&
             &size(data_l2_in%spike_data,3),size(data_l2_in%spike_data,4),size(data_l2_in%spike_data,5)))
     data_l2_out%spike_data = data_l2_in%spike_data
+    if (.not. allocated(data_l2_out%AB_mask)) allocate(data_l2_out%AB_mask(ndet,nsb,nfreq))
+    data_l2_out%AB_mask = data_l2_in%AB_mask
+    if (.not. allocated(data_l2_out%leak_mask)) allocate(data_l2_out%leak_mask(ndet,nsb,nfreq))
+    data_l2_out%leak_mask = data_l2_in%leak_mask
     
     call free_lx_struct(data_l2_in)
 
@@ -750,8 +761,8 @@ contains
     real(dp),     allocatable, dimension(:,:)       :: outlier_mask
     logical(lgt) :: mask_edge_corrs, rm_outliers, verb
     character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
-    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str
-    real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe
+    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str, aliasing_filename
+    real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe, aliasing_db_cutoff
     integer(i4b) :: n_neighbor, prod_offset
     integer(i4b), dimension(3) :: box_offsets, stripe_offsets
     real(dp),     dimension(3) :: nsigma_prod_box, nsigma_prod_stripe, nsigma_mean_box
@@ -770,7 +781,9 @@ contains
     call get_parameter(unit, parfile, 'VARIANCE_MAX',              par_dp=var_max)
     call get_parameter(unit, parfile, 'CORRELATION_MAX',           par_dp=corr_max)
     call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=neighbor_factor)
-    call get_parameter(unit, parfile, 'NSIGMA_EDGE_CORRS',         par_dp=nsigma_edge_corrs)
+!    call get_parameter(unit, parfile, 'NSIGMA_EDGE_CORRS',         par_dp=nsigma_edge_corrs)
+    call get_parameter(unit, parfile, 'ALIASING_FILE',             par_string=aliasing_filename)
+    call get_parameter(unit, parfile, 'ALIASING_DB_CUT',           par_dp=aliasing_db_cutoff)
     call get_parameter(unit, parfile, 'MASK_EDGE_CORRS',           par_lgt=mask_edge_corrs)
     call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
     call get_parameter(unit, parfile, 'BOX_OFFSETS',               par_string=box_offset_str)
@@ -861,59 +874,91 @@ contains
 !     allocate(corrs(2 * nfreq, 2 * nfreq))
 
     if (mask_edge_corrs) then
-       edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
+       
+       call open_hdf_file(aliasing_filename, file, "r")
+       if(.not. allocated(data_l2%AB_mask)) allocate(data_l2%AB_mask(nfreq,nsb,20)) 
+       if(.not. allocated(data_l2%leak_mask)) allocate(data_l2%leak_mask(nfreq,nsb,20)) 
+       
+       ! Read telescope coordinates
+       call read_hdf(file, "AB_mask",            data_l2%AB_mask)
+       call read_hdf(file, "leak_mask",          data_l2%leak_mask)
+
+       
+       call close_hdf_file(file)
+
        do i = 1, ndet
           if (.not. is_alive(data_l2%pixels(i))) cycle
-          do k = 1, nfreq
-             reason = 40
-             j = 1
-             n = 1 + nfreq - k ! type 1
-             m = 2
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 2
-             n = 1 + nfreq - k ! type 1
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 3
-             n = 1 + nfreq - k ! type 1
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = 1 + nfreq - k ! type 1
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = 1 + nfreq - k ! type 1
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             reason = 41
-             j = 1
-             n = k ! type 2
-             m = 2
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 2
-             n = k ! type 2
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 2
-             n = k ! type 2
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 3
-             n = k ! type 2
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = k ! type 2
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = k ! type 2
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+          do j = 1, nsb
+             do k = 1, nfreq
+                if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+                
+                if (data_l2%AB_mask(k,j,data_l2%pixels(i)) < aliasing_db_cutoff) then
+                   data_l2%freqmask_full(k,j,i) = 0.d0
+                   data_l2%freqmask_reason(k,j,i) = 40
+                end if
+
+                if (data_l2%leak_mask(k,j,data_l2%pixels(i)) < aliasing_db_cutoff) then
+                   data_l2%freqmask_full(k,j,i) = 0.d0
+                   data_l2%freqmask_reason(k,j,i) = 41
+                end if
+             end do
           end do
        end do
        vars = vars * data_l2%freqmask_full
+       
+!       edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
+       ! do i = 1, ndet
+       !    if (.not. is_alive(data_l2%pixels(i))) cycle
+       !    do k = 1, nfreq
+       !       reason = 40
+       !       j = 1
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 2
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 2
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 3
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       reason = 41
+       !       j = 1
+       !       n = k ! type 2
+       !       m = 2
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 2
+       !       n = k ! type 2
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 2
+       !       n = k ! type 2
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 3
+       !       n = k ! type 2
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = k ! type 2
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = k ! type 2
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !    end do
+       ! end do
+       ! vars = vars * data_l2%freqmask_full
     end if
 !    allocate(box_offsets(3), prod_offsets(3))
     
@@ -2042,9 +2087,13 @@ contains
        allocate(data_out%acceptrate(nsb,ndet))
        allocate(data_out%diagnostics(size(data_in%nu,1),nsb,ndet,size(data_in%diagnostics,4)))
        allocate(data_out%cut_params(size(data_in%cut_params,1),size(data_in%cut_params,2)))
+       allocate(data_out%AB_mask(size(data_in%nu,1,1),nsb,ndet))
+       allocate(data_out%leak_mask(size(data_in%nu,1,1),nsb,ndet))
        data_out%acceptrate    = data_in%acceptrate
        data_out%diagnostics   = data_in%diagnostics
        data_out%cut_params    = data_in%cut_params
+       data_out%AB_mask       = data_in%AB_mask
+       data_out%leak_mask     = data_in%leak_mask
     end if
     allocate(data_out%pixels(ndet))
     allocate(data_out%pix2ind(size(data_in%pix2ind,1)))
@@ -2092,6 +2141,10 @@ contains
        data_out%pca_comp      = data_in%pca_comp
        data_out%pca_eigv      = data_in%pca_eigv
     end if
+
+
+    
+
     
     ! Make angles safe for averaging
     do j = 1, ndet
@@ -3031,9 +3084,10 @@ contains
     end do
   end subroutine find_tsys
 
-  subroutine calibrate_tod(data_l2_fullres)
+  subroutine calibrate_tod(data_l2_fullres, max_tsys)
     implicit none
     type(lx_struct), intent(inout) :: data_l2_fullres
+    real(dp), intent(in)           :: max_tsys
     integer(i4b) :: i, j, k, ndet, nfreq, nsb
     nfreq    = size(data_l1%tod,2)
     nsb      = size(data_l1%tod,3)
@@ -3044,7 +3098,12 @@ contains
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2_fullres%freqmask_full(k,j,i) == 0.d0) cycle
-             data_l2_fullres%tod(:,k,j,i)  = data_l2_fullres%Tsys(k,j,i) * data_l2_fullres%tod(:,k,j,i)
+             if (data_l2_fullres%Tsys(k,j,i) > max_tsys) then
+                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+                data_l2_fullres%freqmask_reason(k,j,i) = 60
+             else
+                data_l2_fullres%tod(:,k,j,i)  = data_l2_fullres%Tsys(k,j,i) * data_l2_fullres%tod(:,k,j,i)
+             end if
           end do
        end do
     end do

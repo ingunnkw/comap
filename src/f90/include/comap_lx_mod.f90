@@ -56,6 +56,9 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:,:)   :: diagnostics   ! various diagnostics used to make freqmask
      real(dp),     allocatable, dimension(:,:,:,:,:) :: spike_data    ! spike and jump data (n_spikes,spike/jump,info) info = (amp,mjd,samp,sb,feed)
      real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
+     real(dp),     allocatable, dimension(:,:,:)     :: AB_mask       ! aliasing between A and B (in db suppression) (freq, sb,detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: leak_mask     ! aliasing from ouside range (in db suppression) (freq, sb,detector)
+
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: chi2          ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
@@ -468,6 +471,8 @@ contains
     if(allocated(data%flag))        deallocate(data%flag)
 
     if(allocated(data%point))         deallocate(data%point)
+    if(allocated(data%AB_mask))       deallocate(data%AB_mask)
+    if(allocated(data%leak_mask))     deallocate(data%leak_mask)
     if(allocated(data%gain))          deallocate(data%gain)
     if(allocated(data%sigma0))        deallocate(data%sigma0)
     if(allocated(data%alpha))         deallocate(data%alpha)
@@ -570,6 +575,8 @@ contains
     !write(*,*) "middle", data%mask_outliers
     if ((data%mask_outliers == 1) .and. (data%n_cal > 0)) then  ! if n_cal is 0 we don't run diagnostics
        !write(*,*) data%mask_outliers
+       call write_hdf(file, "AB_aliasing",    data%AB_mask)
+       call write_hdf(file, "leak_aliasing",  data%leak_mask)
        call write_hdf(file, "acceptrate",     data%acceptrate)
        call write_hdf(file, "diagnostics",    data%diagnostics)
        call write_hdf(file, "cut_params",     data%cut_params)
@@ -895,6 +902,14 @@ contains
     if(allocated(lx_in%var_fullres))   then
        allocate(lx_out%var_fullres(size(lx_in%var_fullres,1),size(lx_in%var_fullres,2),size(lx_in%var_fullres,3)))
        lx_out%var_fullres = lx_in%var_fullres
+    end if
+    if(allocated(lx_in%AB_mask))   then
+       allocate(lx_out%AB_mask(size(lx_in%AB_mask,1),size(lx_in%AB_mask,2),size(lx_in%AB_mask,3)))
+       lx_out%AB_mask = lx_in%AB_mask
+    end if
+    if(allocated(lx_in%leak_mask))   then
+       allocate(lx_out%leak_mask(size(lx_in%leak_mask,1),size(lx_in%leak_mask,2),size(lx_in%leak_mask,3)))
+       lx_out%leak_mask = lx_in%leak_mask
     end if
 
     if(allocated(lx_in%spike_data))   then
