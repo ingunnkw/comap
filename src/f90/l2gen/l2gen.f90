@@ -317,6 +317,9 @@ program l2gen
            call update_status(status, 'copy_data')
            
            ! Poly-filter copied data
+           write(*,*) "start"
+           call frequency_filter_TOD(data_l2_filter)
+           write(*,*) "stop"
            call polyfilter_TOD(data_l2_filter, bp_filter0)
            call update_status(status, 'polyfilter0')
 !           write(*,*) sum(data_l2_filter%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
@@ -1681,6 +1684,251 @@ contains
 !    close(22)
 
   end subroutine polyfilter_TOD
+
+  subroutine frequency_filter_TOD(data_l2)
+   implicit none
+   type(Lx_struct),                            intent(inout) :: data_l2
+
+   integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp
+   real(dp) :: detinv, samprate, nu, mu
+   real(dp), allocatable, dimension(:,:) :: F, FT, a, P, PT, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY, FTZY_f, y
+   real(sp),     allocatable, dimension(:) :: dt, Cf
+   complex(spc), allocatable, dimension(:) :: dv
+   integer*8    :: plan_fwd, plan_back
+   ! integer(i4b),                               intent(in)    :: bp_filter
+   ! integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, p, stat
+   ! real(dp)     :: samprate, nu, mu
+   ! real(dp),     allocatable, dimension(:)   :: x
+   ! real(dp),     allocatable, dimension(:,:) :: T, A
+
+   ! data_l2%polyorder = bp_filter
+   ! if (bp_filter < 0) return
+
+   nsamp       = size(data_l2%tod,1)
+   nfreq       = size(data_l2%tod,2)
+   nsb         = size(data_l2%tod,3)
+   ndet        = size(data_l2%tod,4)
+   n = nsamp + 1
+   samprate = 50
+
+   ! if (nsamp == 0) then
+   !    allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
+   !    data_l2%tod_poly = 0.d0
+   !    return
+   ! end if
+   ! allocate(T(nfreq,0:p), A(0:p,0:p))
+   ! allocate(data_l2%tod_freqfilter(nsamp,0:p,nsb,ndet))
+
+   allocate(P(nfreq, 2))
+   allocate(PT(2, nfreq))
+   allocate(PTP(2, 2))
+   allocate(PTP_inv(2, 2))
+   allocate(m(2, nsamp))
+   allocate(F(nfreq, 1))
+   allocate(FT(1, nfreq))
+   allocate(a(1, nsamp))
+   allocate(FTZY(1, nsamp))
+   allocate(Z(nfreq, nfreq))
+   allocate(I_mat(nfreq, nfreq))
+   allocate(z_scalar(1,1))
+   allocate(y(nfreq, nsamp))
+   allocate(Cf(0:n-1))
+
+   do i = 1, n-1
+      nu = ind2freq(i+1, samprate, n)
+      write(*,*), i, nu
+      Cf(i) = 1.d-4*(1.d0 + (nu/0.1d0)**(-1.5d0))
+      ! if(Cf(i)<1.0d-12) then
+         ! write(*,*) "ASDF", i, Cf(i)
+      ! end if
+   end do
+   Cf(0) = 1.d0
+
+   do i = 1, nfreq
+      do j = 1, nfreq
+          I_mat(i,j) = 0
+      end do
+      I_mat(i,i) = 1
+  end do
+
+   write(*,*) SHAPE(data_l2%Tsys(:,1,1)) 
+   P(:,1) = data_l2%Tsys(:,1,1)
+   do i = 1, nfreq
+      P(i,2) = (2.0d0*i)/nfreq - 1.0d0
+   end do
+   do i = 1, nfreq
+      F(i,1) = 1
+   end do
+   write(*,*) P(1,2), P(2,2), P(3,2), P(4,2), P(nfreq-1,2), P(nfreq,2)
+   write(*,*) 
+   write(*,*) F(1,1), F(2,1), F(3,1), F(4,1), F(nfreq-1,1), F(nfreq,1)
+   write(*,*)
+
+   write(*,*) "1"
+   FT = TRANSPOSE(F)
+   write(*,*) "2"
+   PT = TRANSPOSE(P)
+   write(*,*) "3"
+   PTP = MATMUL(PT, P)
+   write(*,*) "4"
+   detinv = 1/(PTP(1,1)*PTP(2,2) - PTP(1,2)*PTP(2,1))
+   write(*,*) "5"
+   PTP_inv(1,1) = +detinv * PTP(2,2)
+   PTP_inv(2,1) = -detinv * PTP(2,1)
+   PTP_inv(1,2) = -detinv * PTP(1,2)
+   PTP_inv(2,2) = +detinv * PTP(1,1)
+   write(*,*) "6"
+
+   ! Z = I_mat - MATMUL(MATMUL(P, PTP_inv), PT)
+   Z = I_mat - MATMUL(MATMUL(P, PTP_inv), PT)
+   write(*,*) "7"
+   z_scalar = MATMUL(MATMUL(FT, Z), F)
+   write(*,*) "8"
+   write(*,*) SHAPE(I_mat)
+   write(*,*) SHAPE(FT)
+   write(*,*) SHAPE(Z)
+   write(*,*) SHAPE(data_l2%tod(:,:,1,1))
+
+   y(:,:) = TRANSPOSE(data_l2%tod(:,:,1,1))
+
+   do i = 1, nfreq
+      if (ISNAN(P(i,1))) then
+         write(*,*) "FOUND TSYS NAN", i
+         P(i,1) = 0.0d0
+      end if 
+      do j = 1, nsamp
+         if (ISNAN(y(i,j))) then
+            write(*,*) "FOUND NAN", i, j
+            y(i,j) = 0.0d0
+         end if
+      end do
+   end do
+
+
+   ! write(*,*) MATMUL(MATMUL(FT, Z), data_l2%tod(:,:,1,1))
+   FTZY = MATMUL(MATMUL(FT, Z), y)
+   ! write(*,*) "9"
+   write(*,*) "9"
+   
+   write(*,*) FTZY(1,1), FTZY(1,2), FTZY(1,3), FTZY(1,nsamp-2), FTZY(1,nsamp-1), FTZY(1,nsamp)
+   write(*,*) "10"
+
+   nomp = 1
+   call sfftw_init_threads(err)
+   call sfftw_plan_with_nthreads(nomp)
+   allocate(dt(2*nsamp), dv(0:n-1))
+   call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
+   call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
+   deallocate(dt, dv)
+   write(*,*) "11"
+
+   allocate(dt(2*nsamp), dv(0:n-1))
+   dt(1:nsamp)            = FTZY(1,:)
+   dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+   write(*,*) dt(1), dt(2), dt(3), dt(nsamp-1), dt(nsamp), dt(nsamp+1), dt(nsamp+2), dt(nsamp*2-2), dt(nsamp*2-1), dt(nsamp*2)
+   call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+
+   write(*,*) "12"
+   write(*,*) z_scalar, z_scalar(1,1)
+   write(*,*) dv(1), dv(2), dv(3), dv(nsamp-3), dv(nsamp-2), dv(nsamp-1)
+   do i = 0, n-1
+      ! if (ISNAN(REAL(dv(i)))) then
+         ! write(*,*) "NAN", i
+      ! end if
+      ! write(*,*) i, n-1, dv(i), z_scalar(1,1)
+      write(*,*) z_scalar(1,1), Cf(i), (z_scalar(1,1) + 0.01d0/Cf(i))
+      dv(i) = dv(i)/(z_scalar(1,1) + 0.01d0/Cf(i))
+   end do
+   ! dv = dv*1.0d0/z_scalar(1,1)
+   open(1, file = 'ftr_dt_before.dat', status = 'new')  
+   do i=1,nsamp*2
+      write(1,*) dt(i)
+   end do 
+   close(1)
+
+   write(*,*) "13"
+   call sfftw_execute_dft_c2r(plan_back, dv, dt)
+   dt = dt / (2*nsamp)
+   write(*,*) "14"
+   write(*,*) dt(1), dt(2), dt(3), dt(nsamp-2), dt(nsamp-1), dt(nsamp)
+   write(*,*) "15"
+
+   deallocate(P, PT, PTP, PTP_inv, m, F, FT, a, FTZY)
+   write(*,*) "99"
+
+
+   open(1, file = 'ftr_dt_after.dat', status = 'new')  
+   do i=1,nsamp*2
+      write(1,*) dt(i)
+   end do 
+   close(1)
+
+   open(1, file = 'ftr_dv.dat', status = 'new')
+   do i=0,n-1
+      write(1,*) dv(i)
+   end do 
+   close(1)
+
+   ! ! Precompute polynomial basis
+   ! do k = 1, nfreq
+   !    mu = max(min(2.d0*real(k-1,dp)/real(nfreq-1,dp)-1.d0,1.d0),-1.d0)
+   !    call get_legendre_polynomials(mu,T(k,:))
+   ! end do
+
+   ! do i = 1, ndet
+   !    if (.not. is_alive(data_l2%pixels(i))) cycle
+   !    do j = 1, nsb
+   !       !write(*,*) 'Polyfiltering det, sb = ', i, j
+
+   !       if (all(data_l2%freqmask_full(:,j,i) == 0.d0)) cycle
+
+   !       ! Pre-compute Cholesky factor of coupling matrix for current sideband
+   !       do m = 0, p
+   !          do n = 0, m
+   !             A(m,n) = sum(T(:,m)*T(:,n)*data_l2%freqmask_full(:,j,i))
+   !          end do
+   !       end do
+   !       call dpotrf('L', p+1, A, p+1, stat )
+
+   !       ! Solve for polynomial coefficients
+   !       !$OMP PARALLEL PRIVATE(k,m,x,l,stat)
+   !       allocate(x(0:p))
+   !       !$OMP DO SCHEDULE(guided)
+   !       do k = 1, nsamp
+   !          do m = 0, p
+   !             x(m) = 0.d0
+   !             do l = 1, nfreq
+   !                if (data_l2%freqmask_full(l,j,i) == 0.d0) cycle
+   !                x(m) = x(m) + data_l2%tod(k,l,j,i)*T(l,m)
+   !             end do
+   !          end do
+   !          call dpotrs( 'L', p+1, 1, A, p+1, x, p+1, stat)
+
+   !          ! Store poly coeffs as separate TOD
+   !          data_l2%tod_poly(k,:,j,i) = x
+
+   !          ! Subtract fitted polynomial from main TOD
+   !          do l = 1, nfreq
+   !             if (data_l2%freqmask_full(l,j,i) == 0.d0) cycle
+   !             data_l2%tod(k,l,j,i) = data_l2%tod(k,l,j,i) - sum(T(l,:)*x)
+   !          end do
+   !       end do
+   !       !$OMP END DO
+   !       deallocate(x)
+   !       !$OMP END PARALLEL
+   !    end do
+   ! end do
+   ! deallocate(T, A)
+   
+!    open(22, file="tod_after_poly_2_3.unf", form="unformatted") ! Adjusted open statement
+!    write(22) data_l2%tod(:,:,3,1)
+!    close(22)
+!    open(22, file="tod_after_poly_15_2.unf", form="unformatted") ! Adjusted open statement
+!    write(22) data_l2%tod(:,:,1,14)
+!    close(22)
+
+ end subroutine frequency_filter_TOD
+
 
   subroutine freq_filter_TOD(data_l2)
     implicit none
