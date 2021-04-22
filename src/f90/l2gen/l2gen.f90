@@ -1689,12 +1689,14 @@ contains
    implicit none
    type(Lx_struct),                            intent(inout) :: data_l2
 
-   integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp
-   real(dp) :: detinv, samprate, nu, mu
-   real(dp), allocatable, dimension(:,:) :: F, FT, a, P, PT, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY, FTZY_f, y
+   integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb
+   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6
+   real(dp), allocatable, dimension(:,:) :: F, FT, FTZ, a, P, PT, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY, FTZY_f, y
    real(sp),     allocatable, dimension(:) :: dt, Cf
    complex(spc), allocatable, dimension(:) :: dv
    integer*8    :: plan_fwd, plan_back
+
+   real(dp), allocatable, dimension(:,:) :: m2, FTZY2
    ! integer(i4b),                               intent(in)    :: bp_filter
    ! integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, p, stat
    ! real(dp)     :: samprate, nu, mu
@@ -1718,100 +1720,43 @@ contains
    ! end if
    ! allocate(T(nfreq,0:p), A(0:p,0:p))
    ! allocate(data_l2%tod_freqfilter(nsamp,0:p,nsb,ndet))
+   ! open(1, file = 'ftr_tod_before.dat', status = 'new')
+   ! do j=1,nfreq
+   !    do i=1,nsamp
+   !       write(1,*) data_l2%tod(i,j,1,9)
+   !    end do 
+   ! end do 
 
    allocate(P(nfreq, 2))
    allocate(PT(2, nfreq))
    allocate(PTP(2, 2))
    allocate(PTP_inv(2, 2))
    allocate(m(2, nsamp))
+   allocate(m2(2, nsamp))
    allocate(F(nfreq, 1))
    allocate(FT(1, nfreq))
+   allocate(FTZ(1, nfreq))
    allocate(a(1, nsamp))
    allocate(FTZY(1, nsamp))
+   allocate(FTZY2(1, nsamp))
    allocate(Z(nfreq, nfreq))
    allocate(I_mat(nfreq, nfreq))
    allocate(z_scalar(1,1))
-   allocate(y(nfreq, nsamp))
+   ! allocate(y(nfreq, nsamp))
    allocate(Cf(0:n-1))
 
    do i = 1, n-1
       nu = ind2freq(i+1, samprate, n)
-      write(*,*), i, nu
       Cf(i) = 1.d-4*(1.d0 + (nu/0.1d0)**(-1.5d0))
-      ! if(Cf(i)<1.0d-12) then
-         ! write(*,*) "ASDF", i, Cf(i)
-      ! end if
    end do
    Cf(0) = 1.d0
 
    do i = 1, nfreq
       do j = 1, nfreq
-          I_mat(i,j) = 0
+            I_mat(i,j) = 0
       end do
       I_mat(i,i) = 1
-  end do
-
-   write(*,*) SHAPE(data_l2%Tsys(:,1,1)) 
-   P(:,1) = data_l2%Tsys(:,1,1)
-   do i = 1, nfreq
-      P(i,2) = (2.0d0*i)/nfreq - 1.0d0
    end do
-   do i = 1, nfreq
-      F(i,1) = 1
-   end do
-   write(*,*) P(1,2), P(2,2), P(3,2), P(4,2), P(nfreq-1,2), P(nfreq,2)
-   write(*,*) 
-   write(*,*) F(1,1), F(2,1), F(3,1), F(4,1), F(nfreq-1,1), F(nfreq,1)
-   write(*,*)
-
-   write(*,*) "1"
-   FT = TRANSPOSE(F)
-   write(*,*) "2"
-   PT = TRANSPOSE(P)
-   write(*,*) "3"
-   PTP = MATMUL(PT, P)
-   write(*,*) "4"
-   detinv = 1/(PTP(1,1)*PTP(2,2) - PTP(1,2)*PTP(2,1))
-   write(*,*) "5"
-   PTP_inv(1,1) = +detinv * PTP(2,2)
-   PTP_inv(2,1) = -detinv * PTP(2,1)
-   PTP_inv(1,2) = -detinv * PTP(1,2)
-   PTP_inv(2,2) = +detinv * PTP(1,1)
-   write(*,*) "6"
-
-   ! Z = I_mat - MATMUL(MATMUL(P, PTP_inv), PT)
-   Z = I_mat - MATMUL(MATMUL(P, PTP_inv), PT)
-   write(*,*) "7"
-   z_scalar = MATMUL(MATMUL(FT, Z), F)
-   write(*,*) "8"
-   write(*,*) SHAPE(I_mat)
-   write(*,*) SHAPE(FT)
-   write(*,*) SHAPE(Z)
-   write(*,*) SHAPE(data_l2%tod(:,:,1,1))
-
-   y(:,:) = TRANSPOSE(data_l2%tod(:,:,1,1))
-
-   do i = 1, nfreq
-      if (ISNAN(P(i,1))) then
-         write(*,*) "FOUND TSYS NAN", i
-         P(i,1) = 0.0d0
-      end if 
-      do j = 1, nsamp
-         if (ISNAN(y(i,j))) then
-            write(*,*) "FOUND NAN", i, j
-            y(i,j) = 0.0d0
-         end if
-      end do
-   end do
-
-
-   ! write(*,*) MATMUL(MATMUL(FT, Z), data_l2%tod(:,:,1,1))
-   FTZY = MATMUL(MATMUL(FT, Z), y)
-   ! write(*,*) "9"
-   write(*,*) "9"
-   
-   write(*,*) FTZY(1,1), FTZY(1,2), FTZY(1,3), FTZY(1,nsamp-2), FTZY(1,nsamp-1), FTZY(1,nsamp)
-   write(*,*) "10"
 
    nomp = 1
    call sfftw_init_threads(err)
@@ -1820,54 +1765,151 @@ contains
    call sfftw_plan_dft_r2c_1d(plan_fwd,  2*nsamp, dt, dv, fftw_estimate + fftw_unaligned)
    call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
    deallocate(dt, dv)
-   write(*,*) "11"
 
+   call wall_time(t5)
+
+   !!$OMP PARALLEL PRIVATE(feed, sb, P, F, FT, PT, PTP, PTP_inv, detinv, Z, z_scalar, y, FTZY, dt, dv, a, m, k, i)
    allocate(dt(2*nsamp), dv(0:n-1))
-   dt(1:nsamp)            = FTZY(1,:)
-   dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
-   write(*,*) dt(1), dt(2), dt(3), dt(nsamp-1), dt(nsamp), dt(nsamp+1), dt(nsamp+2), dt(nsamp*2-2), dt(nsamp*2-1), dt(nsamp*2)
-   call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+   !!$OMP DO SCHEDULE(guided)
+   do feed = 1, ndet
+      if (.not. is_alive(data_l2%pixels(feed))) cycle
+      do sb = 1, nsb
+         if (all(data_l2%freqmask_full(:,sb,feed) == 0.d0)) cycle
+         write(*,*), feed, sb
+         call wall_time(t3)
+         P(:,1) = data_l2%Tsys(:,sb,feed)
+         do i = 1, nfreq
+            P(i,2) = (2.0d0*i)/nfreq - 1.0d0
+            F(i,1) = 1
+         end do
+         call wall_time(t4)
+         write(*,*) "0", t4-t3
+         do k=1, nfreq
+            if (data_l2%freqmask_full(k,sb,feed) == 0.d0) then
+               P(k,1) = 0
+               P(k,2) = 0
+               F(k,1) = 0
+            end if
+         end do
 
-   write(*,*) "12"
-   write(*,*) z_scalar, z_scalar(1,1)
-   write(*,*) dv(1), dv(2), dv(3), dv(nsamp-3), dv(nsamp-2), dv(nsamp-1)
-   do i = 0, n-1
-      ! if (ISNAN(REAL(dv(i)))) then
-         ! write(*,*) "NAN", i
-      ! end if
-      ! write(*,*) i, n-1, dv(i), z_scalar(1,1)
-      write(*,*) z_scalar(1,1), Cf(i), (z_scalar(1,1) + 0.01d0/Cf(i))
-      dv(i) = dv(i)/(z_scalar(1,1) + 0.01d0/Cf(i))
+         call wall_time(t3)
+         write(*,*) "1", t3 - t4
+         FT = TRANSPOSE(F)      
+         PT = TRANSPOSE(P)
+         PTP = MATMUL(PT, P)
+         call wall_time(t4)
+         write(*,*) "2", t4 - t3
+         detinv = 1/(PTP(1,1)*PTP(2,2) - PTP(1,2)*PTP(2,1))
+         PTP_inv(1,1) = +detinv * PTP(2,2)
+         PTP_inv(2,1) = -detinv * PTP(2,1)
+         PTP_inv(1,2) = -detinv * PTP(1,2)
+         PTP_inv(2,2) = +detinv * PTP(1,1)
+         call wall_time(t3)
+         write(*,*) "3", t3 - t4
+         
+         Z = I_mat - MATMUL(MATMUL(P, PTP_inv), PT)
+         z_scalar = MATMUL(MATMUL(FT, Z), F)
+         ! y(:,:) = TRANSPOSE(data_l2%tod(:,:,sb,feed))
+         call wall_time(t4)
+         write(*,*) "4", t4 - t3
+         
+         ! FTZY2 = MATMUL(MATMUL(FT, Z), y)
+         ! FTZY = TRANSPOSE(MATMUL(data_l2%tod(:,:,sb,feed), TRANSPOSE(MATMUL(FT, Z))))
+         FTZ = MATMUL(FT, Z)
+         FTZY = 0.d0
+         !$OMP PARALLEL PRIVATE(i, j)
+         !$OMP DO SCHEDULE(guided)
+         do i=1,nsamp
+            do j=1,nfreq
+               FTZY(1,i) = FTZY(1,i) + FTZ(1,j)*data_l2%tod(i,j,sb,feed)
+            end do
+         end do
+         !$OMP END DO
+         !$OMP END PARALLEL
+
+         call wall_time(t3)
+         write(*,*) "5", t3 - t4
+         
+         dt(1:nsamp)            = FTZY(1,:)
+         dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
+         call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
+         
+         call wall_time(t4)
+         write(*,*) "6", t4 - t3
+         do i = 0, n-1
+            dv(i) = dv(i)/(z_scalar(1,1) + 0.01d0/Cf(i))
+         end do
+         call wall_time(t3)
+         write(*,*) "7", t3 - t4
+         
+         call sfftw_execute_dft_c2r(plan_back, dv, dt)
+         dt = dt / (2*nsamp)
+         a(1,:) = dt
+         call wall_time(t4)
+         write(*,*) "8", t4 - t3
+
+         ! m2 = MATMUL(PTP_inv, MATMUL(PT, y - MATMUL(F, a)))
+         ! m = MATMUL(PTP_inv, MATMUL(PT, TRANSPOSE(data_l2%tod(:,:,sb,feed)) - MATMUL(F, a)))
+
+         m = 0.d0
+         !$OMP PARALLEL PRIVATE(i, j)
+         !$OMP DO SCHEDULE(guided)
+         do i=1,nsamp
+            do j=1,nfreq
+               m(1,i) = m(1,i) + (data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i))*P(j,1)
+               m(2,i) = m(2,i) + (data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i))*P(j,2)
+            end do
+         end do
+         !$OMP END DO
+         !$OMP END PARALLEL
+         m = MATMUL(PTP_inv, m)
+
+         call wall_time(t3)
+         write(*,*) "9", t3 - t4
+
+         ! data_l2%tod(:,:,sb,feed) = data_l2%tod(:,:,sb,feed) - MATMUL(F,a) - MATMUL(P,m)
+         !$OMP PARALLEL PRIVATE(i, j)
+         !$OMP DO SCHEDULE(guided)
+         do i=1,nsamp
+            do j=1,nfreq
+               data_l2%tod(i,j,sb,feed) = data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i) - P(j,1)*m(1,i) - P(j,2)*m(2,i)
+            end do
+         end do
+         !$OMP END DO
+         !$OMP END PARALLEL
+      end do
    end do
-   ! dv = dv*1.0d0/z_scalar(1,1)
-   open(1, file = 'ftr_dt_before.dat', status = 'new')  
-   do i=1,nsamp*2
-      write(1,*) dt(i)
-   end do 
-   close(1)
+   !!$OMP END DO
+   deallocate(dt, dv)
+   !!$OMP END PARALLEL
 
-   write(*,*) "13"
-   call sfftw_execute_dft_c2r(plan_back, dv, dt)
-   dt = dt / (2*nsamp)
-   write(*,*) "14"
-   write(*,*) dt(1), dt(2), dt(3), dt(nsamp-2), dt(nsamp-1), dt(nsamp)
-   write(*,*) "15"
-
+   call wall_time(t6)
+   write(*,*) "ASDF", t6 - t5
+   
    deallocate(P, PT, PTP, PTP_inv, m, F, FT, a, FTZY)
-   write(*,*) "99"
+   
+   ! open(1, file = 'ftr_tod99_new_two.dat', status = 'new')
+   ! do j=1,nfreq
+   !    do i=1,nsamp
+   !       write(1,*) data_l2%tod(i,j,1,9)
+   !    end do 
+   ! end do 
 
-
-   open(1, file = 'ftr_dt_after.dat', status = 'new')  
-   do i=1,nsamp*2
-      write(1,*) dt(i)
-   end do 
-   close(1)
-
-   open(1, file = 'ftr_dv.dat', status = 'new')
-   do i=0,n-1
-      write(1,*) dv(i)
-   end do 
-   close(1)
+   ! open(1, file = 'ftr_dt_before.dat', status = 'new')  
+   ! do i=1,nsamp*2
+   !    write(1,*) dt(i)
+   ! end do 
+   ! close(1)
+   ! open(1, file = 'ftr_dt_after.dat', status = 'new')  
+   ! do i=1,nsamp*2
+   !    write(1,*) dt(i)
+   ! end do 
+   ! close(1)
+   ! open(1, file = 'ftr_dv.dat', status = 'new')
+   ! do i=0,n-1
+   !    write(1,*) dv(i)
+   ! end do 
+   ! close(1)
 
    ! ! Precompute polynomial basis
    ! do k = 1, nfreq
