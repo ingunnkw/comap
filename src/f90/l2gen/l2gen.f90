@@ -1690,7 +1690,7 @@ contains
    type(Lx_struct),                            intent(inout) :: data_l2
 
    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb
-   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6
+   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, fknee_prior, alpha_prior, fknee_W, alpha_W
    real(dp), allocatable, dimension(:,:) :: F, FT, FTZ, a, P, PT, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY, FTZY_f, y
    real(sp),     allocatable, dimension(:) :: dt, Cf
    complex(spc), allocatable, dimension(:) :: dv
@@ -1713,6 +1713,12 @@ contains
    n = nsamp + 1
    samprate = 50
 
+   sigma0 = 0.05
+   fknee_prior = 0.1
+   alpha_prior = -1.5
+   fknee_W = 0.01
+   alpha_W = -4.0
+
    ! if (nsamp == 0) then
    !    allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
    !    data_l2%tod_poly = 0.d0
@@ -1726,6 +1732,16 @@ contains
    !       write(1,*) data_l2%tod(i,j,1,9)
    !    end do 
    ! end do 
+   ! open(1, file = 'ftr_tsys.dat', status = 'new')
+   ! do j=1,nfreq
+   !    write(1,*) data_l2%Tsys(j,1,9)
+   ! end do
+
+   ! open(1, file = 'ftr_freqmask.dat', status = 'new')
+   ! do j=1,nfreq
+   !    write(1,*) data_l2%freqmask_full(j,1,9)
+   ! end do
+
 
    allocate(P(nfreq, 2))
    allocate(PT(2, nfreq))
@@ -1747,7 +1763,8 @@ contains
 
    do i = 1, n-1
       nu = ind2freq(i+1, samprate, n)
-      Cf(i) = 1.d-4*(1.d0 + (nu/0.1d0)**(-1.5d0))
+      Cf(i) = sigma0**2*(nu/fknee_prior)**alpha_prior
+      Cf(i) = Cf(i)/(1.d0 + (nu/fknee_W)**alpha_W)
    end do
    Cf(0) = 1.d0
 
@@ -1757,6 +1774,11 @@ contains
       end do
       I_mat(i,i) = 1
    end do
+
+   ! open(1, file = 'ftr_Cf.dat', status = 'new')
+   ! do j=1,n-1
+   !    write(1,*) Cf(j)
+   ! end do
 
    nomp = 1
    call sfftw_init_threads(err)
@@ -1777,21 +1799,19 @@ contains
          if (all(data_l2%freqmask_full(:,sb,feed) == 0.d0)) cycle
          write(*,*), feed, sb
          call wall_time(t3)
-         P(:,1) = data_l2%Tsys(:,sb,feed)
          do i = 1, nfreq
-            P(i,2) = (2.0d0*i)/nfreq - 1.0d0
-            F(i,1) = 1
+            if (data_l2%freqmask_full(i,sb,feed) == 0.d0) then
+               P(i,1) = 0
+               P(i,2) = 0
+               F(i,1) = 0
+            else
+               P(i,1) = 1.0/data_l2%Tsys(i,sb,feed)
+               P(i,2) = ((2.0d0*i)/nfreq - 1.0d0)/data_l2%Tsys(i,sb,feed)
+               F(i,1) = 1
+            end if
          end do
          call wall_time(t4)
          write(*,*) "0", t4-t3
-         do k=1, nfreq
-            if (data_l2%freqmask_full(k,sb,feed) == 0.d0) then
-               P(k,1) = 0
-               P(k,2) = 0
-               F(k,1) = 0
-            end if
-         end do
-
          call wall_time(t3)
          write(*,*) "1", t3 - t4
          FT = TRANSPOSE(F)      
@@ -1837,7 +1857,7 @@ contains
          call wall_time(t4)
          write(*,*) "6", t4 - t3
          do i = 0, n-1
-            dv(i) = dv(i)/(z_scalar(1,1) + 0.01d0/Cf(i))
+            dv(i) = dv(i)/(z_scalar(1,1) + (sigma0**2)/Cf(i))
          end do
          call wall_time(t3)
          write(*,*) "7", t3 - t4
@@ -1877,18 +1897,36 @@ contains
          end do
          !$OMP END DO
          !$OMP END PARALLEL
+
+         ! if((feed==9).AND.(sb==1)) then
+         !    open(1, file = 'ftr_dg.dat', status = 'new')
+         !    do j=1,nsamp
+         !       write(1,*) a(1,j)
+         !    end do
+         !    open(1, file = 'ftr_dT.dat', status = 'new')
+         !    do j=1,nsamp
+         !       write(1,*) m(1,j)
+         !    end do
+         !    open(1, file = 'ftr_slope.dat', status = 'new')
+         !    do j=1,nsamp
+         !       write(1,*) m(2,j)
+         !    end do
+         ! end if
+
       end do
    end do
    !!$OMP END DO
    deallocate(dt, dv)
    !!$OMP END PARALLEL
 
+
+
    call wall_time(t6)
    write(*,*) "ASDF", t6 - t5
    
    deallocate(P, PT, PTP, PTP_inv, m, F, FT, a, FTZY)
    
-   ! open(1, file = 'ftr_tod99_new_two.dat', status = 'new')
+   ! open(1, file = 'ftr_tod99_newnewnewnewnew.dat', status = 'new')
    ! do j=1,nfreq
    !    do i=1,nsamp
    !       write(1,*) data_l2%tod(i,j,1,9)
