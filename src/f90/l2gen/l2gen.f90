@@ -1690,13 +1690,14 @@ contains
    type(Lx_struct),                            intent(inout) :: data_l2
 
    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb
-   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, fknee_prior, alpha_prior, fknee_W, alpha_W
-   real(dp), allocatable, dimension(:,:) :: F, FT, FTZ, a, P, PT, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY, FTZY_f, y
-   real(sp),     allocatable, dimension(:) :: dt, Cf
+   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, fknee_W, alpha_W
+   real(dp), allocatable, dimension(:,:) :: F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY
+   real(dp), allocatable, dimension(:) :: Cf, sigma0_prior, fknee_prior, alpha_prior
+   real(sp),     allocatable, dimension(:) :: dt
    complex(spc), allocatable, dimension(:) :: dv
    integer*8    :: plan_fwd, plan_back
+   type(hdf_file)   :: prior_file
 
-   real(dp), allocatable, dimension(:,:) :: m2, FTZY2
    ! integer(i4b),                               intent(in)    :: bp_filter
    ! integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, p, stat
    ! real(dp)     :: samprate, nu, mu
@@ -1713,11 +1714,7 @@ contains
    n = nsamp + 1
    samprate = 50
 
-   sigma0 = 0.05
-   fknee_prior = 0.1
-   alpha_prior = -1.5
-   fknee_W = 0.01
-   alpha_W = -4.0
+
 
    ! if (nsamp == 0) then
    !    allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
@@ -1744,33 +1741,44 @@ contains
 
 
    allocate(P(nfreq, 2))
-   allocate(PT(2, nfreq))
    allocate(PTP(2, 2))
    allocate(PTP_inv(2, 2))
    allocate(m(2, nsamp))
-   allocate(m2(2, nsamp))
    allocate(F(nfreq, 1))
-   allocate(FT(1, nfreq))
    allocate(FTZ(1, nfreq))
    allocate(a(1, nsamp))
    allocate(FTZY(1, nsamp))
-   allocate(FTZY2(1, nsamp))
    allocate(Z(nfreq, nfreq))
    allocate(I_mat(nfreq, nfreq))
    allocate(z_scalar(1,1))
    ! allocate(y(nfreq, nsamp))
    allocate(Cf(0:n-1))
+   allocate(sigma0_prior(20))
+   allocate(fknee_prior(20))
+   allocate(alpha_prior(20))
 
-   do i = 1, n-1
-      nu = ind2freq(i+1, samprate, n)
-      Cf(i) = sigma0**2*(nu/fknee_prior)**alpha_prior
-      Cf(i) = Cf(i)/(1.d0 + (nu/fknee_W)**alpha_W)
-   end do
-   Cf(0) = 1.d0
+   ! Load in the feed-specific 1/f prior parameters on the gain fluctuations.
+   call open_hdf_file("/mn/stornext/d16/cmbco/comap/jonas/Cf_prior_data.hdf5", prior_file, "r")
+   call read_hdf(prior_file, "sigma0_prior", sigma0_prior)
+   call read_hdf(prior_file, "fknee_prior", fknee_prior)
+   call read_hdf(prior_file, "alpha_prior", alpha_prior)
+   call close_hdf_file(prior_file)
+
+   write(*,*) sigma0_prior
+   write(*,*) fknee_prior
+   write(*,*) alpha_prior
+   write(*,*) sigma0_prior(1), sigma0_prior(20)
+
+   ! Wiener filter normalization parameters.
+   fknee_W = 0.01
+   alpha_W = -4.0
+   sigma0 = 0.001
+   ! fknee_prior(:) = 0.1
+   ! alpha_prior(:) = -1.5
 
    do i = 1, nfreq
       do j = 1, nfreq
-            I_mat(i,j) = 0
+            I_mat(j,i) = 0
       end do
       I_mat(i,i) = 1
    end do
@@ -1780,6 +1788,7 @@ contains
    !    write(1,*) Cf(j)
    ! end do
 
+   ! Doing some setup stuff for the Fourier module. Don't really know what this does.
    nomp = 1
    call sfftw_init_threads(err)
    call sfftw_plan_with_nthreads(nomp)
@@ -1790,6 +1799,10 @@ contains
 
    call wall_time(t5)
 
+   write(*,*) ndet
+   write(*,*) data_l2%pixels
+   write(*,*) data_l1%pixels
+
    !!$OMP PARALLEL PRIVATE(feed, sb, P, F, FT, PT, PTP, PTP_inv, detinv, Z, z_scalar, y, FTZY, dt, dv, a, m, k, i)
    allocate(dt(2*nsamp), dv(0:n-1))
    !!$OMP DO SCHEDULE(guided)
@@ -1799,6 +1812,13 @@ contains
          if (all(data_l2%freqmask_full(:,sb,feed) == 0.d0)) cycle
          write(*,*), feed, sb
          call wall_time(t3)
+         ! Create the 1/f prior "Cf" for the gain flucuations. Divide it by the Wiener filter PS, to compensate for the normalization of the data.
+         do i = 1, n-1 
+            nu = ind2freq(i+1, samprate, n)
+            Cf(i) = sigma0_prior(data_l2%pixels(feed))**2*(nu/fknee_prior(data_l2%pixels(feed)))**alpha_prior(data_l2%pixels(feed))
+            Cf(i) = Cf(i)/(1.d0 + (nu/fknee_W)**alpha_W)
+         end do
+         Cf(0) = 1.d0      
          do i = 1, nfreq
             if (data_l2%freqmask_full(i,sb,feed) == 0.d0) then
                P(i,1) = 0
@@ -1814,9 +1834,7 @@ contains
          write(*,*) "0", t4-t3
          call wall_time(t3)
          write(*,*) "1", t3 - t4
-         FT = TRANSPOSE(F)      
-         PT = TRANSPOSE(P)
-         PTP = MATMUL(PT, P)
+         PTP = MATMUL(TRANSPOSE(P), P)
          call wall_time(t4)
          write(*,*) "2", t4 - t3
          detinv = 1/(PTP(1,1)*PTP(2,2) - PTP(1,2)*PTP(2,1))
@@ -1827,15 +1845,15 @@ contains
          call wall_time(t3)
          write(*,*) "3", t3 - t4
          
-         Z = I_mat - MATMUL(MATMUL(P, PTP_inv), PT)
-         z_scalar = MATMUL(MATMUL(FT, Z), F)
+         FTZ = MATMUL(TRANSPOSE(F), Z)
+         Z = I_mat - MATMUL(MATMUL(P, PTP_inv), TRANSPOSE(P))
+         z_scalar = MATMUL(FTZ, F)
          ! y(:,:) = TRANSPOSE(data_l2%tod(:,:,sb,feed))
          call wall_time(t4)
          write(*,*) "4", t4 - t3
          
          ! FTZY2 = MATMUL(MATMUL(FT, Z), y)
          ! FTZY = TRANSPOSE(MATMUL(data_l2%tod(:,:,sb,feed), TRANSPOSE(MATMUL(FT, Z))))
-         FTZ = MATMUL(FT, Z)
          FTZY = 0.d0
          !$OMP PARALLEL PRIVATE(i, j)
          !$OMP DO SCHEDULE(guided)
@@ -1924,7 +1942,7 @@ contains
    call wall_time(t6)
    write(*,*) "ASDF", t6 - t5
    
-   deallocate(P, PT, PTP, PTP_inv, m, F, FT, a, FTZY)
+   deallocate(F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY)
    
    ! open(1, file = 'ftr_tod99_newnewnewnewnew.dat', status = 'new')
    ! do j=1,nfreq
