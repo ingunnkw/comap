@@ -1698,14 +1698,7 @@ contains
    integer*8    :: plan_fwd, plan_back
    type(hdf_file)   :: prior_file
 
-   ! integer(i4b),                               intent(in)    :: bp_filter
-   ! integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, p, stat
-   ! real(dp)     :: samprate, nu, mu
-   ! real(dp),     allocatable, dimension(:)   :: x
-   ! real(dp),     allocatable, dimension(:,:) :: T, A
-
-   ! data_l2%polyorder = bp_filter
-   ! if (bp_filter < 0) return
+   call wall_time(t5)
 
    nsamp       = size(data_l2%tod,1)
    nfreq       = size(data_l2%tod,2)
@@ -1713,32 +1706,6 @@ contains
    ndet        = size(data_l2%tod,4)
    n = nsamp + 1
    samprate = 50
-
-
-
-   ! if (nsamp == 0) then
-   !    allocate(data_l2%tod_poly(nsamp,0:p,nsb,ndet))
-   !    data_l2%tod_poly = 0.d0
-   !    return
-   ! end if
-   ! allocate(T(nfreq,0:p), A(0:p,0:p))
-   ! allocate(data_l2%tod_freqfilter(nsamp,0:p,nsb,ndet))
-   ! open(1, file = 'ftr_tod_before.dat', status = 'new')
-   ! do j=1,nfreq
-   !    do i=1,nsamp
-   !       write(1,*) data_l2%tod(i,j,1,9)
-   !    end do 
-   ! end do 
-   ! open(1, file = 'ftr_tsys.dat', status = 'new')
-   ! do j=1,nfreq
-   !    write(1,*) data_l2%Tsys(j,1,9)
-   ! end do
-
-   ! open(1, file = 'ftr_freqmask.dat', status = 'new')
-   ! do j=1,nfreq
-   !    write(1,*) data_l2%freqmask_full(j,1,9)
-   ! end do
-
 
    allocate(P(nfreq, 2))
    allocate(PTP(2, 2))
@@ -1751,7 +1718,6 @@ contains
    allocate(Z(nfreq, nfreq))
    allocate(I_mat(nfreq, nfreq))
    allocate(z_scalar(1,1))
-   ! allocate(y(nfreq, nsamp))
    allocate(Cf(0:n-1))
    allocate(sigma0_prior(20))
    allocate(fknee_prior(20))
@@ -1764,18 +1730,12 @@ contains
    call read_hdf(prior_file, "alpha_prior", alpha_prior)
    call close_hdf_file(prior_file)
 
-   write(*,*) sigma0_prior
-   write(*,*) fknee_prior
-   write(*,*) alpha_prior
-   write(*,*) sigma0_prior(1), sigma0_prior(20)
-
    ! Wiener filter normalization parameters.
-   fknee_W = 0.01
+   fknee_W = 0.003
    alpha_W = -4.0
    sigma0 = 0.001
-   ! fknee_prior(:) = 0.1
-   ! alpha_prior(:) = -1.5
 
+   ! Create identity matrix
    do i = 1, nfreq
       do j = 1, nfreq
             I_mat(j,i) = 0
@@ -1797,21 +1757,11 @@ contains
    call sfftw_plan_dft_c2r_1d(plan_back, 2*nsamp, dv, dt, fftw_estimate + fftw_unaligned)
    deallocate(dt, dv)
 
-   call wall_time(t5)
-
-   write(*,*) ndet
-   write(*,*) data_l2%pixels
-   write(*,*) data_l1%pixels
-
-   !!$OMP PARALLEL PRIVATE(feed, sb, P, F, FT, PT, PTP, PTP_inv, detinv, Z, z_scalar, y, FTZY, dt, dv, a, m, k, i)
    allocate(dt(2*nsamp), dv(0:n-1))
-   !!$OMP DO SCHEDULE(guided)
    do feed = 1, ndet
       if (.not. is_alive(data_l2%pixels(feed))) cycle
       do sb = 1, nsb
          if (all(data_l2%freqmask_full(:,sb,feed) == 0.d0)) cycle
-         write(*,*), feed, sb
-         call wall_time(t3)
          ! Create the 1/f prior "Cf" for the gain flucuations. Divide it by the Wiener filter PS, to compensate for the normalization of the data.
          do i = 1, n-1 
             nu = ind2freq(i+1, samprate, n)
@@ -1819,6 +1769,8 @@ contains
             Cf(i) = Cf(i)/(1.d0 + (nu/fknee_W)**alpha_W)
          end do
          Cf(0) = 1.d0      
+
+         ! Create P and F matrices.
          do i = 1, nfreq
             if (data_l2%freqmask_full(i,sb,feed) == 0.d0) then
                P(i,1) = 0
@@ -1830,30 +1782,21 @@ contains
                F(i,1) = 1
             end if
          end do
-         call wall_time(t4)
-         write(*,*) "0", t4-t3
-         call wall_time(t3)
-         write(*,*) "1", t3 - t4
+
+         ! Solve (PT*P)^-1
          PTP = MATMUL(TRANSPOSE(P), P)
-         call wall_time(t4)
-         write(*,*) "2", t4 - t3
          detinv = 1/(PTP(1,1)*PTP(2,2) - PTP(1,2)*PTP(2,1))
          PTP_inv(1,1) = +detinv * PTP(2,2)
          PTP_inv(2,1) = -detinv * PTP(2,1)
          PTP_inv(1,2) = -detinv * PTP(1,2)
          PTP_inv(2,2) = +detinv * PTP(1,1)
-         call wall_time(t3)
-         write(*,*) "3", t3 - t4
-         
+
+         ! Solve for the Z-matrix and the scalar quantity z.
          FTZ = MATMUL(TRANSPOSE(F), Z)
          Z = I_mat - MATMUL(MATMUL(P, PTP_inv), TRANSPOSE(P))
          z_scalar = MATMUL(FTZ, F)
-         ! y(:,:) = TRANSPOSE(data_l2%tod(:,:,sb,feed))
-         call wall_time(t4)
-         write(*,*) "4", t4 - t3
-         
-         ! FTZY2 = MATMUL(MATMUL(FT, Z), y)
-         ! FTZY = TRANSPOSE(MATMUL(data_l2%tod(:,:,sb,feed), TRANSPOSE(MATMUL(FT, Z))))
+
+         ! Solve F^T*Z*y, which is the RHS of the linear equation for a.
          FTZY = 0.d0
          !$OMP PARALLEL PRIVATE(i, j)
          !$OMP DO SCHEDULE(guided)
@@ -1865,30 +1808,22 @@ contains
          !$OMP END DO
          !$OMP END PARALLEL
 
-         call wall_time(t3)
-         write(*,*) "5", t3 - t4
-         
+         ! Solve the fourier transform of FTZY, which we name dt.
          dt(1:nsamp)            = FTZY(1,:)
          dt(2*nsamp:nsamp+1:-1) = dt(1:nsamp)
          call sfftw_execute_dft_r2c(plan_fwd, dt, dv)
-         
-         call wall_time(t4)
-         write(*,*) "6", t4 - t3
+
+         ! Put a prior on a in the fourier domain.
          do i = 0, n-1
             dv(i) = dv(i)/(z_scalar(1,1) + (sigma0**2)/Cf(i))
          end do
-         call wall_time(t3)
-         write(*,*) "7", t3 - t4
          
+         ! Fourier transform it back to get a (gain fluctuations).
          call sfftw_execute_dft_c2r(plan_back, dv, dt)
          dt = dt / (2*nsamp)
          a(1,:) = dt
-         call wall_time(t4)
-         write(*,*) "8", t4 - t3
 
-         ! m2 = MATMUL(PTP_inv, MATMUL(PT, y - MATMUL(F, a)))
-         ! m = MATMUL(PTP_inv, MATMUL(PT, TRANSPOSE(data_l2%tod(:,:,sb,feed)) - MATMUL(F, a)))
-
+         ! Solve for m (containing the temperature fluctuations).
          m = 0.d0
          !$OMP PARALLEL PRIVATE(i, j)
          !$OMP DO SCHEDULE(guided)
@@ -1902,10 +1837,7 @@ contains
          !$OMP END PARALLEL
          m = MATMUL(PTP_inv, m)
 
-         call wall_time(t3)
-         write(*,*) "9", t3 - t4
-
-         ! data_l2%tod(:,:,sb,feed) = data_l2%tod(:,:,sb,feed) - MATMUL(F,a) - MATMUL(P,m)
+         ! Subtract the gain and temperature fluctuations from the TOD.
          !$OMP PARALLEL PRIVATE(i, j)
          !$OMP DO SCHEDULE(guided)
          do i=1,nsamp
@@ -1916,116 +1848,14 @@ contains
          !$OMP END DO
          !$OMP END PARALLEL
 
-         ! if((feed==9).AND.(sb==1)) then
-         !    open(1, file = 'ftr_dg.dat', status = 'new')
-         !    do j=1,nsamp
-         !       write(1,*) a(1,j)
-         !    end do
-         !    open(1, file = 'ftr_dT.dat', status = 'new')
-         !    do j=1,nsamp
-         !       write(1,*) m(1,j)
-         !    end do
-         !    open(1, file = 'ftr_slope.dat', status = 'new')
-         !    do j=1,nsamp
-         !       write(1,*) m(2,j)
-         !    end do
-         ! end if
-
       end do
    end do
-   !!$OMP END DO
    deallocate(dt, dv)
-   !!$OMP END PARALLEL
-
-
-
-   call wall_time(t6)
-   write(*,*) "ASDF", t6 - t5
-   
    deallocate(F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY)
-   
-   ! open(1, file = 'ftr_tod99_newnewnewnewnew.dat', status = 'new')
-   ! do j=1,nfreq
-   !    do i=1,nsamp
-   !       write(1,*) data_l2%tod(i,j,1,9)
-   !    end do 
-   ! end do 
+   call wall_time(t6)
+   write(*,*) "Time spent on frequency filter: ", t6 - t5
 
-   ! open(1, file = 'ftr_dt_before.dat', status = 'new')  
-   ! do i=1,nsamp*2
-   !    write(1,*) dt(i)
-   ! end do 
-   ! close(1)
-   ! open(1, file = 'ftr_dt_after.dat', status = 'new')  
-   ! do i=1,nsamp*2
-   !    write(1,*) dt(i)
-   ! end do 
-   ! close(1)
-   ! open(1, file = 'ftr_dv.dat', status = 'new')
-   ! do i=0,n-1
-   !    write(1,*) dv(i)
-   ! end do 
-   ! close(1)
-
-   ! ! Precompute polynomial basis
-   ! do k = 1, nfreq
-   !    mu = max(min(2.d0*real(k-1,dp)/real(nfreq-1,dp)-1.d0,1.d0),-1.d0)
-   !    call get_legendre_polynomials(mu,T(k,:))
-   ! end do
-
-   ! do i = 1, ndet
-   !    if (.not. is_alive(data_l2%pixels(i))) cycle
-   !    do j = 1, nsb
-   !       !write(*,*) 'Polyfiltering det, sb = ', i, j
-
-   !       if (all(data_l2%freqmask_full(:,j,i) == 0.d0)) cycle
-
-   !       ! Pre-compute Cholesky factor of coupling matrix for current sideband
-   !       do m = 0, p
-   !          do n = 0, m
-   !             A(m,n) = sum(T(:,m)*T(:,n)*data_l2%freqmask_full(:,j,i))
-   !          end do
-   !       end do
-   !       call dpotrf('L', p+1, A, p+1, stat )
-
-   !       ! Solve for polynomial coefficients
-   !       !$OMP PARALLEL PRIVATE(k,m,x,l,stat)
-   !       allocate(x(0:p))
-   !       !$OMP DO SCHEDULE(guided)
-   !       do k = 1, nsamp
-   !          do m = 0, p
-   !             x(m) = 0.d0
-   !             do l = 1, nfreq
-   !                if (data_l2%freqmask_full(l,j,i) == 0.d0) cycle
-   !                x(m) = x(m) + data_l2%tod(k,l,j,i)*T(l,m)
-   !             end do
-   !          end do
-   !          call dpotrs( 'L', p+1, 1, A, p+1, x, p+1, stat)
-
-   !          ! Store poly coeffs as separate TOD
-   !          data_l2%tod_poly(k,:,j,i) = x
-
-   !          ! Subtract fitted polynomial from main TOD
-   !          do l = 1, nfreq
-   !             if (data_l2%freqmask_full(l,j,i) == 0.d0) cycle
-   !             data_l2%tod(k,l,j,i) = data_l2%tod(k,l,j,i) - sum(T(l,:)*x)
-   !          end do
-   !       end do
-   !       !$OMP END DO
-   !       deallocate(x)
-   !       !$OMP END PARALLEL
-   !    end do
-   ! end do
-   ! deallocate(T, A)
-   
-!    open(22, file="tod_after_poly_2_3.unf", form="unformatted") ! Adjusted open statement
-!    write(22) data_l2%tod(:,:,3,1)
-!    close(22)
-!    open(22, file="tod_after_poly_15_2.unf", form="unformatted") ! Adjusted open statement
-!    write(22) data_l2%tod(:,:,1,14)
-!    close(22)
-
- end subroutine frequency_filter_TOD
+end subroutine frequency_filter_TOD
 
 
   subroutine freq_filter_TOD(data_l2)
