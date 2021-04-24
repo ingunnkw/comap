@@ -41,7 +41,7 @@ program tod2comap
   character(len=5)      :: sim_string
   integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split, scan_index
 
-  integer(i4b)          :: myid, nproc, ierr, root
+  integer(i4b)          :: myid, nproc, ierr, root, irun
   logical               :: binning_split, found, obs_map, scan_map, split_mode, verbose, use_acc
   real(dp), allocatable, dimension(:,:) :: offsets
   real(dp)              :: my_x_max, my_y_max
@@ -50,10 +50,15 @@ program tod2comap
   integer(i4b)          :: seed
   integer(i4b)          :: d 
 
+  character(len=512)    :: param_dir, runlist_in
+  character(len=1024)   :: param_name, param_name_raw, runlist_name, runlist_name_raw
+  logical               :: exist
+
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
   call mpi_comm_size(mpi_comm_world, nproc, ierr)
   root = 0
+  
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! mpi per scan, all detectors
@@ -66,6 +71,7 @@ program tod2comap
   call get_parameter(0, parfile, 'MAP_DIR', par_string=pre)
   call get_parameter(0, parfile, 'SIM_DIR', par_string=pre_sim)
   call get_parameter(0, parfile, 'TARGET_NAME', par_string=object)
+  call get_parameter(0, parfile, 'RUNLIST',  par_string=runlist_in)
   call get_parameter(0, parfile, 'MAP_NAME', par_string=map_name)
   call get_parameter(0, parfile, 'SIM_NAME', par_string=sim_name)
   call get_parameter(0, parfile, 'N_NOISE_SIMULATIONS', par_int=nsim)
@@ -86,7 +92,46 @@ program tod2comap
      acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // trim(split_id) // '_' // trim(object) // '.h5'
   end if
 
+  if (myid == 0) then 
+     ! Copy parameter file and runlists to l2-file output directory 
+     ! Copy parameter file to map-file output directory
+      param_dir = "param4map"
+      param_dir = trim(pre)//trim(param_dir)
+      inquire(directory=trim(param_dir), exist=exist)
 
+      if (.not. exist) then 
+         call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+      end if 
+      
+      param_name_raw = trim(param_dir)//"/param_"
+      runlist_name_raw = trim(param_dir)//"/runlist_"
+      param_name_raw = trim(param_name_raw)//trim(map_name)
+      runlist_name_raw = trim(runlist_name_raw)//trim(map_name)
+      
+      write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+      write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+      
+      inquire(file=trim(param_name), exist=exist)
+      
+      if (.not. exist) then
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+         irun = irun + 1
+      else     
+         irun = 1
+         exist = .true.
+         do while (exist)
+            write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+            write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+            inquire(file=trim(param_name), exist=exist)
+            irun = irun + 1
+         end do      
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+      end if
+      print *, "Run number: ", irun - 1
+   end if
+   
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
@@ -128,6 +173,7 @@ program tod2comap
   !write(*,*) split_info%split(:,1,2,75)
   !stop
 
+   
 
   if (myid==0) write(*,*) "Initialising mapmaker"
   call initialize_mapmaker(map_scan, parfile, pinfo, split_info)
@@ -143,7 +189,6 @@ program tod2comap
   !!      call initialize_mapmaker(buffer_split(i), parfile, pinfo, split_info)
   !!   end do
   !!end if
- 
 
   ! This loop currently requiers that all obsIDs are of the same patch
   do i = 1+myid, nscan, nproc 
@@ -178,7 +223,7 @@ program tod2comap
         else
            scan_index = 1
         end if  
-
+        
         !call nullify_map_type(map_scan)
         !call time2pix(tod, map_scan, parfile, pinfo, split_info%split_list(:,:,scan_index))
         !call time2pix(tod, map_tot, parfile, pinfo, split_info%split_list(:,:,scan_index))
@@ -262,25 +307,27 @@ program tod2comap
         !      end if
         !   end do
         !end if
-
+        
         ! Maps per scan
         if (scan_map) then
            call finalize_binning(map_scan)
            call int2string(scan%ss(j)%id, scanid)
            prefix = trim(pre)//trim(scan%object)//'_'//trim(scanid)
            map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+           map_scan%irun = irun
            call output_map_h5(map_filename, map_scan)
         end if
 
      end do ! end loop over scans
 
      call int2string(scan%id, obsid)
-
+     
      ! Maps per obsID
      if (obs_map) then
         call finalize_binning(map_obs)
         prefix = trim(pre)//trim(scan%object)//'_'//trim(obsid)
         map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+        map_obs%irun = irun
         call output_map_h5(map_filename, map_obs)
      end if
      call free_tod_type(tod)
@@ -314,7 +361,7 @@ program tod2comap
      !stop
      
   end do ! end loop over obsIDs
-
+  
   call free_map_type(map_scan)
   call free_map_type(map_obs)
   call free_split_type(split_info)
@@ -337,11 +384,14 @@ program tod2comap
   call mpi_allreduce(map_tot%dsum_splitco, buffer%dsum_splitco, size(map_tot%dsum_splitco), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   call mpi_allreduce(map_tot%nhit_splitco, buffer%nhit_splitco, size(map_tot%nhit_splitco), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   
-  do d = 1, map_tot%n_test
-     call mpi_allreduce(map_tot%div_multisplit(:, :, :, :, :, d, :),  buffer%div_multisplit(:, :, :, :, :, d, :),  size(map_tot%div_multisplit(:, :, :, :, :, d, :)),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_tot%dsum_multisplit(:, :, :, :, :, d, :), buffer%dsum_multisplit(:, :, :, :, :, d, :), size(map_tot%dsum_multisplit(:, :, :, :, :, d, :)), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-     call mpi_allreduce(map_tot%nhit_multisplit(:, :, :, :, :, d, :), buffer%nhit_multisplit(:, :, :, :, :, d, :), size(map_tot%nhit_multisplit(:, :, :, :, :, d, :)), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
-  end do
+  !do d = 1, map_tot%n_test
+  !   call mpi_allreduce(map_tot%div_multisplit(:, :, :, :, :, d, :),  buffer%div_multisplit(:, :, :, :, :, d, :),  size(map_tot%div_multisplit(:, :, :, :, :, d, :)),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !   call mpi_allreduce(map_tot%dsum_multisplit(:, :, :, :, :, d, :), buffer%dsum_multisplit(:, :, :, :, :, d, :), size(map_tot%dsum_multisplit(:, :, :, :, :, d, :)), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  !   call mpi_allreduce(map_tot%nhit_multisplit(:, :, :, :, :, d, :), buffer%nhit_multisplit(:, :, :, :, :, d, :), size(map_tot%nhit_multisplit(:, :, :, :, :, d, :)), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
+  !end do
+  call mpi_allreduce(map_tot%div_multisplit,  buffer%div_multisplit,  size(map_tot%div_multisplit),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%dsum_multisplit, buffer%dsum_multisplit, size(map_tot%dsum_multisplit), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
+  call mpi_allreduce(map_tot%nhit_multisplit, buffer%nhit_multisplit, size(map_tot%nhit_multisplit), MPI_INTEGER, MPI_SUM, mpi_comm_world, ierr)
   
   !!do i = 1, 2*split_info%nsplit
   !!   call mpi_allreduce(map_split(i)%div,     buffer_split(i)%div,     size(map_tot%div),     MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
@@ -355,8 +405,7 @@ program tod2comap
   ! Simulations
   !call mpi_allreduce(map_tot%div_sim,  buffer%div_sim,  size(map_tot%div_sim),  MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
   !call mpi_allreduce(map_tot%dsum_sim, buffer%dsum_sim, size(map_tot%dsum_sim), MPI_REAL, MPI_SUM, mpi_comm_world, ierr)
-
-
+  
   if (myid == 0) then
      map_tot%div  = buffer%div
      map_tot%dsum = buffer%dsum
@@ -381,8 +430,7 @@ program tod2comap
 
      ! Simulations
      !map_tot%div_sim  = buffer%div_sim
-     !map_tot%dsum_sim = buffer%dsum_sim
-
+     !map_tot%dsum_sim = buffer%dsum_sim  
 
      write(*,*) "Finalising"
      ! finalize_split ???????????
@@ -391,14 +439,13 @@ program tod2comap
      !write(*,*) maxval(map_tot%m), maxval(map_tot%m_split)
      prefix = trim(pre)//trim(scan%object)
      map_filename = trim(prefix)//'_'//trim(map_name)//'.h5'
+     map_tot%irun = irun
      call output_map_h5(map_filename, map_tot)
      call free_map_type(map_tot)
 
      if (allocated(map_split)) deallocate(map_split, buffer_split)
-
-
   end if
-
+  
   !deallocate(tod)
   if (myid == 0) write(*,*) 'Done'
   call mpi_finalize(ierr)

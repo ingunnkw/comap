@@ -8,6 +8,7 @@ module comap_map_mod
 
   type map_type
      integer(i4b) :: n_x, n_y, nfreq, nsb, ndet, ndet_tot, n_k, ntheta, nside, nsim, nsplit, nmultisplit, n_test, n_ctrl ! 2^ntheta
+     integer(i4b) :: irun ! 2^ntheta
      !real(dp)     :: x0, y0, f0, 
      real(dp)     :: dthetax, dthetay, df
      real(dp)     :: mean_az, mean_el, time(2), center(2)
@@ -100,8 +101,8 @@ contains
     
     character(len=120) :: map_name, rms_name, hit_name  
     type(hdf_file)     :: file
-    
     call open_hdf_file(trim(filename), file, "w")
+    call write_hdf(file, "runID",          map%irun - 1)
     call write_hdf(file, "n_x",          map%n_x)
     call write_hdf(file, "n_y",          map%n_y)
     call write_hdf(file, "x",            map%x)
@@ -128,14 +129,17 @@ contains
        call write_hdf(file, "rms_coadd",  map%rms_co)
        call write_hdf(file, "nhit_coadd", map%nhit_co)
     end if
+
     if (map%nsim > 0) then
        call write_hdf(file, "map_sim", map%m_sim)
        call write_hdf(file, "rms_sim", map%rms_sim)
     end if
+
     if (map%nsplit > 0) then
        call create_hdf_group(file, "splits")
-       call write_hdf(file, "splts/split_def",  map%split_def)
+       call write_hdf(file, "splits/split_def",  map%split_def)
        call write_hdf(file, "splits/split_feedmap",  map%split_feed)
+       
        nf = 1; nc = 1
        do i = 1, map%nsplit
           map_name = "splits/map_"  // map%split_def(i)
@@ -168,9 +172,9 @@ contains
           call write_hdf(file, trim(hit_name), map%nhit_multisplit(:, :, :, :, :, i, :))
        end do
     end if
-
+    
     call close_hdf_file(file)
-
+    
     !call free_map_type(map)
 
   end subroutine output_map_h5

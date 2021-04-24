@@ -25,8 +25,6 @@ module comap_lx_mod
      integer(i4b), allocatable, dimension(:)         :: pixels      ! Active pixels/detectors (i.e. ind2pix)
      integer(i4b), allocatable, dimension(:)         :: pix2ind     ! Which pixel does ind corresp. to
      integer(i4b), allocatable, dimension(:,:,:)     :: n_nan       ! number of nan values for each frequency
-     real(dp),     allocatable, dimension(:,:,:,:)   :: Tsys        ! (start/stop or middle, freq, sb,detector)
-     real(dp),     allocatable, dimension(:)         :: t_hot       ! Ambient temperature in K
      integer(i4b), allocatable, dimension(:)         :: amb_state   ! Ambient load in/out
      real(dp),     allocatable, dimension(:)         :: amb_time    ! Ambient time in MJD
 
@@ -35,6 +33,15 @@ module comap_lx_mod
      integer(i4b)                                    :: n_pca_comp    ! Number of leading pca-components to subtract
      integer(i4b)                                    :: decimation_time, decimation_nu
      integer(i4b)                                    :: mask_outliers
+     integer(i4b)                                    :: irun          ! Run number identification
+     integer(i4b)                                    :: n_cal         ! Number of successful ambient measurments
+     integer(i4b)                                    :: cal_method  ! (1 = old, 2 = Jonas, 3 = from l1)
+     real(dp),     allocatable, dimension(:,:)       :: Thot        ! (nmethods=3, start/end)
+     real(dp),     allocatable, dimension(:,:)       :: time_hot    ! (nmethods=3, start/end)
+     real(dp),     allocatable, dimension(:,:,:,:,:) :: Phot        ! (nmethods=3, start/end, freq, sb, detector)
+!     real(dp),     allocatable, dimension(:,:,:)     :: Pcold       ! (nmethods=3, freq, sb, detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: Tsys        ! (start/stop or middle, freq, sb,detector)
+     real(dp),     allocatable, dimension(:)         :: t_hot       ! Ambient temperature in K
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask_full ! Full-resolution mask; (freq, sideband, detector)
      integer(i4b), allocatable, dimension(:,:,:)     :: freqmask_reason ! the (first) reason for masking a specific frequency
      real(sp),     allocatable, dimension(:,:,:)     :: freqmask      ! Reduced resolution mask; (freq, sideband, detector)
@@ -49,6 +56,9 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:,:)   :: diagnostics   ! various diagnostics used to make freqmask
      real(dp),     allocatable, dimension(:,:,:,:,:) :: spike_data    ! spike and jump data (n_spikes,spike/jump,info) info = (amp,mjd,samp,sb,feed)
      real(sp),     allocatable, dimension(:,:)       :: cut_params    ! means and stds used for the different diagnostics
+     real(dp),     allocatable, dimension(:,:,:)     :: AB_mask       ! aliasing between A and B (in db suppression) (freq, sb,detector)
+     real(dp),     allocatable, dimension(:,:,:)     :: leak_mask     ! aliasing from ouside range (in db suppression) (freq, sb,detector)
+
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: chi2          ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
@@ -314,8 +324,8 @@ contains
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
     !call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
     call read_hdf(file, "mean_tp",          data%mean_tp)
-    allocate(data%tsys(2,nfreq_full,nsb,ndet), data%tsys_lowres(nfreq,nsb,ndet))
-    call read_hdf(file, "Tsys",             data%tsys)
+    allocate(data%Tsys(nfreq_full,nsb,ndet), data%tsys_lowres(nfreq,nsb,ndet))
+    call read_hdf(file, "Tsys",             data%Tsys)
     call read_hdf(file, "Tsys_lowres",      data%tsys_lowres)
     allocate(data%n_nan(nfreq_full,nsb,ndet))
     call read_hdf(file, "n_nan",            data%n_nan)
@@ -342,7 +352,8 @@ contains
     end if
 
     call read_hdf(file, "mask_outliers",    data%mask_outliers)
-    if (data%mask_outliers == 1) then
+!    if (data%mask_outliers == 1) then
+    if ((data%mask_outliers == 1) .and. (data%n_cal > 0)) then  ! if n_cal is 0 we don't run diagnostics
        allocate(data%diagnostics(nfreq_full,nsb,ndet,5))
        allocate(data%cut_params(2,5))
        allocate(data%acceptrate(nsb,ndet))
@@ -460,10 +471,16 @@ contains
     if(allocated(data%flag))        deallocate(data%flag)
 
     if(allocated(data%point))         deallocate(data%point)
+    if(allocated(data%AB_mask))       deallocate(data%AB_mask)
+    if(allocated(data%leak_mask))     deallocate(data%leak_mask)
     if(allocated(data%gain))          deallocate(data%gain)
     if(allocated(data%sigma0))        deallocate(data%sigma0)
     if(allocated(data%alpha))         deallocate(data%alpha)
     if(allocated(data%Tsys))          deallocate(data%Tsys)
+    if(allocated(data%Phot))          deallocate(data%Phot)
+!    if(allocated(data%Pcold))         deallocate(data%Pcold)
+    if(allocated(data%Thot))          deallocate(data%Thot)
+    if(allocated(data%time_hot))      deallocate(data%time_hot)
     if(allocated(data%Tsys_lowres))   deallocate(data%Tsys_lowres)
     if(allocated(data%fknee))         deallocate(data%fknee)
     if(allocated(data%freqmask))      deallocate(data%freqmask)
@@ -507,7 +524,8 @@ contains
     else
        call open_hdf_file(scan%ss(k)%l2file, file, "w")
     end if
-
+    
+    call write_hdf(file, "runID",             data%irun)
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "mjd_start",         data%mjd_start)
     call write_hdf(file, "decimation_time",   data%decimation_time)
@@ -521,7 +539,13 @@ contains
     call write_hdf(file, "tod_mean",          data%tod_mean)
     !call write_hdf(file, "flag",              data%flag)
     !write(*,*) "right before", data%Tsys(1, 1, 1, 1)
+    call write_hdf(file, "cal_method",        data%cal_method)
+    call write_hdf(file, "n_cal",             data%n_cal)
     call write_hdf(file, "Tsys",              data%Tsys)
+    call write_hdf(file, "Thot",              data%Thot)
+    call write_hdf(file, "Phot",              data%Phot)
+!    call write_hdf(file, "Pcold",             data%Pcold)
+    call write_hdf(file, "time_hot",          data%time_hot)
     call write_hdf(file, "Tsys_lowres",       data%Tsys_lowres)
     if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
     if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
@@ -549,8 +573,10 @@ contains
     call write_hdf(file, "spike_data",        data%spike_data)
     call write_hdf(file, "mask_outliers",     data%mask_outliers)
     !write(*,*) "middle", data%mask_outliers
-    if (data%mask_outliers == 1) then
+    if ((data%mask_outliers == 1) .and. (data%n_cal > 0)) then  ! if n_cal is 0 we don't run diagnostics
        !write(*,*) data%mask_outliers
+       call write_hdf(file, "AB_aliasing",    data%AB_mask)
+       call write_hdf(file, "leak_aliasing",  data%leak_mask)
        call write_hdf(file, "acceptrate",     data%acceptrate)
        call write_hdf(file, "diagnostics",    data%diagnostics)
        call write_hdf(file, "cut_params",     data%cut_params)
@@ -595,7 +621,7 @@ contains
     
     call read_hdf(l1_file, "hk/array/weather/windSpeed", hk_buffer)
     call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
-    
+       
     call close_hdf_file(file)
   end subroutine
 
@@ -752,6 +778,8 @@ contains
     lx_out%decimation_nu = lx_in%decimation_nu
     lx_out%n_pca_comp = lx_in%n_pca_comp
     lx_out%mask_outliers = lx_in%mask_outliers
+    lx_out%cal_method = lx_in%cal_method
+    lx_out%n_cal = lx_in%n_cal
 
     if(allocated(lx_in%time))        then
        allocate(lx_out%time(size(lx_in%time,1)))
@@ -824,8 +852,24 @@ contains
        lx_out%Tsys_lowres = lx_in%Tsys_lowres
     end if
     if(allocated(lx_in%Tsys))      then
-       allocate(lx_out%Tsys(size(lx_in%Tsys,1),size(lx_in%Tsys,2),size(lx_in%Tsys,3),size(lx_in%Tsys,4)))
+       allocate(lx_out%Tsys(size(lx_in%Tsys,1),size(lx_in%Tsys,2),size(lx_in%Tsys,3)))
        lx_out%Tsys = lx_in%Tsys
+    end if
+    if(allocated(lx_in%Phot))      then
+       allocate(lx_out%Phot(size(lx_in%Phot,1),size(lx_in%Phot,2),size(lx_in%Phot,3),size(lx_in%Phot,4),size(lx_in%Phot,5)))
+       lx_out%Phot = lx_in%Phot
+    end if
+    ! if(allocated(lx_in%Pcold))      then
+    !    allocate(lx_out%Pcold(size(lx_in%Pcold,1),size(lx_in%Pcold,2),size(lx_in%Pcold,3)))
+    !    lx_out%Pcold = lx_in%Pcold
+    ! end if
+    if(allocated(lx_in%Thot))      then
+       allocate(lx_out%Thot(size(lx_in%Thot,1),size(lx_in%Thot,2)))
+       lx_out%Thot = lx_in%Thot
+    end if
+    if(allocated(lx_in%time_hot))      then
+       allocate(lx_out%time_hot(size(lx_in%time_hot,1),size(lx_in%time_hot,2)))
+       lx_out%time_hot = lx_in%time_hot
     end if
     if(allocated(lx_in%freqmask_full)) then
        allocate(lx_out%freqmask_full(size(lx_in%freqmask_full,1),size(lx_in%freqmask_full,2),size(lx_in%freqmask_full,3)))
@@ -858,6 +902,14 @@ contains
     if(allocated(lx_in%var_fullres))   then
        allocate(lx_out%var_fullres(size(lx_in%var_fullres,1),size(lx_in%var_fullres,2),size(lx_in%var_fullres,3)))
        lx_out%var_fullres = lx_in%var_fullres
+    end if
+    if(allocated(lx_in%AB_mask))   then
+       allocate(lx_out%AB_mask(size(lx_in%AB_mask,1),size(lx_in%AB_mask,2),size(lx_in%AB_mask,3)))
+       lx_out%AB_mask = lx_in%AB_mask
+    end if
+    if(allocated(lx_in%leak_mask))   then
+       allocate(lx_out%leak_mask(size(lx_in%leak_mask,1),size(lx_in%leak_mask,2),size(lx_in%leak_mask,3)))
+       lx_out%leak_mask = lx_in%leak_mask
     end if
 
     if(allocated(lx_in%spike_data))   then

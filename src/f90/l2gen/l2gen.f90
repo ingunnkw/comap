@@ -17,11 +17,14 @@ program l2gen
   
   character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile
   character(len=9)     :: id_old
-  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore
+  character(len=10)    :: target_name
+  character(len=512)   :: param_dir, runlist_in
+  character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw
+  integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
-  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys
+  real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
   logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
@@ -53,10 +56,14 @@ program l2gen
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
   call get_parameter(unit, parfile, 'IS_SIM',                    par_lgt=is_sim)
   call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
+  call get_parameter(unit, parfile, 'Max_TSYS',                  par_dp=max_tsys)
   call get_parameter(unit, parfile, 'REMOVE_ELEVATION_TEMP',     par_lgt=rem_el)
   call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
   call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
-
+  call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
+  call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
+  
+  
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
@@ -70,6 +77,40 @@ program l2gen
   !call dset(id=myid,level=debug)
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
+
+   if (myid == 0) then 
+     ! Copy parameter file and runlists to l2-file output directory 
+      param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
+      inquire(directory=trim(param_dir), exist=exist)
+      if (.not. exist) then 
+         call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+      end if 
+
+      param_name_raw = trim(param_dir)//"/param_"
+      runlist_name_raw = trim(param_dir)//"/runlist_"
+      write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+      write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+      
+      inquire(file=trim(param_name), exist=exist)
+      
+      if (.not. exist) then
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+         irun = irun + 1
+      else     
+         irun = 1
+         exist = .true.
+         do while (exist)
+            write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+            write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+            inquire(file=trim(param_name), exist=exist)
+            irun = irun + 1
+         end do      
+         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+      end if
+      print *, "Run number: ", irun - 1
+   end if
 
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
@@ -111,47 +152,53 @@ program l2gen
      call interpolate_nans(data_l1, scan%id, verb)
      call update_status(status, 'nan_interp')
 
+     ! Finding Phot, Thot and time_hot
+     call prepare_calibration(scan, data_l1, is_sim, verb)
+
+
      ! Finalize frequency mask
      call postprocess_frequency_mask(numfreq, data_l1, scan%id, verb)
      call update_status(status, 'freq_mask2')
      
-     n_tsys = 0
-     nsamp = size(data_l1%tod,1)
+!     n_tsys = 0
+!     nsamp = size(data_l1%tod,1)
+
      !write(*,*) 4
+
      !write(*,*) data_l1%tod(1751:2650,1,1,1)
-     do i=1, scan%nsub
-        if (scan%ss(i)%scanmode == 'tsys') then
-           n_tsys = n_tsys + 1
-           if (n_tsys > 2) exit
-           tsys_mjd_min     = max(scan%ss(i)%mjd(1), minval(data_l1%time))
-           tsys_mjd_max     = min(scan%ss(i)%mjd(2), maxval(data_l1%time))
-           !write(*,*) "A", tsys_mjd_min, tsys_mjd_max
-           tsys_ind(1) = 1
-           do while (tsys_ind(1) <= nsamp)
-              if (data_l1%time(tsys_ind(1)) > tsys_mjd_min) exit
-              tsys_ind(1) = tsys_ind(1) + 1
-           end do
+     ! do i=1, scan%nsub
+     !    if (scan%ss(i)%scanmode == 'tsys') then
+     !       n_tsys = n_tsys + 1
+     !       if (n_tsys > 2) exit
+     !       tsys_mjd_min     = max(scan%ss(i)%mjd(1), minval(data_l1%time))
+     !       tsys_mjd_max     = min(scan%ss(i)%mjd(2), maxval(data_l1%time))
+     !       !write(*,*) "A", tsys_mjd_min, tsys_mjd_max
+     !       tsys_ind(1) = 1
+     !       do while (tsys_ind(1) <= nsamp)
+     !          if (data_l1%time(tsys_ind(1)) > tsys_mjd_min) exit
+     !          tsys_ind(1) = tsys_ind(1) + 1
+     !       end do
 
-           ! Find end position
-           tsys_ind(2) = nsamp
-           do while (tsys_ind(2) >= 1)
-              if (data_l1%time(tsys_ind(2)) < tsys_mjd_max) exit
-              tsys_ind(2) = tsys_ind(2) - 1
-           end do
-           !write(*,*) "B", tsys_ind
-           !stop
+     !       ! Find end position
+     !       tsys_ind(2) = nsamp
+     !       do while (tsys_ind(2) >= 1)
+     !          if (data_l1%time(tsys_ind(2)) < tsys_mjd_max) exit
+     !          tsys_ind(2) = tsys_ind(2) - 1
+     !       end do
+     !       !write(*,*) "B", tsys_ind
+     !       !stop
 
-           ! Compute absolute calibration
+     !       ! Compute absolute calibration
 
-           call compute_P_hot(tsysfile, data_l1, tsys_ind, n_tsys, is_sim, verb)
-           tsys_time(n_tsys) = 0.5*(tsys_mjd_min + tsys_mjd_max)
-        end if
-     end do
-     if (n_tsys == 1) tsys_time(2) = data_l1%time(nsamp)
-     if (n_tsys == 0) then
-        write(*,*) "No ambient subscans!"
-        cycle
-     end if
+     !       call compute_P_hot(tsysfile, data_l1, tsys_ind, n_tsys, is_sim, verb)
+     !       tsys_time(n_tsys) = 0.5*(tsys_mjd_min + tsys_mjd_max)
+     !    end if
+     ! end do
+     ! if (n_tsys == 1) tsys_time(2) = data_l1%time(nsamp)
+     ! if (n_tsys == 0) then
+     !    write(*,*) "No ambient subscans!"
+     !    cycle
+     ! end if
 
      ! Get patch info
      found = get_patch_info(scan%object, pinfo) 
@@ -166,6 +213,9 @@ program l2gen
         ! Reformat L1 data into L2 format, and truncate
         call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
         call update_status(status, 'excise')
+
+        call find_tsys(data_l2_fullres, is_sim, sim_tsys, verb)
+        call update_status(status, 'find tsys')
         
         if (verb) then
            write(*,*) "Starting analysis of scan", scan%ss(k)%id
@@ -255,8 +305,10 @@ program l2gen
               write(*,*) "NaN in tod before filtering!", scan%ss(k)%id
            end if
         end if
+       
+        
         data_l2_fullres%mask_outliers = mask_outliers
-        if (mask_outliers) then
+        if ((mask_outliers) .and. (.not. (sum(data_l2_fullres%freqmask_full) == 0.d0))) then
            if (verb) then
               write(*,*) 'Making frequency mask', scan%ss(k)%id
            end if
@@ -293,20 +345,16 @@ program l2gen
 
            ! replace freqmask in original tod
            call transfer_diagnostics(data_l2_filter, data_l2_fullres)
+           
 
-           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, verb)
+           call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, .false.)
            call update_status(status, 'made_freqmask')
 
            call free_lx_struct(data_l2_filter)
         end if
+
 !        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
  !       write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
-        if (verb) then
-           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, &
-                & sum(data_l2_fullres%freqmask_full) &
-                & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
-                & / 4.d0 / 1024.d0 
-        end if
 
         !!! All channels masked!!
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
@@ -392,13 +440,25 @@ program l2gen
         !call convert_GHz_to_k(data_l2_fullres(i))               
 
         ! Apply absolute calibration
-        call calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys, verb)
+        call calibrate_tod(data_l2_fullres, max_tsys)
+        
+        ! Update freqmask after max_tsys cut
+        call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, verb)
+
+        if (verb) then
+           write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, &
+                & sum(data_l2_fullres%freqmask_full) &
+                & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
+                & / 4.d0 / 1024.d0 
+        end if
+
         
         if (verb) then
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
               write(*,*) "NaN in tod after filtering!"
            end if
         end if
+        
         
         ! If necessary, decimate L2 file in both time and frequency
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
@@ -415,6 +475,8 @@ program l2gen
         if (verb) then
            write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
         end if
+
+        data_l2_decimated%irun = irun - 1
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
         call write_l2_file(scan, k, data_l2_decimated)
         call update_status(status, 'write_l2')
@@ -590,6 +652,10 @@ contains
     if (.not. allocated(data_l2_out%spike_data)) allocate(data_l2_out%spike_data(size(data_l2_in%spike_data,1),size(data_l2_in%spike_data,2),&
             &size(data_l2_in%spike_data,3),size(data_l2_in%spike_data,4),size(data_l2_in%spike_data,5)))
     data_l2_out%spike_data = data_l2_in%spike_data
+    if (.not. allocated(data_l2_out%AB_mask)) allocate(data_l2_out%AB_mask(ndet,nsb,nfreq))
+    data_l2_out%AB_mask = data_l2_in%AB_mask
+    if (.not. allocated(data_l2_out%leak_mask)) allocate(data_l2_out%leak_mask(ndet,nsb,nfreq))
+    data_l2_out%leak_mask = data_l2_in%leak_mask
     
     call free_lx_struct(data_l2_in)
 
@@ -695,8 +761,8 @@ contains
     real(dp),     allocatable, dimension(:,:)       :: outlier_mask
     logical(lgt) :: mask_edge_corrs, rm_outliers, verb
     character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
-    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str
-    real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe
+    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str, aliasing_filename
+    real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe, aliasing_db_cutoff
     integer(i4b) :: n_neighbor, prod_offset
     integer(i4b), dimension(3) :: box_offsets, stripe_offsets
     real(dp),     dimension(3) :: nsigma_prod_box, nsigma_prod_stripe, nsigma_mean_box
@@ -715,7 +781,9 @@ contains
     call get_parameter(unit, parfile, 'VARIANCE_MAX',              par_dp=var_max)
     call get_parameter(unit, parfile, 'CORRELATION_MAX',           par_dp=corr_max)
     call get_parameter(unit, parfile, 'NEIGHBOR_FACTOR',           par_dp=neighbor_factor)
-    call get_parameter(unit, parfile, 'NSIGMA_EDGE_CORRS',         par_dp=nsigma_edge_corrs)
+!    call get_parameter(unit, parfile, 'NSIGMA_EDGE_CORRS',         par_dp=nsigma_edge_corrs)
+    call get_parameter(unit, parfile, 'ALIASING_FILE',             par_string=aliasing_filename)
+    call get_parameter(unit, parfile, 'ALIASING_DB_CUT',           par_dp=aliasing_db_cutoff)
     call get_parameter(unit, parfile, 'MASK_EDGE_CORRS',           par_lgt=mask_edge_corrs)
     call get_parameter(unit, parfile, 'REMOVE_OUTLIERS',           par_lgt=rm_outliers)
     call get_parameter(unit, parfile, 'BOX_OFFSETS',               par_string=box_offset_str)
@@ -806,59 +874,91 @@ contains
 !     allocate(corrs(2 * nfreq, 2 * nfreq))
 
     if (mask_edge_corrs) then
-       edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
+       
+       call open_hdf_file(aliasing_filename, file, "r")
+       if(.not. allocated(data_l2%AB_mask)) allocate(data_l2%AB_mask(nfreq,nsb,20)) 
+       if(.not. allocated(data_l2%leak_mask)) allocate(data_l2%leak_mask(nfreq,nsb,20)) 
+       
+       ! Read telescope coordinates
+       call read_hdf(file, "AB_mask",            data_l2%AB_mask)
+       call read_hdf(file, "leak_mask",          data_l2%leak_mask)
+
+       
+       call close_hdf_file(file)
+
        do i = 1, ndet
           if (.not. is_alive(data_l2%pixels(i))) cycle
-          do k = 1, nfreq
-             reason = 40
-             j = 1
-             n = 1 + nfreq - k ! type 1
-             m = 2
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 2
-             n = 1 + nfreq - k ! type 1
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 3
-             n = 1 + nfreq - k ! type 1
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = 1 + nfreq - k ! type 1
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = 1 + nfreq - k ! type 1
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             reason = 41
-             j = 1
-             n = k ! type 2
-             m = 2
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 2
-             n = k ! type 2
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 2
-             n = k ! type 2
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 3
-             n = k ! type 2
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = k ! type 2
-             m = 3
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-             j = 1
-             n = k ! type 2
-             m = 4
-             call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+          do j = 1, nsb
+             do k = 1, nfreq
+                if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
+                
+                if (data_l2%AB_mask(k,j,data_l2%pixels(i)) < aliasing_db_cutoff) then
+                   data_l2%freqmask_full(k,j,i) = 0.d0
+                   data_l2%freqmask_reason(k,j,i) = 40
+                end if
+
+                if (data_l2%leak_mask(k,j,data_l2%pixels(i)) < aliasing_db_cutoff) then
+                   data_l2%freqmask_full(k,j,i) = 0.d0
+                   data_l2%freqmask_reason(k,j,i) = 41
+                end if
+             end do
           end do
        end do
        vars = vars * data_l2%freqmask_full
+       
+!       edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
+       ! do i = 1, ndet
+       !    if (.not. is_alive(data_l2%pixels(i))) cycle
+       !    do k = 1, nfreq
+       !       reason = 40
+       !       j = 1
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 2
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 2
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 3
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = 1 + nfreq - k ! type 1
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       reason = 41
+       !       j = 1
+       !       n = k ! type 2
+       !       m = 2
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 2
+       !       n = k ! type 2
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 2
+       !       n = k ! type 2
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 3
+       !       n = k ! type 2
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = k ! type 2
+       !       m = 3
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !       j = 1
+       !       n = k ! type 2
+       !       m = 4
+       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
+       !    end do
+       ! end do
+       ! vars = vars * data_l2%freqmask_full
     end if
 !    allocate(box_offsets(3), prod_offsets(3))
     
@@ -1894,7 +1994,9 @@ contains
     allocate(data_l2%freqmask_full(size(data_l1%nu,1,1),nsb,ndet))
     allocate(data_l2%freqmask_reason(size(data_l1%nu,1,1),nsb,ndet))
     !allocate(data_l2%flag(nsamp_tot))
-    allocate(data_l2%Tsys(1,nfreq,nsb,ndet))
+    allocate(data_l2%Phot(3,2,nfreq,nsb,ndet))
+    allocate(data_l2%Thot(3,2))
+    allocate(data_l2%time_hot(3,2))
     allocate(data_l2%n_nan(nfreq,nsb,ndet))
 
     ! Merge L1 data
@@ -1910,7 +2012,11 @@ contains
     data_l2%freqmask        = data_l1%freqmask
     data_l2%freqmask_full   = data_l1%freqmask_full
     data_l2%freqmask_reason = data_l1%freqmask_reason
-    data_l2%Tsys            = 0.d0 !data_l1%Tsys
+    data_l2%cal_method      = data_l1%cal_method
+    data_l2%n_cal           = data_l1%n_cal    
+    data_l2%Phot            = data_l1%Phot
+    data_l2%Thot            = data_l1%Thot
+    data_l2%time_hot        = data_l1%time_hot
     data_l2%n_nan           = data_l1%n_nan
     do j = 1, ndet
        if (.not. is_alive(data_l2%pixels(j))) cycle
@@ -1966,7 +2072,10 @@ contains
     allocate(data_out%flag(nsamp_out))
     allocate(data_out%freqmask(numfreq_out,nsb,ndet))
     allocate(data_out%chi2(numfreq_out,nsb,ndet))
-    allocate(data_out%Tsys(2,numfreq_in,nsb,ndet))
+    allocate(data_out%Tsys(numfreq_in,nsb,ndet))
+    allocate(data_out%Phot(3,2,numfreq_in,nsb,ndet))
+    allocate(data_out%Thot(3,2))
+    allocate(data_out%Time_hot(3,2))
     allocate(data_out%Tsys_lowres(numfreq_out,nsb,ndet))
     allocate(data_out%freqmask_full(size(data_in%nu,1,1),nsb,ndet))
     allocate(data_out%freqmask_reason(size(data_in%nu,1,1),nsb,ndet))
@@ -1978,9 +2087,13 @@ contains
        allocate(data_out%acceptrate(nsb,ndet))
        allocate(data_out%diagnostics(size(data_in%nu,1),nsb,ndet,size(data_in%diagnostics,4)))
        allocate(data_out%cut_params(size(data_in%cut_params,1),size(data_in%cut_params,2)))
+       allocate(data_out%AB_mask(size(data_in%nu,1,1),nsb,ndet))
+       allocate(data_out%leak_mask(size(data_in%nu,1,1),nsb,ndet))
        data_out%acceptrate    = data_in%acceptrate
        data_out%diagnostics   = data_in%diagnostics
        data_out%cut_params    = data_in%cut_params
+       data_out%AB_mask       = data_in%AB_mask
+       data_out%leak_mask     = data_in%leak_mask
     end if
     allocate(data_out%pixels(ndet))
     allocate(data_out%pix2ind(size(data_in%pix2ind,1)))
@@ -2009,7 +2122,12 @@ contains
     data_out%freqmask_reason = data_in%freqmask_reason
     data_out%pixels        = data_in%pixels
     data_out%pix2ind       = data_in%pix2ind
+    data_out%cal_method    = data_in%cal_method
+    data_out%n_cal         = data_in%n_cal
     data_out%Tsys          = data_in%Tsys
+    data_out%Phot          = data_in%Phot
+    data_out%Thot          = data_in%Thot
+    data_out%time_hot      = data_in%time_hot    
     data_out%sb_mean       = data_in%sb_mean
 !    data_out%spike_data    = data_in%spike_data
     data_out%n_nan         = data_in%n_nan
@@ -2023,6 +2141,10 @@ contains
        data_out%pca_comp      = data_in%pca_comp
        data_out%pca_eigv      = data_in%pca_eigv
     end if
+
+
+    
+
     
     ! Make angles safe for averaging
     do j = 1, ndet
@@ -2043,7 +2165,8 @@ contains
        do j = 1, nsb
           do i = 1, size(data_in%nu,1)
              if (data_out%freqmask_full(i,j,k) == 0) then
-                data_out%var_fullres(i,j,k) = 2.8d-5
+                !data_out%var_fullres(i,j,k) = 2.8d-5
+                data_out%var_fullres(i,j,k) = 0.d0
                 cycle
              end if
              data_out%tod_mean(i,j,k) = data_in%tod_mean(i,j,k)
@@ -2126,7 +2249,9 @@ contains
                    nw = nw + 1
                 end if
                 weight = weight + w 
-                data_out%Tsys_lowres(k,j,i) = data_out%Tsys_lowres(k,j,i) + (w * (data_in%Tsys(1,n,j,i) + data_in%Tsys(2,n,j,i))/2.d0) ** 2
+                ! must say that I do not understand this line (but I will trust my former self):
+                !data_out%Tsys_lowres(k,j,i) = data_out%Tsys_lowres(k,j,i) + (w * (data_in%Tsys(1,n,j,i) + data_in%Tsys(2,n,j,i))/2.d0) ** 2
+                data_out%Tsys_lowres(k,j,i) = data_out%Tsys_lowres(k,j,i) + (w * data_in%Tsys(n,j,i)) ** 2  
              end do
              data_out%Tsys_lowres(k,j,i) = sqrt(data_out%Tsys_lowres(k,j,i))
              if (weight > 0.d0) then
@@ -2563,20 +2688,24 @@ contains
   end subroutine remove_elevation_gain
 
 
-  subroutine init_vanemask(data, vanemask, tsys_ind)
+  subroutine init_vanemask(data, vanemask, Thot, tsys_ind)
     implicit none
     type(Lx_struct),                                 intent(inout) :: data    
     integer(i4b), dimension(:), allocatable,         intent(inout) :: vanemask
     integer(i4b),                                    intent(in)    :: tsys_ind(2)
+    real(dp),                                        intent(out)   :: Thot
 
-    integer(i4b) :: i, j, nsamp_lowres, nsamp_highres
+    integer(i4b) :: i, j, nsamp_lowres, nsamp_highres, n_mean
     real(dp)     :: mjd_start, mjd_stop
 
     nsamp_lowres  = size(data%amb_state, 1)
     nsamp_highres = size(data%tod,1)
 
-    allocate(vanemask(nsamp_highres))
+    if (.not. allocated(vanemask)) allocate(vanemask(nsamp_highres))
+    
     vanemask = -1
+    n_mean = 0
+    Thot = 0.d0
     i = 1 ! Counter for highres grid
     j = 1 ! Couner for lowres grid
     do j = 1, nsamp_lowres-1
@@ -2590,28 +2719,35 @@ contains
           do while (data%time(i) < mjd_stop .and. i <= nsamp_highres)
              if (i > tsys_ind(1) .and. i < tsys_ind(2)) then
                 vanemask(i) = data%amb_state(j)
+                n_mean = n_mean + 1
+                Thot = Thot + data%t_hot(j)
              end if
              i            = i+1
           end do
        end if
     end do
+    if (n_mean > 0) then
+       Thot = Thot / n_mean / 100.d0 + 273.15  ! in Kelvin
+    end if
   end subroutine init_vanemask
 
-  subroutine compute_P_hot(tsys_file, data, tsys_ind, n_tsys, is_sim, verb)
+
+  subroutine prepare_calibration(scan, data, is_sim, verb)
     implicit none
-    character(len=*),            intent(in)       :: tsys_file
     type(Lx_struct),             intent(inout)    :: data
     logical(lgt),                intent(in)       :: is_sim, verb 
+    logical(lgt)                                  :: vane_in, no_nans
     type(hdf_file)                                :: file
     real(dp)                                      :: mean_tod, P_hot, P_cold
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
     integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
-    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys
-    integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
-    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
+    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys, cal_id(2), n_cal
+    !integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
+    integer(i4b)                                  :: vane_in_index, vane_out_index
+    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, Thot
     real(dp), dimension(:), allocatable           :: time, Y, tod_hot, tod_cold
     integer(i4b), dimension(:), allocatable       :: vanemask
-    
+    type(comap_scan_info) :: scan
 
     nsamp         = size(data%tod,1)
     nfreq_fullres = size(data%tod,2)
@@ -2619,209 +2755,355 @@ contains
     ndet          = size(data%tod,4)
 
 
-    if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
-    allocate(Y(nfreq_fullres), tod_hot(nsamp), tod_cold(nsamp))
-
-    data%Tsys(n_tsys,:,:,:) = 1.d0
-    
-    !call locate_ambient_indecies(data, vane_in_index, vane_out_index, tsys_ind)                                                                                                                                                  
-    call init_vanemask(data, vanemask, tsys_ind)
-
-    do i=1, ndet
-       if (.not. is_alive(data%pixels(i))) cycle
-       do j=1, nsb
-          do k=1, nfreq_fullres
-             if (data%freqmask_full(k,j,i) == 0.d0) cycle
-
-             P_hot = 0.d0
-             n_hot = 0
-             do l = 1, nsamp
-                if (vanemask(l) == 1 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
-                   !P_hot = P_hot + data%tod(l,k,j,i)
-                   n_hot = n_hot + 1
-                   tod_hot(n_hot) = data%tod(l,k,j,i)
-                else
-                   cycle
-                end if
-             end do
-             if (n_hot == 0) then
-                data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
-                if (verb) then
-                   write(*,*) "no n_hot", i, j, k
-                end if
-             else
-                P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
-                if (is_sim) then 
-                   data%Tsys(n_tsys,k,j,i) = 1.d0
-                else if (P_hot == 0.d0) then
-                   data%Tsys(n_tsys,k,j,i) = 1.d0
-                   if (verb) then
-                      write(*,*) "P_hot = 0", P_hot, i, j, k
-                   end if
-                else
-                   data%Tsys(n_tsys,k,j,i) = P_hot!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
-                end if
-                !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
-             end if
-          end do
-       end do
-    end do
-
-    deallocate(vanemask, tod_hot, tod_cold)
-
-  end subroutine compute_P_hot
-
-
-
-  subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys, is_sim, verb)
-    implicit none
-    character(len=*),            intent(in)       :: tsys_file
-    type(Lx_struct),             intent(inout)    :: data
-    logical(lgt),                intent(in)       :: is_sim, verb 
-    type(hdf_file)                                :: file
-    real(dp)                                      :: mean_tod, P_hot, P_cold
-    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
-    integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
-    integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys
-    integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
-    real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
-    real(dp), dimension(:), allocatable           :: time, Y, tod_hot, tod_cold
-    integer(i4b), dimension(:), allocatable       :: vanemask
     
 
-    nsamp         = size(data%tod,1)
-    nfreq_fullres = size(data%tod,2)
-    nsb           = size(data%tod,3)
-    ndet          = size(data%tod,4)
-
-
-    if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
-    allocate(Y(nfreq_fullres), tod_hot(nsamp), tod_cold(nsamp))
-
-    data%Tsys(n_tsys,:,:,:) = 40.d0
-    t_cold = 2.73
-    t_hot = mean(data%t_hot)/100 + 273.15
-
-    !call locate_ambient_indecies(data, vane_in_index, vane_out_index, tsys_ind)                                                                                                                                                  
-    call init_vanemask(data, vanemask, tsys_ind)
-
-    do i=1, ndet
-       if (.not. is_alive(data%pixels(i))) cycle
-       do j=1, nsb
-          do k=1, nfreq_fullres
-             if (data%freqmask_full(k,j,i) == 0.d0) cycle
-
-             P_hot = 0.d0
-             P_cold = 0.d0
-             n_hot = 0
-             n_cold = 0
-             do l = 1, nsamp
-                if (vanemask(l) == 2 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
-                   !P_hot = P_hot + data%tod(l,k,j,i)
-                   n_hot = n_hot + 1
-                   tod_hot(n_hot) = data%tod(l,k,j,i)
-                else if (vanemask(l) == 3 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
-                   !P_cold = P_cold + data%tod(l,k,j,i)
-                   n_cold = n_cold + 1
-                   tod_cold(n_cold) = data%tod(l,k,j,i)
-                else
-                   cycle
-                end if
-             end do
-             if ((n_hot == 0) .or. (n_cold == 0)) then
-                data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
-                if (verb) then
-                   write(*,*) "no n_cold", i, j, k
-                end if
-             else
-                P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
-                P_cold = median(tod_cold(1:n_cold)) !P_cold / n_cold
-                Y(k)   = P_hot/P_cold
-                if (is_sim) then 
-                   data%Tsys(n_tsys,k,j,i) = 1.d0
-                else if ((Y(k) == 1.d0) .or. (P_cold == 0.d0)) then
-                   data%Tsys(n_tsys,k,j,i) = 1.d0
-                   if (verb) then
-                      write(*,*) "Y = 1 or P_cold = 0", P_hot, P_cold, i, j, k
-                   end if
-                else
-                   data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
-                end if
-                !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
+!    if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
+    if (.not. allocated(data%Phot)) allocate(data%Phot(3, 2, nfreq_fullres, nsb, ndet))
+    if (.not. allocated(data%Thot)) allocate(data%Thot(3, 2))
+    if (.not. allocated(data%time_hot)) allocate(data%time_hot(3, 2))
+    
+    data%Phot = 0.d0
+    data%Thot = 0.d0
+    data%time_hot = 0.d0 
+    
+    cal_id(1) = 1
+    cal_id(2) = scan%nsub
+    do m = 1, 2 
+       tsys_ind(1) = minloc(abs(data%time - scan%ss(cal_id(m))%mjd(1)), 1) + 1
+       tsys_ind(2) = minloc(abs(data%time - scan%ss(cal_id(m))%mjd(2)), 1) - 1
+       ! write(*,*) "tsys_ind ", tsys_ind
+       ! write(*,*) "cal_id ", cal_id
+    
+                                                                           
+       call init_vanemask(data, vanemask, Thot, tsys_ind)
+       n_hot = 0
+!       write(*,*) "vanemask ", vanemask(tsys_ind(1):tsys_ind(2))
+       
+       vane_in = .false.   
+       ! Find indices when vane is in
+       do l = tsys_ind(1), tsys_ind(2)
+          if (vanemask(l) == 1) then
+             n_hot = n_hot + 1
+!             write(*,*) "n_hot ", n_hot
+             if (.not. vane_in) then 
+                vane_in_index = l
+                vane_in = .true.
+                !write(*,*) "vane_in", vane_in
              end if
-          end do
+          else if (vane_in) then
+             vane_out_index = l
+!             write(*,*) "vane_out", l, vane_out_index
+             exit
+          end if
        end do
+       if (n_hot == 0) then
+          if (verb) then
+             write(*,*) "no n_hot", cal_id(m)
+          end if
+       else
+!          write(*,*) "in/out ", vane_in_index, vane_out_index
+          data%time_hot(1, m) = sum(data%time(vane_in_index:vane_out_index - 1)) / (vane_out_index - vane_in_index)
+!          write(*,*) "data%time_hot ", data%time_hot          
+          data%Thot(1, m) = Thot
+          do i=1, ndet
+             if (.not. is_alive(data%pixels(i))) cycle
+             do j=1, nsb
+                do k=1, nfreq_fullres
+                   if (data%freqmask_full(k,j,i) == 0.d0) cycle
+                   data%Phot(1, m, k, j, i) = sum(data%tod(vane_in_index:vane_out_index - 1,k,j,i)) / (vane_out_index - vane_in_index)
+                   !write(*,*) data%pixels(i), j, k, data%Phot(1, m, k, j, i)
+                   !if (sum(data%tod(vane_in_index:vane_out_index - 1,k,j,i)) == sum(data%tod(vane_in_index:vane_out_index - 1,k,j,i))) then
+                      !data%Phot(1, m, k, j, i) = median(data%tod(vane_in_index:vane_out_index - 1,k,j,i))
+                   !end if
+                   ! P_hot = 0.d0
+                   ! no_nans = .true.
+                   ! do l = vane_in_index, 
+                   !    if (.not. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then  !! check for NAN
+                   !       no_nans = .false.
+                   !    end if
+                   ! end do
+                   
+                   ! P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
+                   ! if (is_sim) then 
+                   !    data%Tsys(n_tsys,k,j,i) = 1.d0
+                   ! else if (P_hot == 0.d0) then
+                   !    data%Tsys(n_tsys,k,j,i) = 1.d0
+                   !    if (verb) then
+                   !       write(*,*) "P_hot = 0", P_hot, i, j, k
+                   !    end if
+                   ! else
+                   !    data%Tsys(n_tsys,k,j,i) = P_hot!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+                   ! end if
+                   !    !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
+                   ! end if
+                end do
+             end do
+          end do
+       end if
     end do
+    deallocate(vanemask)
 
-    deallocate(vanemask, tod_hot, tod_cold)
+    data%cal_method = 1
+    n_cal = 0 
+    do j = 1, 2
+       if (.not. (data%time_hot(data%cal_method,j) == 0.d0)) then
+          n_cal = n_cal + 1
+       end if
+    end do
+    data%n_cal = n_cal 
+    if (n_cal < 1) then
+       data%freqmask_full(:,:,:) = 0.d0
+       if (verb) then
+          write(*,*) "no valid ambient measurments, Obsid: ", scan%id
+       end if
+    end if
 
-  end subroutine compute_Tsys_per_tp
+  end subroutine prepare_calibration
 
 
-  subroutine calibrate_tod(data_l1, data_l2_fullres, tsys_time, is_sim, sim_tsys, verb)
+
+  ! subroutine compute_P_hot(tsys_file, data, tsys_ind, n_tsys, is_sim, verb)
+  !   implicit none
+  !   character(len=*),            intent(in)       :: tsys_file
+  !   type(Lx_struct),             intent(inout)    :: data
+  !   logical(lgt),                intent(in)       :: is_sim, verb 
+  !   type(hdf_file)                                :: file
+  !   real(dp)                                      :: mean_tod, P_hot, P_cold
+  !   real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
+  !   integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
+  !   integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys
+  !   integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
+  !   real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
+  !   real(dp), dimension(:), allocatable           :: time, Y, tod_hot, tod_cold
+  !   integer(i4b), dimension(:), allocatable       :: vanemask
+    
+
+  !   nsamp         = size(data%tod,1)
+  !   nfreq_fullres = size(data%tod,2)
+  !   nsb           = size(data%tod,3)
+  !   ndet          = size(data%tod,4)
+
+
+  !   if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
+  !   allocate(Y(nfreq_fullres), tod_hot(nsamp), tod_cold(nsamp))
+
+  !   data%Tsys(n_tsys,:,:,:) = 1.d0
+    
+  !   !call locate_ambient_indecies(data, vane_in_index, vane_out_index, tsys_ind)                                                                                                                                                  
+  !   call init_vanemask(data, vanemask, tsys_ind)
+
+  !   do i=1, ndet
+  !      if (.not. is_alive(data%pixels(i))) cycle
+  !      do j=1, nsb
+  !         do k=1, nfreq_fullres
+  !            if (data%freqmask_full(k,j,i) == 0.d0) cycle
+
+  !            P_hot = 0.d0
+  !            n_hot = 0
+  !            do l = 1, nsamp
+  !               if (vanemask(l) == 1 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+  !                  !P_hot = P_hot + data%tod(l,k,j,i)
+  !                  n_hot = n_hot + 1
+  !                  tod_hot(n_hot) = data%tod(l,k,j,i)
+  !               else
+  !                  cycle
+  !               end if
+  !            end do
+  !            if (n_hot == 0) then
+  !               data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+  !               if (verb) then
+  !                  write(*,*) "no n_hot", i, j, k
+  !               end if
+  !            else
+  !               P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
+  !               if (is_sim) then 
+  !                  data%Tsys(n_tsys,k,j,i) = 1.d0
+  !               else if (P_hot == 0.d0) then
+  !                  data%Tsys(n_tsys,k,j,i) = 1.d0
+  !                  if (verb) then
+  !                     write(*,*) "P_hot = 0", P_hot, i, j, k
+  !                  end if
+  !               else
+  !                  data%Tsys(n_tsys,k,j,i) = P_hot!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+  !               end if
+  !               !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
+  !            end if
+  !         end do
+  !      end do
+  !   end do
+
+  !   deallocate(vanemask, tod_hot, tod_cold)
+
+  ! end subroutine compute_P_hot
+
+
+
+  ! subroutine compute_Tsys_per_tp(tsys_file, data, tsys_ind, n_tsys, is_sim, verb)
+  !   implicit none
+  !   character(len=*),            intent(in)       :: tsys_file
+  !   type(Lx_struct),             intent(inout)    :: data
+  !   logical(lgt),                intent(in)       :: is_sim, verb 
+  !   type(hdf_file)                                :: file
+  !   real(dp)                                      :: mean_tod, P_hot, P_cold
+  !   real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
+  !   integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
+  !   integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys
+  !   integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
+  !   real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, t_hot
+  !   real(dp), dimension(:), allocatable           :: time, Y, tod_hot, tod_cold
+  !   integer(i4b), dimension(:), allocatable       :: vanemask
+    
+
+  !   nsamp         = size(data%tod,1)
+  !   nfreq_fullres = size(data%tod,2)
+  !   nsb           = size(data%tod,3)
+  !   ndet          = size(data%tod,4)
+
+
+  !   if (.not. allocated(data%Tsys)) allocate(data%Tsys(2, nfreq_fullres, nsb, ndet))
+  !   allocate(Y(nfreq_fullres), tod_hot(nsamp), tod_cold(nsamp))
+
+  !   data%Tsys(n_tsys,:,:,:) = 40.d0
+  !   t_cold = 2.73
+  !   t_hot = mean(data%t_hot)/100 + 273.15
+
+  !   !call locate_ambient_indecies(data, vane_in_index, vane_out_index, tsys_ind)                                                                                                                                                  
+  !   call init_vanemask(data, vanemask, tsys_ind)
+
+  !   do i=1, ndet
+  !      if (.not. is_alive(data%pixels(i))) cycle
+  !      do j=1, nsb
+  !         do k=1, nfreq_fullres
+  !            if (data%freqmask_full(k,j,i) == 0.d0) cycle
+
+  !            P_hot = 0.d0
+  !            P_cold = 0.d0
+  !            n_hot = 0
+  !            n_cold = 0
+  !            do l = 1, nsamp
+  !               if (vanemask(l) == 2 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+  !                  !P_hot = P_hot + data%tod(l,k,j,i)
+  !                  n_hot = n_hot + 1
+  !                  tod_hot(n_hot) = data%tod(l,k,j,i)
+  !               else if (vanemask(l) == 3 .and. data%tod(l,k,j,i) == data%tod(l,k,j,i)) then
+  !                  !P_cold = P_cold + data%tod(l,k,j,i)
+  !                  n_cold = n_cold + 1
+  !                  tod_cold(n_cold) = data%tod(l,k,j,i)
+  !               else
+  !                  cycle
+  !               end if
+  !            end do
+  !            if ((n_hot == 0) .or. (n_cold == 0)) then
+  !               data%Tsys(n_tsys,k,j,i) = 1.d0!(t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+  !               if (verb) then
+  !                  write(*,*) "no n_cold", i, j, k
+  !               end if
+  !            else
+  !               P_hot  = median(tod_hot(1:n_hot))   !P_hot  / n_hot
+  !               P_cold = median(tod_cold(1:n_cold)) !P_cold / n_cold
+  !               Y(k)   = P_hot/P_cold
+  !               if (is_sim) then 
+  !                  data%Tsys(n_tsys,k,j,i) = 1.d0
+  !               else if ((Y(k) == 1.d0) .or. (P_cold == 0.d0)) then
+  !                  data%Tsys(n_tsys,k,j,i) = 1.d0
+  !                  if (verb) then
+  !                     write(*,*) "Y = 1 or P_cold = 0", P_hot, P_cold, i, j, k
+  !                  end if
+  !               else
+  !                  data%Tsys(n_tsys,k,j,i) = (t_hot-t_cold)/(Y(k)-1.d0)/P_cold
+  !               end if
+  !               !write(*,*) (t_hot-t_cold)/(Y(k)-1.d0)
+  !            end if
+  !         end do
+  !      end do
+  !   end do
+
+  !   deallocate(vanemask, tod_hot, tod_cold)
+
+  ! end subroutine compute_Tsys_per_tp
+
+
+
+  subroutine find_tsys(data_l2_fullres, is_sim, sim_tsys, verb)
     implicit none
-    type(lx_struct), intent(in)    :: data_l1
     type(lx_struct), intent(inout) :: data_l2_fullres
     real(dp),        intent(in)    :: sim_tsys
-    real(dp),    intent(in)        :: tsys_time(2)
+!    real(dp),    intent(in)        :: tsys_time(2)
     logical(lgt), intent(in)       :: is_sim, verb
-    real(dp)                       :: interp1d_P_hot, mean_tod, y0, y1, x0, x1, x, scan_time
-    real(dp)                       :: t_cold, t_hot, tsys
-    integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp, n_print
+    real(dp)                       :: interp1d_P_hot, interp1d_T_hot, mean_tod, y0, y1, x0, x1, x, scan_time
+    real(dp)                       :: T_cold, T_hot(2), tsys, time_hot(2)
+    integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp, n_print, cal_method
     l2_nsamp = size(data_l2_fullres%tod, 1)
-    nfreq    = size(data_l1%tod,2)
-    nsb      = size(data_l1%tod,3)
-    ndet     = size(data_l1%tod,4)
-    t_cold = 2.73
-    t_hot = mean(data_l1%t_hot)/100 + 273.15
+    nfreq    = size(data_l2_fullres%tod,2)
+    nsb      = size(data_l2_fullres%tod,3)
+    ndet     = size(data_l2_fullres%tod,4)
+    T_cold = 2.725
+    scan_time = data_l2_fullres%time(l2_nsamp/2)
+
+    if (.not. allocated(data_l2_fullres%Tsys)) allocate(data_l2_fullres%Tsys(nfreq, nsb, ndet))
+    data_l2_fullres%Tsys = 0
     
-    n_print = 0
-    ! Interpolate Tsys to current time for each detector                                                        
+    cal_method = data_l2_fullres%cal_method
+    T_hot = data_l2_fullres%Thot(cal_method, :)
+    time_hot = data_l2_fullres%time_hot(cal_method, :)
+    if (data_l2_fullres%n_cal == 2) then
+       x0 = time_hot(1); x1 = time_hot(2)
+       y0 = T_hot(1); y1 = T_hot(2)
+       interp1d_T_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
+    end if
+
     do i = 1, ndet
        if (.not. is_alive(data_l2_fullres%pixels(i))) cycle
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2_fullres%freqmask_full(k,j,i) == 0.d0) cycle
-             scan_time = data_l2_fullres%time(l2_nsamp/2)
-             x0 = tsys_time(1); x1 = tsys_time(2)
-             y0 = data_l1%Tsys(1,k,j,i); y1 = data_l1%Tsys(2,k,j,i)
-             interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
              mean_tod = data_l2_fullres%tod_mean(k,j,i)
-!             mean_tod = mean(data_l1%tod(:,k,j,i))  !!!! should be mean over scan, not obsid ???
+                
              if (is_sim) then
-                data_l2_fullres%tod(:,k,j,i)  = sim_tsys * data_l2_fullres%tod(:,k,j,i)
-                !data_l2_fullres%Tsys(1,k,j,i) = sim_tsys
-                !data_l2_fullres%Tsys(2,k,j,i) = sim_tsys
-             else if (interp1d_P_hot == mean_tod) then
-                if ((verb) .and. (n_print < 4)) then
-                   n_print = n_print + 1
-                   write(*,*) "P_hot = P_cold !!", interp1d_P_hot == mean_tod, i, j, k
-                end if
-                tsys = 100.d0 ! (t_hot-t_cold)/(interp1d_P_hot/mean_tod-1.d0)
-                data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
-                data_l2_fullres%Tsys(1,k,j,i) = tsys
-                data_l2_fullres%Tsys(2,k,j,i) = tsys
+                data_l2_fullres%tod(tsys,k,j,i)  = sim_tsys
              else if (mean_tod == 0.d0) then
-                tsys = 100.d0
-                data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
-                data_l2_fullres%Tsys(1,k,j,i) = tsys
-                data_l2_fullres%Tsys(2,k,j,i) = tsys
+                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+             else if (data_l2_fullres%n_cal == 2) then  ! Two good ambient load measurements
+                ! Interpolate Tsys to current time for each detector
+                
+                y0 = data_l2_fullres%Phot(cal_method,1,k,j,i); y1 = data_l2_fullres%Phot(cal_method,1,k,j,i)
+                interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
+                tsys = (interp1d_T_hot - T_cold)/(interp1d_P_hot/mean_tod-1.d0)
+                data_l2_fullres%Tsys(k,j,i) = tsys
              else
-                tsys = (t_hot-t_cold)/(interp1d_P_hot/mean_tod-1.d0)
-                data_l2_fullres%tod(:,k,j,i)  = tsys * data_l2_fullres%tod(:,k,j,i)
-                data_l2_fullres%Tsys(1,k,j,i) = tsys
-                data_l2_fullres%Tsys(2,k,j,i) = tsys
+                if (time_hot(2) == 0.d0) then  ! Only first ambient measurement is good
+                   tsys = (T_hot(1) - T_cold) / (data_l2_fullres%Phot(cal_method,1,k,j,i) / mean_tod - 1.d0)
+                   data_l2_fullres%Tsys(k,j,i) = tsys
+                else                           ! Only second ambient measurement is good
+                   tsys = (T_hot(2) - T_cold) / (data_l2_fullres%Phot(cal_method,2,k,j,i) / mean_tod - 1.d0)
+                   data_l2_fullres%Tsys(k,j,i) = tsys
+                end if
              end if
-             !data_l2_fullres%tod(:,k,j,i)  = 40.d0 * data_l2_fullres%tod(:,k,j,i)
-             !write(*,*) "----------------"                                                                     
-             !write(*,*) data_l1%Tsys(1,k,j,i)                                                                  
-             !write(*,*) data_l1%Tsys(2,k,j,i)                                                                  
-             !write(*,*) "----------------"                                                                     
-             !write(*,*) mean_tod                                                                               
-             !write(*,*) "----------------"                                                                     
+          end do
+       end do
+    end do
+  end subroutine find_tsys
 
-             !write(*,*) interp1d_tsys*mean_tod                                                                 
-             !write(*,*) "----------------"                                                                     
+  subroutine calibrate_tod(data_l2_fullres, max_tsys)
+    implicit none
+    type(lx_struct), intent(inout) :: data_l2_fullres
+    real(dp), intent(in)           :: max_tsys
+    integer(i4b) :: i, j, k, ndet, nfreq, nsb
+    nfreq    = size(data_l1%tod,2)
+    nsb      = size(data_l1%tod,3)
+    ndet     = size(data_l1%tod,4)
+
+    do i = 1, ndet
+       if (.not. is_alive(data_l2_fullres%pixels(i))) cycle
+       do j = 1, nsb
+          do k = 1, nfreq
+             if (data_l2_fullres%freqmask_full(k,j,i) == 0.d0) cycle
+             if (data_l2_fullres%Tsys(k,j,i) > max_tsys) then
+                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+                data_l2_fullres%freqmask_reason(k,j,i) = 60
+             else
+                data_l2_fullres%tod(:,k,j,i)  = data_l2_fullres%Tsys(k,j,i) * data_l2_fullres%tod(:,k,j,i)
+             end if
           end do
        end do
     end do
