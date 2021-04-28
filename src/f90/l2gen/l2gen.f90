@@ -1731,7 +1731,7 @@ contains
    call close_hdf_file(prior_file)
 
    ! Wiener filter normalization parameters.
-   fknee_W = 0.003
+   fknee_W = 0.01
    alpha_W = -4.0
    sigma0 = 0.001
 
