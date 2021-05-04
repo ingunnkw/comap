@@ -58,8 +58,9 @@ module comap_lx_mod
      integer(lgt)                                    :: import_freqmask, import_sigma ! bool whether to import freqmask from existing l2 file
      
      ! Baseline Template file
-     real(sp),    allocatable, dimension(:, :, :, :) :: tod_baseline ! (time, freq, sideband, detector) Baseline template of tod
-     
+     real(sp),    allocatable, dimension(:, :, :, :) :: tod_baseline, amplitudes ! (time, freq, sideband, detector) Baseline template of tod
+     integer(sp),    allocatable, dimension(:)       :: Nperbaseline ! (time, freq, sideband, detector) Baseline template of tod
+      
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
 !!$     real(dp)                                        :: scanfreq(2), pixsize 
@@ -368,16 +369,25 @@ contains
     character(len=*), intent(in) :: filename
     type(lx_struct)              :: data
     type(hdf_file)               :: file
-    integer(i4b)                 :: nsamp, nfreq, nsb, ndet, ext(4)
+    integer(i4b)                 :: nbasis, nfreq, nsb, ndet, ext(4)
+
     ! Reading in baseline fit of tod from file.
+
     call free_lx_struct(data)
+
     call open_hdf_file(filename, file, "r")
-    call get_size_hdf(file, "tod_baseline", ext)
-    nsamp = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
-    allocate(data%tod_baseline(nsamp,nfreq,nsb,ndet))
-    call read_hdf(file, "tod_baseline", data%tod_baseline)
+    call get_size_hdf(file, "amplitudes", ext)
+
+    nbasis = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
+
+    allocate(data%Nperbaseline(nbasis))
+    allocate(data%amplitudes(nbasis,nfreq,nsb,ndet))
+
+    call read_hdf(file, "Nperbaseline", data%Nperbaseline)
+    call read_hdf(file, "amplitudes", data%amplitudes)
+
     call close_hdf_file(file)
-  end subroutine
+  end subroutine read_baselines
 
   ! ! Where should this sub logically be?
   ! subroutine decimate(time, time_full, tod, tod_full, point, point_full, dec)
@@ -510,6 +520,8 @@ contains
     if(allocated(data%amb_time))      deallocate(data%amb_time)
     if(allocated(data%el_az_stats))   deallocate(data%el_az_stats)
     if(allocated(data%tod_baseline))   deallocate(data%tod_baseline)
+    if(allocated(data%Nperbaseline))   deallocate(data%Nperbaseline)
+    if(allocated(data%amplitudes))   deallocate(data%amplitudes)
   end subroutine
 
   subroutine write_l2_file(scan, k, data, name_append)

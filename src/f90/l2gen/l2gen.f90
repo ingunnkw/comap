@@ -349,16 +349,19 @@ program l2gen
                end if
                ! Copy tod, run filtering, make new mask, then do filtering again on original (unfiltered) data
                call copy_lx_struct(data_l2_fullres, data_l2_filter)
+               !print *, "BEFORE", all(data_l2_filter%tod .eq. 0)
                call update_status(status, 'copy_data')
                
                ! Poly-filter copied data
                call polyfilter_TOD(data_l2_filter, bp_filter0)
                call update_status(status, 'polyfilter0')
       !           write(*,*) sum(data_l2_filter%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
-               
-               call find_spikes(data_l2_filter, verb)
-               call update_status(status, 'find_spikes')
-
+               !print *, "HEI0", bp_filter0, data_l2_filter%polyorder
+               if (bp_filter0 > -1) then
+                  !print *, "INSIDE", bp_filter0, data_l2_filter%polyorder
+                  call find_spikes(data_l2_filter, verb)
+                  call update_status(status, 'find_spikes')
+               end if
                ! pca filter copied data
                call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
                call update_status(status, 'pca_filter0')
@@ -383,12 +386,14 @@ program l2gen
 
                call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, verb)
                call update_status(status, 'made_freqmask')
+               !print *, "AFTER", all(data_l2_fullres%tod .eq. 0)
 
                call free_lx_struct(data_l2_filter)
            end if 
         end if
 !        write(*,*) data_l2_fullres%freqmask_reason(:, 1, 17)
  !       write(*,*) data_l2_fullres%freqmask_reason(:, 4, 10)
+        !print *, "HEI1"
         if (verb) then
            write(*,*) "Average acceptrate for scan: ", scan%ss(k)%id, &
                 & sum(data_l2_fullres%freqmask_full) &
@@ -559,6 +564,8 @@ contains
           if (.not. is_alive(data_l2%pixels(k))) cycle
           do j = 1, nsb
              if (sum(data_l2%freqmask_full(:,j,k)) == 0.d0) cycle
+             !print *, "HEI", shape(data_l2%tod_poly), allocated(data_l2%tod_poly)
+             !stop
              if ((isnan(data_l2%tod_poly(i+1,0,j,k))) .or. (isnan(data_l2%tod_poly(i,0,j,k)))) cycle
              ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
                               
@@ -1647,7 +1654,9 @@ contains
     real(dp),     allocatable, dimension(:,:) :: T, A
 
     data_l2%polyorder = bp_filter
+    !print *, "HEI2"
     if (bp_filter < 0) return
+    !print *, "HEI3"
 
     nsamp       = size(data_l2%tod,1)
     nfreq       = size(data_l2%tod,2)

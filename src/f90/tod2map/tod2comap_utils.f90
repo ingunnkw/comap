@@ -7,7 +7,7 @@ module tod2comap_utils
 
   type tod_type
      real(dp)     :: samprate, Tsys
-     integer(i4b) :: nsamp, ndet, nfreq, nsb, nsim
+     integer(i4b) :: nsamp, ndet, nfreq, nsb, nsim, nbasis
      real(dp)     :: fmin, fmax, df, mean_el, mean_az
      logical      :: fit_baselines
 
@@ -119,6 +119,8 @@ contains
 
     type(lx_struct) :: data
     
+    integer(i4b) :: freq, sb, det, time, basis, current, next
+   
     ! Read baseline tod data
     call read_baselines(baselinefile, data)
 
@@ -126,13 +128,27 @@ contains
     tod%nfreq = size(tod%d,2)
     tod%nsb   = size(tod%d,3)
     tod%ndet  = size(tod%d,4)
+    tod%nbasis = size(data%amplitudes, 1)
+
+    allocate(tod%baselines(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet))
     
-    allocate(tod%baselines(tod%nsamp, tod%nfreq, tod%nsb, tod%ndet - 1))
+    tod%baselines = 0
 
-    tod%baselines = data%tod_baseline
-   
+    do freq = 1, tod%nfreq
+       do sb = 1, tod%nsb
+          do det = 1, tod%ndet
+             if (all(data%amplitudes(:, freq, sb, det) .eq. 0)) cycle 
+             current = 1
+             do basis = 1, tod%nbasis 
+                next  = current + data%Nperbaseline(basis)
+                tod%baselines(current:next, freq, sb, det) = data%amplitudes(basis, freq, sb, det)
+                current = next 
+             end do
+          end do
+       end do
+    end do
+    
     call free_lx_struct(data)
-
   end subroutine get_baselines
   
 

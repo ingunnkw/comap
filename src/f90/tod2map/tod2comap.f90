@@ -51,7 +51,7 @@ program tod2comap
   integer(i4b)          :: seed
   integer(i4b)          :: d 
 
-  character(len=512)    :: param_dir, runlist_in
+  character(len=512)    :: param_dir, runlist_in, scheme
   character(len=1024)   :: param_name, param_name_raw, runlist_name, runlist_name_raw
   logical               :: exist, fit_baselines
 
@@ -93,7 +93,11 @@ program tod2comap
      if (trim(split_id) .ne. '') split_id = '_' // split_id
      acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // trim(split_id) // '_' // trim(object) // '.h5'
   end if
-  call get_parameter(0, parfile, 'FIT_BASELINES', par_lgt=fit_baselines)
+  call get_parameter(0, parfile, 'SCHEME', par_string = scheme)
+  
+  if (scheme .eq. "baselines") then
+     fit_baselines = .true.
+  end if
 
    ! Copy parameter file to map-file output directory
    param_dir = "param4map"
@@ -208,7 +212,9 @@ program tod2comap
          baseline_filename = trim(baseline_path)//"baselines"//trim(baseline_filename(:name_len-3))//"_temp.h5"
          
          call get_baselines(trim(baseline_filename), tod, parfile)
+
          tod%d(:, :, :, :tod%ndet-1) = tod%d(:, :, :, :tod%ndet-1) - tod%baselines ! Subtracting baseline templates
+         
      end if
         !elevation cuts here
         !if (tod%mean_el .lt. 35.d0) cycle
