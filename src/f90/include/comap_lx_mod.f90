@@ -64,7 +64,12 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: Tsys_lowres   ! (freq, sb,detector)
      real(sp),     allocatable, dimension(:,:,:,:,:) :: el_az_stats ! (g/a, n_chunks, freq, sb, feed)
+     integer(lgt)                                    :: import_freqmask, import_sigma ! bool whether to import freqmask from existing l2 file
      
+     ! Baseline Template file
+     real(sp),    allocatable, dimension(:, :, :, :) :: tod_baseline, amplitudes ! (time, freq, sideband, detector) Baseline template of tod
+     integer(sp),    allocatable, dimension(:)       :: Nperbaseline ! (time, freq, sideband, detector) Baseline template of tod
+      
      ! Level 3 fields
 !!$     integer(i4b)                                    :: coord_sys
 !!$     real(dp)                                        :: scanfreq(2), pixsize 
@@ -319,10 +324,10 @@ contains
     call read_hdf(file, "point_cel",        data%point_cel)
     !call read_hdf(file, "flag",             data%flag)
     nfreq_full = nfreq*data%decimation_nu
-    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet))
+    allocate(data%freqmask_full(nfreq_full,nsb,ndet), data%freqmask(nfreq,nsb,ndet), data%mean_tp(nfreq_full,nsb,ndet), data%freqmask_reason(nfreq_full,nsb,ndet))
     call read_hdf(file, "freqmask",         data%freqmask)    
     call read_hdf(file, "freqmask_full",    data%freqmask_full)
-    !call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
+    call read_hdf(file, "freqmask_reason",  data%freqmask_reason)
     call read_hdf(file, "mean_tp",          data%mean_tp)
     allocate(data%Tsys(nfreq_full,nsb,ndet), data%tsys_lowres(nfreq,nsb,ndet))
     call read_hdf(file, "Tsys",             data%Tsys)
@@ -369,6 +374,30 @@ contains
     !write(*,*) nfreq,nsb,ndet
   end subroutine read_l2_file
 
+  subroutine read_baselines(filename, data)
+  implicit none
+    character(len=*), intent(in) :: filename
+    type(lx_struct)              :: data
+    type(hdf_file)               :: file
+    integer(i4b)                 :: nbasis, nfreq, nsb, ndet, ext(4)
+
+    ! Reading in baseline fit of tod from file.
+
+    call free_lx_struct(data)
+
+    call open_hdf_file(filename, file, "r")
+    call get_size_hdf(file, "amplitudes", ext)
+
+    nbasis = ext(1); nfreq = ext(2) ; nsb = ext(3); ndet = ext(4)
+
+    allocate(data%Nperbaseline(nbasis))
+    allocate(data%amplitudes(nbasis,nfreq,nsb,ndet))
+
+    call read_hdf(file, "Nperbaseline", data%Nperbaseline)
+    call read_hdf(file, "amplitudes", data%amplitudes)
+
+    call close_hdf_file(file)
+  end subroutine read_baselines
 
   ! ! Where should this sub logically be?
   ! subroutine decimate(time, time_full, tod, tod_full, point, point_full, dec)
@@ -506,6 +535,9 @@ contains
     if(allocated(data%amb_state))     deallocate(data%amb_state)
     if(allocated(data%amb_time))      deallocate(data%amb_time)
     if(allocated(data%el_az_stats))   deallocate(data%el_az_stats)
+    if(allocated(data%tod_baseline))   deallocate(data%tod_baseline)
+    if(allocated(data%Nperbaseline))   deallocate(data%Nperbaseline)
+    if(allocated(data%amplitudes))   deallocate(data%amplitudes)
   end subroutine
 
   subroutine write_l2_file(scan, k, data, name_append)
@@ -547,12 +579,15 @@ contains
 !    call write_hdf(file, "Pcold",             data%Pcold)
     call write_hdf(file, "time_hot",          data%time_hot)
     call write_hdf(file, "Tsys_lowres",       data%Tsys_lowres)
+    
     if (allocated(data%sigma0))    call write_hdf(file, "sigma0",            data%sigma0)
     if (allocated(data%alpha))     call write_hdf(file, "alpha",             data%alpha)
     if (allocated(data%fknee))     call write_hdf(file, "fknee",             data%fknee)   
+    
     call write_hdf(file, "freqmask",          data%freqmask)
     call write_hdf(file, "freqmask_full",     data%freqmask_full)
     call write_hdf(file, "freqmask_reason",   data%freqmask_reason)
+    
     call write_hdf(file, "n_nan",             data%n_nan)
     if (allocated(data%mean_tp)) call write_hdf(file, "mean_tp",           data%mean_tp)
     if (allocated(data%chi2)) call write_hdf(file, "chi2",           data%chi2)
@@ -623,6 +658,7 @@ contains
     call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
        
     call close_hdf_file(file)
+
   end subroutine
 
 !!$  subroutine write_l3_file(filename, data)
