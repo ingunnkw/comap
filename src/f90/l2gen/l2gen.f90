@@ -20,10 +20,10 @@ program l2gen
   character(len = 1024)  :: freq_import_name, sigma_import_name
   character(len=10)    :: target_name
   character(len=512)   :: param_dir, runlist_in
-  character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw
+  character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw, cal_db
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2)
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2), cal_method
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
@@ -57,7 +57,9 @@ program l2gen
   call get_parameter(unit, parfile, 'PCA_NSIGMA_REMOVE',         par_dp=pca_sig_rem)
   call get_parameter(unit, parfile, 'IS_SIM',                    par_lgt=is_sim)
   call get_parameter(unit, parfile, 'SIM_TSYS',                  par_dp=sim_tsys)
-  call get_parameter(unit, parfile, 'Max_TSYS',                  par_dp=max_tsys)
+  call get_parameter(unit, parfile, 'MAX_TSYS',                  par_dp=max_tsys)
+  call get_parameter(unit, parfile, 'CALIBRATION_METHOD',        par_int=cal_method)
+  call get_parameter(unit, parfile, 'CAL_DATABASE_FILE',         par_string=cal_db)
   call get_parameter(unit, parfile, 'REMOVE_ELEVATION_TEMP',     par_lgt=rem_el)
   call get_parameter(unit, parfile, 'VERBOSE_PRINT',             par_lgt=verb)
   call get_parameter(unit, parfile, 'RETURN_DIAG_L2_FILES',      par_lgt=diag_l2)
@@ -168,7 +170,7 @@ program l2gen
      call update_status(status, 'nan_interp')
 
      ! Finding Phot, Thot and time_hot
-     call prepare_calibration(scan, data_l1, is_sim, verb)
+     call prepare_calibration(scan, data_l1, is_sim, cal_method, cal_db, verb)
 
 
      ! Finalize frequency mask
@@ -2849,14 +2851,16 @@ contains
   end subroutine init_vanemask
 
 
-  subroutine prepare_calibration(scan, data, is_sim, verb)
+  subroutine prepare_calibration(scan, data, is_sim, cal_method, cal_db, verb)
     implicit none
     type(Lx_struct),             intent(inout)    :: data
-    logical(lgt),                intent(in)       :: is_sim, verb 
+    logical(lgt),                intent(in)       :: is_sim, verb
+    integer(i4b),                intent(in)       :: cal_method
+    character(len=1024),         intent(in)       :: cal_db
     logical(lgt)                                  :: vane_in, no_nans
     type(hdf_file)                                :: file
     real(dp)                                      :: mean_tod, P_hot, P_cold
-    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres
+    real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres, buffer
     integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
     integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys, cal_id(2), n_cal
     !integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
@@ -2864,6 +2868,7 @@ contains
     real(dp)                                      :: mjd_high,w, sum_w_t, sum_w, t1, t2, tsys, tod_mean_dec, t_cold, Thot
     real(dp), dimension(:), allocatable           :: time, Y, tod_hot, tod_cold
     integer(i4b), dimension(:), allocatable       :: vanemask
+    character(len=1024)                           :: db_string
     type(comap_scan_info) :: scan
 
     nsamp         = size(data%tod,1)
@@ -2959,8 +2964,20 @@ contains
        end if
     end do
     deallocate(vanemask)
+    
+    if (.not. (trim(cal_db) == '')) then
+       allocate(buffer(2, nfreq_fullres, nsb, 20))
+       call open_hdf_file(cal_db, file, "r")
+       write(db_string, '(A,I7.7)') 'obsid/', 15376 !scan%id
+       call read_hdf(file, trim(db_string) // '/Phot', buffer)
+       data%Phot(2, data%pixels, :, :, :) = buffer
+       call read_hdf(file, trim(db_string) // '/Thot', data%Thot(2, :))
+       call read_hdf(file, trim(db_string) // '/calib_times', data%time_hot(2, :))
+       call close_hdf_file(file)
+       deallocate(buffer)
+    end if
 
-    data%cal_method = 1
+    data%cal_method = cal_method
     n_cal = 0 
     do j = 1, 2
        if (.not. (data%time_hot(data%cal_method,j) == 0.d0)) then
