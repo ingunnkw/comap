@@ -82,7 +82,7 @@ program tod2comap
   !call get_parameter(0, parfile, 'NUMBER_JK', par_int=nsplit)
   call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
   call get_parameter(0, parfile, 'SCAN_MAPS', par_lgt=scan_map)
-  call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose)
+  call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose) 
   call get_parameter(0, parfile, 'USE_ACCEPT', par_lgt=use_acc)
   if (use_acc) then 
      call get_parameter(0, parfile, 'ACCEPT_DATA_FOLDER', par_string=acceptfile)
