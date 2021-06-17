@@ -230,7 +230,6 @@ program tod2comap
          name_len = len_trim(baseline_filename)
          
          baseline_filename = trim(baseline_path)//"baselines"//trim(baseline_filename(:name_len-3))//"_temp.h5"
-         
          call get_baselines(trim(baseline_filename), tod, parfile)
 
          tod%d(:, :, :, :tod%ndet-1) = tod%d(:, :, :, :tod%ndet-1) - tod%baselines ! Subtracting baseline templates

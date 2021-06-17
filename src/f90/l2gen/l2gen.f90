@@ -66,7 +66,17 @@ program l2gen
   call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
   call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
 
-  
+  if (import_freqmask) then 
+     call get_parameter(unit, parfile, 'FREQMASK_L2_FOLDER',     par_string=freq_import_dir)
+  else if (import_sigma) then
+     call get_parameter(unit, parfile, 'SIGMA0_L2_FOLDER',       par_string=sigma_import_dir)
+  end if 
+
+  ! Require that outliers are masked if mask is to be imported
+  if (import_freqmask .and. .not. mask_outliers) then 
+     mask_outliers = .true. 
+  end if 
+
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
@@ -333,11 +343,10 @@ program l2gen
         data_l2_fullres%mask_outliers = mask_outliers
         data_l2_fullres%import_freqmask = import_freqmask
         data_l2_decimated%import_freqmask = import_freqmask
-        
         if ((mask_outliers) .and. (.not. (sum(data_l2_fullres%freqmask_full) == 0.d0))) then
            if (import_freqmask) then
-              write (*,*) "Importing frequency mask from existing l2 file"
-              
+              data_l2_import%n_cal = data_l2_fullres%n_cal
+
               freq_dir = scan%ss(k)%l2file
               freq_import_name = freq_dir(len_trim(freq_dir)-20:)
               freq_import_name = trim(freq_import_dir)//trim(freq_import_name)
@@ -405,9 +414,10 @@ program l2gen
            data_l2_fullres%n_pca_comp = 0
            
            ! If necessary, decimate L2 file in both time and frequency
+           
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
            call update_status(status, 'decimate')
-        
+           
            ! Fit noise
            if (.not. import_freqmask .and. .not. import_sigma) then 
               call fit_noise(data_l2_decimated)
@@ -417,16 +427,18 @@ program l2gen
            
            ! Write L2 file to disk
            if (verb) then
-              write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
+              write(*,*) 'Writing ', scan%ss(k)%id, ' to disk1', trim(scan%ss(k)%l2file)
            end if
            
            call mkdirs(trim(scan%ss(k)%l2file), .true.)
            !call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
            call write_l2_file(scan, k, data_l2_decimated)
            call update_status(status, 'write_l2')
+           
            cycle
+
         end if
-        
+
         ! Poly-filter if requested
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
         call polyfilter_TOD(data_l2_fullres, bp_filter)
@@ -504,7 +516,7 @@ program l2gen
         
         
         ! If necessary, decimate L2 file in both time and frequency
-
+        
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
 
         call update_status(status, 'decimate')
@@ -523,7 +535,7 @@ program l2gen
 
         ! Write L2 file to disk
         if (verb) then
-           write(*,*) 'Writing ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
+           write(*,*) 'Writing ', scan%ss(k)%id, ' to disk2', trim(scan%ss(k)%l2file)
         end if
 
         data_l2_decimated%irun = irun - 1
@@ -574,8 +586,6 @@ contains
           if (.not. is_alive(data_l2%pixels(k))) cycle
           do j = 1, nsb
              if (sum(data_l2%freqmask_full(:,j,k)) == 0.d0) cycle
-             !print *, "HEI", shape(data_l2%tod_poly), allocated(data_l2%tod_poly)
-             !stop
              if ((isnan(data_l2%tod_poly(i+1,0,j,k))) .or. (isnan(data_l2%tod_poly(i,0,j,k)))) cycle
              ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
                               
@@ -1703,9 +1713,7 @@ contains
     real(dp),     allocatable, dimension(:,:) :: T, A
 
     data_l2%polyorder = bp_filter
-    !print *, "HEI2"
     if (bp_filter < 0) return
-    !print *, "HEI3"
 
     nsamp       = size(data_l2%tod,1)
     nfreq       = size(data_l2%tod,2)

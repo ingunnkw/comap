@@ -357,8 +357,10 @@ contains
     end if
 
     call read_hdf(file, "mask_outliers",    data%mask_outliers)
-!    if (data%mask_outliers == 1) then
+    !if (data%mask_outliers == 1) then
+    
     if ((data%mask_outliers == 1) .and. (data%n_cal > 0)) then  ! if n_cal is 0 we don't run diagnostics
+       
        allocate(data%diagnostics(nfreq_full,nsb,ndet,5))
        allocate(data%cut_params(2,5))
        allocate(data%acceptrate(nsb,ndet))
@@ -556,7 +558,6 @@ contains
     else
        call open_hdf_file(scan%ss(k)%l2file, file, "w")
     end if
-    
     call write_hdf(file, "runID",             data%irun)
     call write_hdf(file, "samprate",          data%samprate)
     call write_hdf(file, "mjd_start",         data%mjd_start)
@@ -596,6 +597,7 @@ contains
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",         data%tod_poly)
     end if
+
     call write_hdf(file, "pixels",            data%pixels)
     call write_hdf(file, "pix2ind",           data%pix2ind)
     call write_hdf(file, "var_fullres",       data%var_fullres)
@@ -608,13 +610,14 @@ contains
     call write_hdf(file, "spike_data",        data%spike_data)
     call write_hdf(file, "mask_outliers",     data%mask_outliers)
     !write(*,*) "middle", data%mask_outliers
+    
     if ((data%mask_outliers == 1) .and. (data%n_cal > 0)) then  ! if n_cal is 0 we don't run diagnostics
        !write(*,*) data%mask_outliers
        call write_hdf(file, "AB_aliasing",    data%AB_mask)
        call write_hdf(file, "leak_aliasing",  data%leak_mask)
-       call write_hdf(file, "acceptrate",     data%acceptrate)
        call write_hdf(file, "diagnostics",    data%diagnostics)
        call write_hdf(file, "cut_params",     data%cut_params)
+       call write_hdf(file, "acceptrate",     data%acceptrate)
     end if 
     !write(*,*) "right after", data%Tsys(1, 1, 1, 1)
     
@@ -656,7 +659,7 @@ contains
     
     call read_hdf(l1_file, "hk/array/weather/windSpeed", hk_buffer)
     call write_hdf(file, "hk_windspeed", hk_buffer(hk_start_ind:hk_end_ind))
-       
+    
     call close_hdf_file(file)
 
   end subroutine
