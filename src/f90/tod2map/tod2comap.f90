@@ -35,11 +35,12 @@ program tod2comap
 
   integer(i4b), allocatable, dimension(:,:) :: pixels
   character(len=512)    :: filename, map_filename, parfile, acceptfile, prefix, pre, map_name, object, coord_system, l1file
+  character(len=512)    :: baseline_filename, baseline_path
   character(len=512)    :: sim_filename, prefix_sim, pre_sim, sim_name, split_string, split_def_file, acc_id, map_file1, map_file2, split_id
   character(len=6)      :: obsid
   character(len=8)      :: scanid
   character(len=5)      :: sim_string
-  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split, scan_index
+  integer(i4b)          :: nscan, nsub, i, j, k, det, sb, freq, sim, nsim, n1, nn1, n2, nn2, split, scan_index, ii, jj, kk, ll
 
   integer(i4b)          :: myid, nproc, ierr, root, irun
   logical               :: binning_split, found, obs_map, scan_map, split_mode, verbose, use_acc
@@ -50,9 +51,11 @@ program tod2comap
   integer(i4b)          :: seed
   integer(i4b)          :: d 
 
-  character(len=512)    :: param_dir, runlist_in
+  character(len=512)    :: param_dir, runlist_in, scheme
   character(len=1024)   :: param_name, param_name_raw, runlist_name, runlist_name_raw
-  logical               :: exist
+  logical               :: exist, fit_baselines
+
+  integer(i4b)          :: name_len
 
   call mpi_init(ierr)
   call mpi_comm_rank(mpi_comm_world, myid,  ierr)
@@ -80,7 +83,7 @@ program tod2comap
   !call get_parameter(0, parfile, 'NUMBER_JK', par_int=nsplit)
   call get_parameter(0, parfile, 'OBSID_MAPS', par_lgt=obs_map)
   call get_parameter(0, parfile, 'SCAN_MAPS', par_lgt=scan_map)
-  call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose)
+  call get_parameter(0, parfile, 'VERBOSE_PRINT', par_lgt=verbose) 
   call get_parameter(0, parfile, 'USE_ACCEPT', par_lgt=use_acc)
   if (use_acc) then 
      call get_parameter(0, parfile, 'ACCEPT_DATA_FOLDER', par_string=acceptfile)
@@ -90,6 +93,11 @@ program tod2comap
      if (trim(acc_id) .ne. '') acc_id = '_' // acc_id
      if (trim(split_id) .ne. '') split_id = '_' // split_id
      acceptfile = trim(acceptfile) // 'jk_data' // trim(acc_id) // trim(split_id) // '_' // trim(object) // '.h5'
+  end if
+  call get_parameter(0, parfile, 'SCHEME', par_string = scheme)
+  
+  if (scheme .eq. "baselines") then
+     fit_baselines = .true.
   end if
 
   if (myid == 0) then 
@@ -176,6 +184,7 @@ program tod2comap
    
 
   if (myid==0) write(*,*) "Initialising mapmaker"
+  if (fit_baselines .and. myid==0) write(*,*) "Using baseline destriper"
   call initialize_mapmaker(map_scan, parfile, pinfo, split_info)
   call initialize_mapmaker(map_obs,  parfile, pinfo, split_info)
   call initialize_mapmaker(map_tot,  parfile, pinfo, split_info)
@@ -208,9 +217,24 @@ program tod2comap
         !nsub = scan%nsub
         !do j = 2, nsub-1
         !write(*,*) myid, 'scan', i, 'of', nscan, 'subscan', j, 'of', nsub
+        tod%fit_baselines = fit_baselines
         filename = scan%ss(j)%l2file !write(*,*) trim(filename)
         
         call get_tod(trim(filename), tod, parfile)
+        
+        if (fit_baselines) then 
+         name_len = len_trim(filename)
+         
+         baseline_path = filename(:name_len-16)
+         baseline_filename = filename(name_len-16:)
+         name_len = len_trim(baseline_filename)
+         
+         baseline_filename = trim(baseline_path)//"baselines"//trim(baseline_filename(:name_len-3))//"_temp.h5"
+         call get_baselines(trim(baseline_filename), tod, parfile)
+
+         tod%d(:, :, :, :tod%ndet-1) = tod%d(:, :, :, :tod%ndet-1) - tod%baselines ! Subtracting baseline templates
+         
+     end if
         !elevation cuts here
         !if (tod%mean_el .lt. 35.d0) cycle
         !if (tod%mean_el .gt. 65.d0) cycle
