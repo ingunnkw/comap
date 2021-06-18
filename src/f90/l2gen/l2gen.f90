@@ -307,6 +307,7 @@ program l2gen
         end if
        
         
+        data_l2_fullres%use_freq_filter = .true.
         data_l2_fullres%mask_outliers = mask_outliers
         if ((mask_outliers) .and. (.not. (sum(data_l2_fullres%freqmask_full) == 0.d0))) then
            if (verb) then
@@ -317,10 +318,13 @@ program l2gen
            call update_status(status, 'copy_data')
            
            ! Poly-filter copied data
-           write(*,*) "start"
-           call frequency_filter_TOD(data_l2_filter)
-           write(*,*) "stop"
-           call polyfilter_TOD(data_l2_filter, bp_filter0)
+           if (data_l2_fullres%use_freq_filter) then
+              write(*,*) "start"
+              call frequency_filter_TOD(data_l2_filter)
+              write(*,*) "stop"
+           else
+              call polyfilter_TOD(data_l2_filter, bp_filter0)
+           end if
            call update_status(status, 'polyfilter0')
 !           write(*,*) sum(data_l2_filter%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
            
@@ -366,7 +370,8 @@ program l2gen
            end if
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
-           
+           data_l2_fullres%use_freq_filter = .false.
+
            ! If necessary, decimate L2 file in both time and frequency
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
            call update_status(status, 'decimate')
@@ -388,7 +393,13 @@ program l2gen
         
         ! Poly-filter if requested
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
-        call polyfilter_TOD(data_l2_fullres, bp_filter)
+        
+        if (data_l2_fullres%use_freq_filter) then
+           call frequency_filter_TOD(data_l2_fullres)
+        else
+           call polyfilter_TOD(data_l2_fullres, bp_filter)
+        end if
+           
         call update_status(status, 'polyfilter')
         
         
@@ -431,7 +442,12 @@ program l2gen
         if (trim(pinfo%type) == 'gal') then
            call copy_lx_struct(data_l2_fullres, data_l2_filter)
            
-           call polyfilter_TOD(data_l2_filter, bp_filter0)
+           if (data_l2_fullres%use_freq_filter) then
+              call frequency_filter_TOD(data_l2_fullres)
+           else
+              call polyfilter_TOD(data_l2_fullres, bp_filter)
+           end if
+           !call polyfilter_TOD(data_l2_filter, bp_filter0)
            
            ! pca filter copied data
            call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
@@ -501,7 +517,7 @@ contains
     implicit none
     type(Lx_struct),     intent(inout) :: data_l2
     logical(lgt),        intent(in)    :: verb
-    real(dp)        :: gamma, cutoff
+    real(dp)        :: gamma, cutoff, Tmean
     integer(i4b)    :: i, j, k, nsamp, nfreq, nsb, ndet, is_spike, n_spikes(4)
     real(dp), allocatable, dimension(:,:) :: ampsum
     
@@ -518,6 +534,7 @@ contains
     gamma = 0.7d0
     cutoff = 0.0015d0 * 8.d0
     ampsum(:,:) = 0.d0
+    Tmean = 55.d0
 
     i = 0
     outer:do 
@@ -527,9 +544,14 @@ contains
           if (.not. is_alive(data_l2%pixels(k))) cycle
           do j = 1, nsb
              if (sum(data_l2%freqmask_full(:,j,k)) == 0.d0) cycle
-             if ((isnan(data_l2%tod_poly(i+1,0,j,k))) .or. (isnan(data_l2%tod_poly(i,0,j,k)))) cycle
-             ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
-                              
+
+             if (data_l2%use_freq_filter) then                
+                if ((isnan(data_l2%T_cont(i+1,j,k,1))) .or. (isnan(data_l2%T_cont(i,j,k,1)))) cycle
+                ampsum(j,k) = ampsum(j,k) * gamma + data_l2%T_cont(i+1,j,k,1) / Tmean - data_l2%T_cont(i,j,k,1) / Tmean 
+             else
+                if ((isnan(data_l2%tod_poly(i+1,0,j,k))) .or. (isnan(data_l2%tod_poly(i,0,j,k)))) cycle
+                ampsum(j,k) = ampsum(j,k) * gamma + data_l2%tod_poly(i+1,0,j,k) - data_l2%tod_poly(i,0,j,k) 
+             end if
              if (abs(ampsum(j,k)) > cutoff) then
                 ! write(*,*) "Spike at:", ampsum(j,k), j, k, i + 1, data_l2%tod_poly(i+1,0,j,k), data_l2%tod_poly(i,0,j,k)
                 call get_spike_data(data_l2,k,j,i+1,n_spikes)
@@ -556,7 +578,7 @@ contains
     integer(i4b),          intent(in)        :: i, j, k
     integer(i4b),          intent(inout)     :: n_spikes(4)
     real(dp), allocatable, dimension(:,:,:)  :: fwd
-    real(dp)        :: gamma, cutoff
+    real(dp)        :: gamma, cutoff, Tmean
     integer(i4b)    :: m, n, l, nsamp, nfreq, nsb, ndet, spike_type, max_ind,indices(3)
     integer(i4b)    :: jump_mean_dur
 
@@ -580,6 +602,9 @@ contains
     gamma = 0.7d0
     jump_mean_dur = 20
     allocate(fwd(41,nsb,ndet))
+
+    Tmean = 55.d0
+
     
     fwd(:,:,:) = 0.d0
           
@@ -587,8 +612,13 @@ contains
        if (.not. is_alive(data%pixels(n))) cycle
        do l = 1, nsb
           do m = -20, 19
-             if ((isnan(data%tod_poly(i+m+1,0,l,n))) .or. (isnan(data%tod_poly(i+m,0,l,n)))) cycle
-             fwd(21 + m + 1,l,n) = fwd(21 + m,l,n) * gamma + data%tod_poly(i + m + 1,0,l,n) - data%tod_poly(i + m,0,l,n)
+             if (data%use_freq_filter) then
+                if ((isnan(data%T_cont(i+m+1,l,n,1))) .or. (isnan(data%T_cont(i+m,l,n,1)))) cycle
+                fwd(21 + m + 1,l,n) = fwd(21 + m,l,n) * gamma + data%T_cont(i + m + 1,l,n,1) / Tmean - data%T_cont(i + m,l,n,1) / Tmean
+             else
+                if ((isnan(data%tod_poly(i+m+1,0,l,n))) .or. (isnan(data%tod_poly(i+m,0,l,n)))) cycle
+                fwd(21 + m + 1,l,n) = fwd(21 + m,l,n) * gamma + data%tod_poly(i + m + 1,0,l,n) - data%tod_poly(i + m,0,l,n)
+             end if
           end do
        end do
     end do
@@ -741,6 +771,58 @@ contains
 
   end subroutine mask_specific_corr
 
+  subroutine remove_corr_templates(corrs, templates, ampl)
+    ! Fits and removes the templates from the correlation matrix by linear regression
+    ! Model: y = X ampl + noise, solution: ampl = (X^TX)^(-1)X^Ty, where y is corr, and X are
+    ! the templates. 
+    implicit none
+    real(sp), allocatable, dimension(:, :),     intent(inout) :: corrs
+    real(sp), allocatable, dimension(:,:,:),    intent(in)    :: templates
+    ! real(dp), allocatable, dimension(:,:),      intent(in)    :: mask 
+!    integer(i4b),                               intent(in)    :: feed, band
+    real(dp), allocatable, dimension(:)                       :: xty
+    real(dp), allocatable, dimension(:),        intent(out)   :: ampl
+    real(dp), allocatable, dimension(:,:)                     :: xtx
+    integer(i4b)                                              :: nsamp, i, j, k, l, m, n, ntemp
+    
+    ntemp = size(templates, 3)  ! check this
+    if(.not. allocated(ampl)) allocate(ampl(ntemp)) 
+    allocate(xty(ntemp))
+    allocate(xtx(ntemp,ntemp))
+
+    if (sum(merge(1.d0,0.d0,corrs /= 0.d0)) == 0.0) then
+       return
+    end if
+    
+    do i = 1, ntemp
+       xty(i) = sum(corrs(:,:) * templates(:,:,i))
+       xtx(i,i) = sum(templates(:,:,i) * templates(:,:,i) * merge(1.d0,0.d0,corrs /= 0.d0))  ! last part is basically a mask
+       do j = i+1, ntemp
+          xtx(i,j) = sum(templates(:,:,i) * templates(:,:,j) * merge(1.d0,0.d0,corrs /= 0.d0))
+          xtx(j,i) = xtx(i,j)
+       end do
+    end do
+    
+    if (xtx(3,1) == 0.0) then
+       write(*,*) corrs(59, 321)
+       write(*,*) templates(123, 413, 3)
+    end if
+    
+!    write(*,*) xtx
+    call invert_matrix(xtx)
+    
+       
+    
+    do i = 1, ntemp
+       ampl(i) = sum(xtx(:,i) * xty(:))
+       corrs(:,:) = corrs(:,:) - ampl(i) * templates(:,:,i) * merge(1.d0,0.d0,corrs /= 0.d0)
+    end do
+!    write(*,*) ampl
+    deallocate(xty)
+    deallocate(xtx)
+
+  end subroutine remove_corr_templates
+
 
   subroutine flag_correlations(data_l2, id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
     implicit none
@@ -758,13 +840,14 @@ contains
     real(dp),     allocatable, dimension(:, :, :)   :: means, vars, maxcorr, meancorr, meanabscorr
     real(dp),     allocatable, dimension(:, :, :)   :: temp_freqmask !corrsum
     real(sp),     allocatable, dimension(:, :, :)   :: corrsum_mask
-    real(dp),     allocatable, dimension(:)         :: subt, median, smedian, minimum
-    real(dp),     allocatable, dimension(:,:)       :: corrs, corr_prod
+    real(dp),     allocatable, dimension(:)         :: subt, median, smedian, minimum, ampl
+    real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod
+    real(sp),     allocatable, dimension(:,:,:)     :: corr_templates
     real(sp),     allocatable, dimension(:,:)       :: corr_template
     real(dp),     allocatable, dimension(:,:)       :: outlier_mask
     logical(lgt) :: mask_edge_corrs, rm_outliers, verb
     character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
-    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str, aliasing_filename
+    character(len=512) :: nsigma_prod_box_str, nsigma_mean_box_str, aliasing_filename, filename, template_name
     real(dp)     :: nsigma_chi2_box, nsigma_chi2_stripe, aliasing_db_cutoff
     integer(i4b) :: n_neighbor, prod_offset
     integer(i4b), dimension(3) :: box_offsets, stripe_offsets
@@ -811,7 +894,6 @@ contains
     if(.not. allocated(data_l2%diagnostics)) allocate(data_l2%diagnostics(nfreq,nsb,ndet,5)) 
     if(.not. allocated(data_l2%cut_params)) allocate(data_l2%cut_params(2,5)) 
 !    allocate(corrs(nfreq,nfreq), corr_template(nfreq,nfreq))
-    allocate(corr_template(nfreq,nfreq))
     allocate(corrs(2 * nfreq, 2 * nfreq))
 !    allocate(corr_prod(2 * nfreq-1, 2 * nfreq))
     allocate(subt(nsamp-1), median(nfreq))
@@ -825,8 +907,13 @@ contains
     meancorr = 0.d0
     meanabscorr = 0.d0
     temp_freqmask = 1.d0
-    
-    if (data_l2%polyorder == 1) then
+
+    if (data_l2%use_freq_filter) then
+       allocate(corr_templates(2 * nfreq, 2 * nfreq, 4))
+
+    else if (data_l2%polyorder == 1) then
+       allocate(corr_template(nfreq,nfreq))
+
        call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
        call read_hdf(file, "corr", corr_template)
        call close_hdf_file(file)
@@ -907,61 +994,7 @@ contains
              end do
           end do
        end do
-       vars = vars * data_l2%freqmask_full
-       
-!       edge_corr_cut = nsigma_edge_corrs * sqrt(1.d0 / nsamp)
-       ! do i = 1, ndet
-       !    if (.not. is_alive(data_l2%pixels(i))) cycle
-       !    do k = 1, nfreq
-       !       reason = 40
-       !       j = 1
-       !       n = 1 + nfreq - k ! type 1
-       !       m = 2
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 2
-       !       n = 1 + nfreq - k ! type 1
-       !       m = 3
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 3
-       !       n = 1 + nfreq - k ! type 1
-       !       m = 4
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 1
-       !       n = 1 + nfreq - k ! type 1
-       !       m = 3
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 1
-       !       n = 1 + nfreq - k ! type 1
-       !       m = 4
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       reason = 41
-       !       j = 1
-       !       n = k ! type 2
-       !       m = 2
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 2
-       !       n = k ! type 2
-       !       m = 3
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 2
-       !       n = k ! type 2
-       !       m = 4
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 3
-       !       n = k ! type 2
-       !       m = 4
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 1
-       !       n = k ! type 2
-       !       m = 3
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !       j = 1
-       !       n = k ! type 2
-       !       m = 4
-       !       call mask_specific_corr(data_l2, vars, means, i, j, k, i, m, n, edge_corr_cut, id, reason)
-       !    end do
-       ! end do
-       ! vars = vars * data_l2%freqmask_full
+       vars = vars * data_l2%freqmask_full       
     end if
 !    allocate(box_offsets(3), prod_offsets(3))
     
@@ -986,28 +1019,59 @@ contains
                 if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
                 corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
                 corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
-                if ((j == m) .and. (data_l2%polyorder == 0)) then
-                   corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
-                end if
+                !if ((j == m) .and. (data_l2%polyorder == 0)) then  !! commented out since we use freq_filter
+                !   corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
+                !end if
                 corrs(p,q) = corr
                 corrs(q,p) = corr
              end do
           end do
           !$OMP END DO
           !$OMP END PARALLEL
-
+          
+          
           ! if (i == 12 .and. o == 1) then
           !    open(22, file="corr_12_12_before.unf", form="unformatted") ! Adjusted open statement
           !    write(22) corrs
           !    close(22)
           ! end if
+          ! if (.true.) then
+          !    write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_', data_l2%pixels(i), '_', o, '_', id,'.unf' 
+          !    open(22, file=filename, form="unformatted") ! Adjusted open statement
+          !    write(22) corrs
+          !    close(22)
+          ! end if
 
+          if (data_l2%use_freq_filter) then
+             
+             call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_templates_band.h5", file, "r")
+             if (o == 1) then
+                write(template_name, "(A, I0.2, A)") 'corr_templates_', data_l2%pixels(i), '_A' 
+             else 
+                write(template_name, "(A, I0.2, A)") 'corr_templates_', data_l2%pixels(i), '_B' 
+             end if
+             !write(*,*) template_name, id
+             call read_hdf(file, template_name, corr_templates)
+             call close_hdf_file(file)
 
-          if (data_l2%polyorder == 1) then
+             
+             call remove_corr_templates(corrs, corr_templates, ampl)
+ 
+             !corrs(1:nfreq,1:nfreq) = corrs(1:nfreq,1:nfreq) - corr_template * merge(1.d0,0.d0,corrs(1:nfreq,1:nfreq) /= 0.d0)
+             !corrs(nfreq+1:,nfreq+1:) = corrs(nfreq+1:,nfreq+1:) - corr_template * merge(1.d0,0.d0,corrs(nfreq+1:,nfreq+1:) /= 0.d0)
+          else if (data_l2%polyorder == 1) then
              corrs(1:nfreq,1:nfreq) = corrs(1:nfreq,1:nfreq) - corr_template * merge(1.d0,0.d0,corrs(1:nfreq,1:nfreq) /= 0.d0)
              corrs(nfreq+1:,nfreq+1:) = corrs(nfreq+1:,nfreq+1:) - corr_template * merge(1.d0,0.d0,corrs(nfreq+1:,nfreq+1:) /= 0.d0)
           end if
 
+          ! if (.true.) then
+          !    write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_after_', data_l2%pixels(i), '_', o, '_', id,'.unf' 
+          !    open(22, file=filename, form="unformatted") ! Adjusted open statement
+          !    write(22) corrs
+          !    close(22)
+          ! end if
+
+          
           ! if (i == 12 .and. o == 1) then
           !    open(22, file="corr_12_12.unf", form="unformatted") ! Adjusted open statement
           !    write(22) corrs
@@ -1281,6 +1345,13 @@ contains
     data_l2%cut_params(2,4) = sigma_meanabscorr
     data_l2%cut_params(1,5) = sum(median) / nfreq
     data_l2%cut_params(2,5) = std_median
+    
+    if (data_l2%use_freq_filter) then
+       deallocate(corr_templates)
+    else if (data_l2%polyorder == 1) then
+       deallocate(corr_template)
+    end if
+    
     deallocate(vars)
     deallocate(means)
     deallocate(median)
@@ -1689,7 +1760,7 @@ contains
    implicit none
    type(Lx_struct),                            intent(inout) :: data_l2
 
-   integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb
+   integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb, n_order
    real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, fknee_W, alpha_W
    real(dp), allocatable, dimension(:,:) :: F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY
    real(dp), allocatable, dimension(:) :: Cf, sigma0_prior, fknee_prior, alpha_prior
@@ -1699,6 +1770,8 @@ contains
    type(hdf_file)   :: prior_file
 
    call wall_time(t5)
+   
+
 
    nsamp       = size(data_l2%tod,1)
    nfreq       = size(data_l2%tod,2)
@@ -1706,6 +1779,14 @@ contains
    ndet        = size(data_l2%tod,4)
    n = nsamp + 1
    samprate = 50
+
+   n_order = 1
+ 
+   if(.not. allocated(data_l2%T_cont)) allocate(data_l2%T_cont(nsamp,nsb,ndet,n_order+1)) 
+   if(.not. allocated(data_l2%dg)) allocate(data_l2%dg(nsamp,nsb,ndet)) 
+
+   data_l2%T_cont = 0.d0
+   data_l2%dg = 0.d0
 
    allocate(P(nfreq, 2))
    allocate(PTP(2, 2))
@@ -1724,7 +1805,7 @@ contains
    allocate(alpha_prior(20))
 
    ! Load in the feed-specific 1/f prior parameters on the gain fluctuations.
-   call open_hdf_file("/mn/stornext/d16/cmbco/comap/jonas/Cf_prior_data.hdf5", prior_file, "r")
+   call open_hdf_file("/mn/stornext/d16/cmbco/comap/jonas/Cf_prior_data.hdf5", prior_file, "r")  ! get from param file
    call read_hdf(prior_file, "sigma0_prior", sigma0_prior)
    call read_hdf(prior_file, "fknee_prior", fknee_prior)
    call read_hdf(prior_file, "alpha_prior", alpha_prior)
@@ -1733,7 +1814,8 @@ contains
    ! Wiener filter normalization parameters.
    fknee_W = 0.01
    alpha_W = -4.0
-   sigma0 = 0.001
+   sigma0 = 0.005
+   
 
    ! Create identity matrix
    do i = 1, nfreq
@@ -1844,6 +1926,9 @@ contains
             do j=1,nfreq
                data_l2%tod(i,j,sb,feed) = data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i) - P(j,1)*m(1,i) - P(j,2)*m(2,i)
             end do
+            data_l2%dg(i,sb,feed) = a(1,i)
+            data_l2%T_cont(i,sb,feed,1) = m(1,i)
+            data_l2%T_cont(i,sb,feed,2) = m(2,i)
          end do
          !$OMP END DO
          !$OMP END PARALLEL
@@ -2308,6 +2393,7 @@ end subroutine frequency_filter_TOD
 !    data_out%spike_data    = data_in%spike_data
     data_out%n_nan         = data_in%n_nan
     data_out%n_pca_comp    = data_in%n_pca_comp
+    data_out%use_freq_filter = data_in%use_freq_filter
     if (data_in%n_pca_comp > 0) then
        allocate(data_out%pca_ampl(size(data_in%nu,1),nsb,ndet,size(data_in%pca_ampl,4)))
        allocate(data_out%pca_comp(size(data_in%pca_comp,1),size(data_in%pca_comp,2)))
@@ -2319,7 +2405,12 @@ end subroutine frequency_filter_TOD
     end if
 
 
-    
+    if (data_in%use_freq_filter) then
+       allocate(data_out%T_cont(nsamp_out,nsb,ndet,size(data_in%T_cont,4))) 
+       allocate(data_out%dg(nsamp_out,nsb,ndet))
+       data_out%T_cont        = data_in%T_cont
+       data_out%dg            = data_in%dg
+    end if
 
     
     ! Make angles safe for averaging
@@ -2461,7 +2552,7 @@ end subroutine frequency_filter_TOD
 
     ! Polyfiltered TOD
     data_out%polyorder = data_in%polyorder
-    if (data_out%polyorder >= 0) then
+    if ((data_out%polyorder >= 0) .and. (.not. data_in%use_freq_filter)) then
        allocate(data_out%tod_poly(nsamp_out, 0:data_out%polyorder, nsb, ndet))
        do l = 1, ndet           
           if (.not. is_alive(data_out%pixels(l))) then

@@ -36,6 +36,7 @@ module comap_lx_mod
      integer(i4b)                                    :: irun          ! Run number identification
      integer(i4b)                                    :: n_cal         ! Number of successful ambient measurments
      integer(i4b)                                    :: cal_method  ! (1 = old, 2 = Jonas, 3 = from l1)
+     logical(lgt)                                    :: use_freq_filter ! use the new frequency filter (T/F)
      real(dp),     allocatable, dimension(:,:)       :: Thot        ! (nmethods=3, start/end)
      real(dp),     allocatable, dimension(:,:)       :: time_hot    ! (nmethods=3, start/end)
      real(dp),     allocatable, dimension(:,:,:,:,:) :: Phot        ! (nmethods=3, start/end, freq, sb, detector)
@@ -48,6 +49,8 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:)     :: point         ! Sky coordinates; (phi/theta/psi,time,det)
      real(sp),     allocatable, dimension(:,:,:)     :: mean_tp
      real(sp),     allocatable, dimension(:,:,:,:)   :: tod_poly      ! Poly-filter TOD coefficients (time,0:poly,sb,det)
+     real(sp),     allocatable, dimension(:,:,:,:)   :: T_cont        ! Continuum temperature comp from freq filter (0:ncomp,time,sb,det)
+     real(sp),     allocatable, dimension(:,:,:)     :: dg            ! gain fluctuation comp from freq filter (time,sb,det)
      real(sp),     allocatable, dimension(:,:,:)     :: var_fullres   ! Full-resolution variance (freq,sb,det)
      real(sp),     allocatable, dimension(:,:,:,:)   :: pca_ampl      ! amplitudes of pca-components (frec,sb,det,comp)
      real(sp),     allocatable, dimension(:,:)       :: pca_comp      ! actual pca component timestreams (time,comp)
@@ -490,6 +493,8 @@ contains
     if(allocated(data%mean_tp))       deallocate(data%mean_tp)
     if(allocated(data%n_nan))         deallocate(data%n_nan)
     if(allocated(data%tod_poly))      deallocate(data%tod_poly)
+    if(allocated(data%T_cont))        deallocate(data%T_cont)
+    if(allocated(data%dg))            deallocate(data%dg)
     if(allocated(data%tod_mean))      deallocate(data%tod_mean)
     if(allocated(data%sb_mean))       deallocate(data%sb_mean)
     if(allocated(data%pixels))        deallocate(data%pixels)
@@ -561,6 +566,12 @@ contains
     if (data%polyorder >= 0) then
        call write_hdf(file, "tod_poly",         data%tod_poly)
     end if
+    
+    if (data%use_freq_filter) then
+       call write_hdf(file, "T_cont",         data%T_cont)
+       call write_hdf(file, "dg",             data%dg)
+    end if
+
     call write_hdf(file, "pixels",            data%pixels)
     call write_hdf(file, "pix2ind",           data%pix2ind)
     call write_hdf(file, "var_fullres",       data%var_fullres)
@@ -780,6 +791,8 @@ contains
     lx_out%mask_outliers = lx_in%mask_outliers
     lx_out%cal_method = lx_in%cal_method
     lx_out%n_cal = lx_in%n_cal
+    lx_out%use_freq_filter = lx_in%use_freq_filter
+
 
     if(allocated(lx_in%time))        then
        allocate(lx_out%time(size(lx_in%time,1)))
@@ -890,6 +903,14 @@ contains
     if(allocated(lx_in%tod_poly))      then
        allocate(lx_out%tod_poly(size(lx_in%tod_poly,1),size(lx_in%tod_poly,2),size(lx_in%tod_poly,3),size(lx_in%tod_poly,4)))
        lx_out%tod_poly = lx_in%tod_poly
+    end if
+    if(allocated(lx_in%T_cont))      then
+       allocate(lx_out%T_cont(size(lx_in%T_cont,1),size(lx_in%T_cont,2),size(lx_in%T_cont,3),size(lx_in%T_cont,4)))
+       lx_out%T_cont = lx_in%T_cont
+    end if
+    if(allocated(lx_in%dg))      then
+       allocate(lx_out%dg(size(lx_in%dg,1),size(lx_in%dg,2),size(lx_in%dg,3)))
+       lx_out%dg = lx_in%dg
     end if
     if(allocated(lx_in%pixels))        then
        allocate(lx_out%pixels(size(lx_in%pixels,1)))
