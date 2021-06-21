@@ -11,7 +11,7 @@ import tqdm
 
 def convolve(pixind):
     theta, phi = hp.pix2ang(nside, pixind)
-    r = hp.rotator.Rotator(rot=(phi, -theta, 0), deg=False, eulertype='ZYX')
+    r = hp.rotator.Rotator(rot=(0, theta, phi), deg=False, eulertype='X')
     beam2 = r.rotate_map_pixel(beam)
     return sum(beam2*pickup)/sum(beam2)
 
@@ -46,7 +46,7 @@ X, Y = np.meshgrid(x,y)
 # The default projection is zenithal equidistant, or 'ARC'
 # X = theta\cos \phi and Y = \theta \sin \phi
 
-nside = 512
+nside = 64
 
 w = wcs.WCS(naxis=2)
 w.wcs.crpix = [1000.5,1000.5]
@@ -99,7 +99,7 @@ plt.close('all')
 from multiprocessing import Pool
 import os
 os.environ['OMP_NUM_THREADS'] = '1'
-pool = Pool(processes=128)
+pool = Pool(processes=8)
 x = [pool.apply_async(convolve, args=[i]) for i in range(hp.nside2npix(nside))]
 for i in tqdm.tqdm(range(len(x))):
     conv[i] = x[i].get()
