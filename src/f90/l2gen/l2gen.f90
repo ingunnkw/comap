@@ -27,7 +27,7 @@ program l2gen
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-  logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2
+  logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2, use_freq_filter
   logical(lgt)         :: import_freqmask, import_sigma
   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
   type(comap_scan_info) :: scan
@@ -65,6 +65,7 @@ program l2gen
   call get_parameter(unit, parfile, 'IMPORT_SIGMA0',             par_lgt=import_sigma)
   call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
   call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
+  call get_parameter(unit, parfile, 'USE_FREQ_FILTER',           par_lgt=use_freq_filter)
 
   if (import_freqmask) then 
      call get_parameter(unit, parfile, 'FREQMASK_L2_FOLDER',     par_string=freq_import_dir)
@@ -229,7 +230,7 @@ program l2gen
         call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
         call update_status(status, 'excise')
 
-        call find_tsys(data_l2_fullres, is_sim, sim_tsys, verb)
+        call find_tsys(data_l2_fullres, is_sim, sim_tsys, scan%ss(k), verb)
         call update_status(status, 'find tsys')
         
         if (verb) then
@@ -340,13 +341,17 @@ program l2gen
               
               call free_lx_struct(data_l2_import)
         end if 
-       
+
+        if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
+           write(*,*) "All channels masked before masking!!!!!!! Scan: ", scan%ss(k)%id
+        end if
+
         
-        data_l2_fullres%use_freq_filter = .true.
+        data_l2_fullres%use_freq_filter = use_freq_filter !.true.
         data_l2_fullres%mask_outliers = mask_outliers
         data_l2_fullres%import_freqmask = import_freqmask
         data_l2_decimated%import_freqmask = import_freqmask
-        if ((mask_outliers) .and. (.not. (sum(data_l2_fullres%freqmask_full) == 0.d0))) then
+        if ((mask_outliers == 1) .and. (.not. (sum(data_l2_fullres%freqmask_full) == 0.d0))) then
            if (import_freqmask) then
               data_l2_import%n_cal = data_l2_fullres%n_cal
 
@@ -370,7 +375,7 @@ program l2gen
               ! Poly-filter copied data
               if (data_l2_fullres%use_freq_filter) then
                  !write(*,*) "start"
-                 call frequency_filter_TOD(data_l2_filter)
+                 call frequency_filter_TOD(data_l2_filter, nu_gain, alpha_gain, scan%ss(k))
                  !write(*,*) "stop"
               else
                  call polyfilter_TOD(data_l2_filter, bp_filter0)
@@ -395,6 +400,18 @@ program l2gen
                  call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_4_before_mask")))
                  data_l2_filter%mask_outliers = mask_outliers
               end if
+              ! flag correlations and variance
+              call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
+              call update_status(status, 'flag_corr')
+
+              ! replace freqmask in original tod
+              call transfer_diagnostics(data_l2_filter, data_l2_fullres)
+               
+
+              call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, .false.)
+              call update_status(status, 'made_freqmask')
+              
+              call free_lx_struct(data_l2_filter)
            end if 
         end if
 
@@ -424,7 +441,7 @@ program l2gen
            
            ! Write L2 file to disk
            if (verb) then
-              write(*,*) 'Writing ', scan%ss(k)%id, ' to disk1', trim(scan%ss(k)%l2file)
+              write(*,*) 'Writing empty file ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
            end if
            
            call mkdirs(trim(scan%ss(k)%l2file), .true.)
@@ -440,7 +457,7 @@ program l2gen
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
         
         if (data_l2_fullres%use_freq_filter) then
-           call frequency_filter_TOD(data_l2_fullres)
+           call frequency_filter_TOD(data_l2_fullres, nu_gain, alpha_gain, scan%ss(k))
         else
            call polyfilter_TOD(data_l2_fullres, bp_filter)
         end if
@@ -487,7 +504,7 @@ program l2gen
            call copy_lx_struct(data_l2_fullres, data_l2_filter)
            
            if (data_l2_fullres%use_freq_filter) then
-              call frequency_filter_TOD(data_l2_fullres)
+              call frequency_filter_TOD(data_l2_fullres, nu_gain, alpha_gain, scan%ss(k))
            else
               call polyfilter_TOD(data_l2_fullres, bp_filter)
            end if
@@ -514,7 +531,6 @@ program l2gen
                 & / (size(data_l2_fullres%pixels, 1) - 1.d0) &
                 & / 4.d0 / 1024.d0 
         end if
-
         
         if (verb) then
            if (.not. all(data_l2_fullres%tod == data_l2_fullres%tod)) then
@@ -725,9 +741,9 @@ contains
     nsb         = size(data_l2_in%tod,3)
     ndet        = size(data_l2_in%tod,4)
     
-    if (.not. allocated(data_l2_out%freqmask_full)) allocate(data_l2_out%freqmask_full(ndet,nsb,nfreq))
+    if (.not. allocated(data_l2_out%freqmask_full)) allocate(data_l2_out%freqmask_full(nfreq,nsb,ndet))
     data_l2_out%freqmask_full = data_l2_in%freqmask_full
-    if (.not. allocated(data_l2_out%freqmask_reason)) allocate(data_l2_out%freqmask_reason(ndet,nsb,nfreq))
+    if (.not. allocated(data_l2_out%freqmask_reason)) allocate(data_l2_out%freqmask_reason(nfreq,nsb,ndet))
     data_l2_out%freqmask_reason = data_l2_in%freqmask_reason
     if (.not. allocated(data_l2_out%diagnostics)) allocate(data_l2_out%diagnostics(ndet,nsb,nfreq,size(data_l2_in%diagnostics,4)))
     data_l2_out%diagnostics = data_l2_in%diagnostics
@@ -736,11 +752,15 @@ contains
     if (.not. allocated(data_l2_out%spike_data)) allocate(data_l2_out%spike_data(size(data_l2_in%spike_data,1),size(data_l2_in%spike_data,2),&
             &size(data_l2_in%spike_data,3),size(data_l2_in%spike_data,4),size(data_l2_in%spike_data,5)))
     data_l2_out%spike_data = data_l2_in%spike_data
-    if (.not. allocated(data_l2_out%AB_mask)) allocate(data_l2_out%AB_mask(ndet,nsb,nfreq))
+    if (.not. allocated(data_l2_out%AB_mask)) allocate(data_l2_out%AB_mask(nfreq,nsb,20))
     data_l2_out%AB_mask = data_l2_in%AB_mask
-    if (.not. allocated(data_l2_out%leak_mask)) allocate(data_l2_out%leak_mask(ndet,nsb,nfreq))
+    if (.not. allocated(data_l2_out%leak_mask)) allocate(data_l2_out%leak_mask(nfreq,nsb,20))
     data_l2_out%leak_mask = data_l2_in%leak_mask
     
+    if (data_l2_out%use_freq_filter) then
+       if (.not. allocated(data_l2_out%corr_templ_ampl)) allocate(data_l2_out%corr_templ_ampl(4,nsb/2,ndet))
+       data_l2_out%corr_templ_ampl = data_l2_in%corr_templ_ampl
+    end if
         
     if (data_l2_out%import_freqmask) then
        if (.not. allocated(data_l2_out%freqmask)) allocate(data_l2_out%freqmask(ndet,nsb,nfreq))
@@ -1007,7 +1027,7 @@ contains
 
     if (data_l2%use_freq_filter) then
        allocate(corr_templates(2 * nfreq, 2 * nfreq, 4))
-
+       if(.not. allocated(data_l2%corr_templ_ampl)) allocate(data_l2%corr_templ_ampl(4, nsb / 2, ndet)) 
     else if (data_l2%polyorder == 1) then
        allocate(corr_template(nfreq,nfreq))
 
@@ -1116,9 +1136,9 @@ contains
                 if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
                 corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
                 corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
-                !if ((j == m) .and. (data_l2%polyorder == 0)) then  !! commented out since we use freq_filter
-                !   corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
-                !end if
+                if (.not. data_l2%use_freq_filter .and. ((j == m) .and. (data_l2%polyorder == 0))) then 
+                   corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
+                end if
                 corrs(p,q) = corr
                 corrs(q,p) = corr
              end do
@@ -1153,7 +1173,9 @@ contains
 
              
              call remove_corr_templates(corrs, corr_templates, ampl)
- 
+             
+             data_l2%corr_templ_ampl(:,o,i) = ampl(:)
+             !write(*,*) data_l2%corr_templ_ampl(:,o,i)
              !corrs(1:nfreq,1:nfreq) = corrs(1:nfreq,1:nfreq) - corr_template * merge(1.d0,0.d0,corrs(1:nfreq,1:nfreq) /= 0.d0)
              !corrs(nfreq+1:,nfreq+1:) = corrs(nfreq+1:,nfreq+1:) - corr_template * merge(1.d0,0.d0,corrs(nfreq+1:,nfreq+1:) /= 0.d0)
           else if (data_l2%polyorder == 1) then
@@ -1853,12 +1875,13 @@ contains
 
   end subroutine polyfilter_TOD
 
-  subroutine frequency_filter_TOD(data_l2)
+  subroutine frequency_filter_TOD(data_l2, fknee_W, alpha_W, scan)
    implicit none
    type(Lx_struct),                            intent(inout) :: data_l2
-
+   type(comap_subscan),                        intent(in)    :: scan
+   real(dp),                                   intent(in)    :: fknee_W, alpha_W
    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb, n_order
-   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, fknee_W, alpha_W
+   real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, dnu
    real(dp), allocatable, dimension(:,:) :: F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY
    real(dp), allocatable, dimension(:) :: Cf, sigma0_prior, fknee_prior, alpha_prior
    real(sp),     allocatable, dimension(:) :: dt
@@ -1875,9 +1898,10 @@ contains
    nsb         = size(data_l2%tod,3)
    ndet        = size(data_l2%tod,4)
    n = nsamp + 1
-   samprate = 50
+    
+   samprate = data_l2%samprate
 
-   n_order = 1
+   n_order = 1  
  
    if(.not. allocated(data_l2%T_cont)) allocate(data_l2%T_cont(nsamp,nsb,ndet,n_order+1)) 
    if(.not. allocated(data_l2%dg)) allocate(data_l2%dg(nsamp,nsb,ndet)) 
@@ -1902,17 +1926,19 @@ contains
    allocate(alpha_prior(20))
 
    ! Load in the feed-specific 1/f prior parameters on the gain fluctuations.
-   call open_hdf_file("/mn/stornext/d16/cmbco/comap/jonas/Cf_prior_data.hdf5", prior_file, "r")  ! get from param file
+   call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/Cf_prior_data.hdf5", prior_file, "r")  ! get from parameter file 
    call read_hdf(prior_file, "sigma0_prior", sigma0_prior)
    call read_hdf(prior_file, "fknee_prior", fknee_prior)
    call read_hdf(prior_file, "alpha_prior", alpha_prior)
    call close_hdf_file(prior_file)
 
    ! Wiener filter normalization parameters.
-   fknee_W = 0.01
-   alpha_W = -4.0
-   sigma0 = 0.005
+!   fknee_W = 0.01
+!   alpha_W = -4.0
+   dnu = (data_l2%nu(2, 1, 1) - data_l2%nu(3, 1, 1)) * 1d9
+   !radiometer = 1.0d0 / sqrt(dnu * 1.d0 / data_l2%samprate)
    
+   sigma0 = 1.0d0 / sqrt(dnu * 1.d0 / data_l2%samprate)  !0.005  ! From radiometer eq
 
    ! Create identity matrix
    do i = 1, nfreq
@@ -2020,12 +2046,16 @@ contains
          !$OMP PARALLEL PRIVATE(i, j)
          !$OMP DO SCHEDULE(guided)
          do i=1,nsamp
-            do j=1,nfreq
-               data_l2%tod(i,j,sb,feed) = data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i) - P(j,1)*m(1,i) - P(j,2)*m(2,i)
-            end do
-            data_l2%dg(i,sb,feed) = a(1,i)
-            data_l2%T_cont(i,sb,feed,1) = m(1,i)
-            data_l2%T_cont(i,sb,feed,2) = m(2,i)
+            if ((a(1,i) == a(1,i)) .and. (m(1,i) == m(1,i)) .and. (m(2,i) == m(2,i))) then
+               do j=1,nfreq
+                  data_l2%tod(i,j,sb,feed) = data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i) - P(j,1)*m(1,i) - P(j,2)*m(2,i)
+               end do
+               data_l2%dg(i,sb,feed) = a(1,i)
+               data_l2%T_cont(i,sb,feed,1) = m(1,i)
+               data_l2%T_cont(i,sb,feed,2) = m(2,i)
+            else
+               write(*,*) "Probelm in freq filter: ", a(1,i), m(1,i), m(2,i), scan%id
+            end if
          end do
          !$OMP END DO
          !$OMP END PARALLEL
@@ -2505,6 +2535,10 @@ end subroutine frequency_filter_TOD
 
 
     if (data_in%use_freq_filter) then
+       if (data_in%mask_outliers == 1) then
+          allocate(data_out%corr_templ_ampl(4, nsb/2, ndet))
+          data_out%corr_templ_ampl = data_in%corr_templ_ampl
+       end if
        allocate(data_out%T_cont(nsamp_out,nsb,ndet,size(data_in%T_cont,4))) 
        allocate(data_out%dg(nsamp_out,nsb,ndet))
        data_out%T_cont        = data_in%T_cont
@@ -2645,12 +2679,19 @@ end subroutine frequency_filter_TOD
           do j = 1, nsb
              do k = 1, numfreq_out
                 if (data_out%freqmask(k,j,i) == 0) cycle
-                var = variance(data_out%tod(2:,k,j,i) - data_out%tod(:nsamp_out-1,k,j,i)) / 2
-                data_out%chi2(k,j,i) = (sum(data_out%tod(:,k,j,i) ** 2) / var - nsamp_out) / sqrt(2.d0*nsamp_out)
-                if (data_out%chi2(k,j,i) > 5.d0) then   !!!! add to parameter file
-                   data_out%freqmask(k,j,i) = 0.d0
-                   data_out%freqmask_full((k-1)*dnu+1:k*dnu,j,i) = 0.d0
-                   data_out%freqmask_reason((k-1)*dnu+1:k*dnu,j,i) = 50
+                ! var = sum(data_out%tod(:,k,j,i) ** 2) 
+                ! var = sqrt(2.d0*nsamp_out)
+                ! var = 1.d0 / variance(data_out%tod(2:,k,j,i) - data_out%tod(:nsamp_out-1,k,j,i))
+                var = variance(data_out%tod(2:,k,j,i) - data_out%tod(:nsamp_out-1,k,j,i)) / 2.d0
+                if (var == 0.d0) then 
+                   data_out%freqmask(k,j,i) = 0
+                else
+                   data_out%chi2(k,j,i) = (sum(data_out%tod(:,k,j,i) ** 2) / var - nsamp_out) / sqrt(2.d0*nsamp_out)
+                   if (data_out%chi2(k,j,i) > 5.d0) then   !!!! add to parameter file
+                      data_out%freqmask(k,j,i) = 0.d0
+                      data_out%freqmask_full((k-1)*dnu+1:k*dnu,j,i) = 0.d0
+                      data_out%freqmask_reason((k-1)*dnu+1:k*dnu,j,i) = 50
+                   end if
                 end if
              end do
           end do
@@ -3398,9 +3439,10 @@ end subroutine frequency_filter_TOD
 
 
 
-  subroutine find_tsys(data_l2_fullres, is_sim, sim_tsys, verb)
+  subroutine find_tsys(data_l2_fullres, is_sim, sim_tsys, scan, verb)
     implicit none
     type(lx_struct), intent(inout) :: data_l2_fullres
+    type(comap_subscan), intent(in) :: scan
     real(dp),        intent(in)    :: sim_tsys
 !    real(dp),    intent(in)        :: tsys_time(2)
     logical(lgt), intent(in)       :: is_sim, verb
@@ -3434,14 +3476,20 @@ end subroutine frequency_filter_TOD
              mean_tod = data_l2_fullres%tod_mean(k,j,i)
                 
              if (is_sim) then
-                data_l2_fullres%tod(tsys,k,j,i)  = sim_tsys
+                data_l2_fullres%tsys(k,j,i)  = sim_tsys
              else if (mean_tod == 0.d0) then
+                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+             else if (x0 == x1) then
                 data_l2_fullres%freqmask_full(k,j,i) = 0.d0
              else if (data_l2_fullres%n_cal == 2) then  ! Two good ambient load measurements
                 ! Interpolate Tsys to current time for each detector
                 
                 y0 = data_l2_fullres%Phot(cal_method,1,k,j,i); y1 = data_l2_fullres%Phot(cal_method,1,k,j,i)
                 interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
+                if (interp1d_P_hot == mean_tod) then
+                   data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+                   write(*,*) "Phot = Pcold", i, j, k, scan%id
+                end if
                 tsys = (interp1d_T_hot - T_cold)/(interp1d_P_hot/mean_tod-1.d0)
                 data_l2_fullres%Tsys(k,j,i) = tsys
              else

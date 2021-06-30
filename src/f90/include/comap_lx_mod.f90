@@ -62,6 +62,8 @@ module comap_lx_mod
      real(dp),     allocatable, dimension(:,:,:)     :: AB_mask       ! aliasing between A and B (in db suppression) (freq, sb,detector)
      real(dp),     allocatable, dimension(:,:,:)     :: leak_mask     ! aliasing from ouside range (in db suppression) (freq, sb,detector)
 
+     real(dp),     allocatable, dimension(:,:,:)     :: corr_templ_ampl ! correlation template amplitudes (n_ampl, band, detector)
+
      real(dp),     allocatable, dimension(:,:,:)     :: sigma0, alpha, fknee ! (freq, nsb, detector)
      real(dp),     allocatable, dimension(:,:,:)     :: chi2          ! (freq, nsb, detector)
      real(sp),     allocatable, dimension(:,:,:)     :: gain                 ! (freq_fullres, nsb, detector)
@@ -507,6 +509,7 @@ contains
     if(allocated(data%point))         deallocate(data%point)
     if(allocated(data%AB_mask))       deallocate(data%AB_mask)
     if(allocated(data%leak_mask))     deallocate(data%leak_mask)
+    if(allocated(data%corr_templ_ampl)) deallocate(data%corr_templ_ampl)
     if(allocated(data%gain))          deallocate(data%gain)
     if(allocated(data%sigma0))        deallocate(data%sigma0)
     if(allocated(data%alpha))         deallocate(data%alpha)
@@ -599,14 +602,15 @@ contains
     if (allocated(data%chi2)) call write_hdf(file, "chi2",           data%chi2)
     if (allocated(data%el_az_stats)) call write_hdf(file, "el_az_stats", data%el_az_stats)
     call write_hdf(file, "polyorder",         data%polyorder)
-    if (data%polyorder >= 0) then
-       call write_hdf(file, "tod_poly",         data%tod_poly)
-    end if
-
+    
     if (data%use_freq_filter) then
+       call write_hdf(file, "corr_templ_ampl", data%corr_templ_ampl)
        call write_hdf(file, "T_cont",         data%T_cont)
        call write_hdf(file, "dg",             data%dg)
+    else if (data%polyorder >= 0) then
+       call write_hdf(file, "tod_poly",         data%tod_poly)
     end if
+       
 
     call write_hdf(file, "pixels",            data%pixels)
     call write_hdf(file, "pix2ind",           data%pix2ind)
@@ -849,6 +853,11 @@ contains
     if(allocated(lx_in%tod_mean))         then  
        allocate(lx_out%tod_mean(size(lx_in%tod_mean,1),size(lx_in%tod_mean,2),size(lx_in%tod_mean,3)))
        lx_out%tod_mean = lx_in%tod_mean
+    end if
+    
+    if(allocated(lx_in%corr_templ_ampl))         then  
+       allocate(lx_out%corr_templ_ampl(size(lx_in%corr_templ_ampl,1),size(lx_in%corr_templ_ampl,2),size(lx_in%corr_templ_ampl,3)))
+       lx_out%corr_templ_ampl = lx_in%corr_templ_ampl
     end if
 
     if(allocated(lx_in%sb_mean))         then  
