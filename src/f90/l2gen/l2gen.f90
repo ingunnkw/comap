@@ -94,39 +94,39 @@ program l2gen
 
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
-   if (myid == 0) then 
+  if (myid == 0) then 
      ! Copy parameter file and runlists to l2-file output directory 
-      param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
-      inquire(directory=trim(param_dir), exist=exist)
-      if (.not. exist) then 
-         call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
-      end if 
+     param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
+     inquire(directory=trim(param_dir), exist=exist)
+     if (.not. exist) then 
+        call execute_command_line("mkdir "//trim(param_dir), wait=.true.)
+     end if
 
-      param_name_raw = trim(param_dir)//"/param_"
-      runlist_name_raw = trim(param_dir)//"/runlist_"
-      write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
-      write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
-      
-      inquire(file=trim(param_name), exist=exist)
-      
-      if (.not. exist) then
-         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
-         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
-         irun = irun + 1
-      else     
-         irun = 1
-         exist = .true.
-         do while (exist)
-            write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
-            write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
-            inquire(file=trim(param_name), exist=exist)
-            irun = irun + 1
-         end do      
-         call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
-         call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
-      end if
-      print *, "Run number: ", irun - 1
-   end if
+     param_name_raw = trim(param_dir)//"/param_"
+     runlist_name_raw = trim(param_dir)//"/runlist_"
+     write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
+     write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+     
+     inquire(file=trim(param_name), exist=exist)
+     
+     if (.not. exist) then
+        call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+        call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+        irun = irun + 1
+     else     
+        irun = 1
+        exist = .true.
+        do while (exist)
+           write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
+           write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+           inquire(file=trim(param_name), exist=exist)
+           irun = irun + 1
+        end do
+        call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
+        call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+     end if
+     print *, "Run number: ", irun - 1
+  end if
 
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
@@ -345,7 +345,40 @@ program l2gen
         end if 
 
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
-           write(*,*) "All channels masked before masking!!!!!!! Scan: ", scan%ss(k)%id
+           if (verb) then
+              write(*,*) "All channels masked before masking!!!!!!! Scan: ", scan%ss(k)%id
+           end if
+           data_l2_fullres%polyorder = -1
+           data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%use_freq_filter = .false.
+           data_l2_fullres%mask_outliers = 0
+           
+
+           ! If necessary, decimate L2 file in both time and frequency
+           
+           call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
+           call update_status(status, 'decimate')
+           
+           ! Fit noise
+           if (.not. import_freqmask .and. .not. import_sigma) then 
+              call fit_noise(data_l2_decimated)
+           else
+              call transfer_imported_sigma(data_l2_fullres, data_l2_decimated)
+           end if
+           
+           ! Write L2 file to disk
+           if (verb) then
+              write(*,*) 'Writing empty file ', scan%ss(k)%id, ' to disk', trim(scan%ss(k)%l2file)
+           end if
+           
+           call mkdirs(trim(scan%ss(k)%l2file), .true.)
+           !call write_l2_file(scan%ss(k)%l2file, data_l2_decimated)
+           call write_l2_file(scan, k, data_l2_decimated)
+           call update_status(status, 'write_l2')
+           
+           cycle
+
+           
         end if
 
         
@@ -385,7 +418,7 @@ program l2gen
               call update_status(status, 'polyfilter0')
               !           write(*,*) sum(data_l2_filter%freqmask_full) / 19.d0 / 4.d0 / 1024.d0 
 
-              call find_spikes(data_l2_filter, verb)
+              call find_spikes(data_l2_filter, verb, scan%ss(k)%id)
               call update_status(status, 'find_spikes')
 
               ! pca filter copied data
@@ -481,7 +514,7 @@ program l2gen
         end if
         
         if ((mask_outliers == 0) .and. (bp_filter > -1)) then
-           call find_spikes(data_l2_fullres, verb)
+           call find_spikes(data_l2_fullres, verb, scan%ss(k)%id)
            call update_status(status, 'find_spikes')
         end if
         !call freq_filter_TOD(data_l2_fullres)
@@ -582,10 +615,11 @@ program l2gen
 
 contains
 
-  subroutine find_spikes(data_l2, verb)
+  subroutine find_spikes(data_l2, verb, id)
     implicit none
     type(Lx_struct),     intent(inout) :: data_l2
     logical(lgt),        intent(in)    :: verb
+    integer(i4b),        intent(in)    :: id
     real(dp)        :: gamma, cutoff, Tmean
     integer(i4b)    :: i, j, k, nsamp, nfreq, nsb, ndet, is_spike, n_spikes(4)
     real(dp), allocatable, dimension(:,:) :: ampsum
@@ -632,6 +666,7 @@ contains
        end do
     end do outer
     if (verb) then
+       write(*,*) "Spike data for scan", id
        write(*,*) "Found ", n_spikes(1), " spikes"
        write(*,*) "Found ", n_spikes(2), " jumps"
        write(*,*) "Found ", n_spikes(3), " anomalies"
@@ -739,7 +774,7 @@ contains
     integer(i4b) :: i, j, k, l, m, n, nsamp, nfreq, nsb, ndet
     
     nsamp       = size(data_l2_in%tod,1)
-    nfreq       = size(data_l2_in%freqmask_full,1) ! nfreq in lowres data
+    nfreq       = size(data_l2_in%freqmask_full,1) ! nfreq in highres data
     nsb         = size(data_l2_in%tod,3)
     ndet        = size(data_l2_in%tod,4)
     
@@ -765,7 +800,7 @@ contains
     end if
         
     if (data_l2_out%import_freqmask) then
-       if (.not. allocated(data_l2_out%freqmask)) allocate(data_l2_out%freqmask(ndet,nsb,nfreq))
+       if (.not. allocated(data_l2_out%freqmask)) allocate(data_l2_out%freqmask(ndet,nsb,nfreq))  !!! is this order of arguments correct?
        data_l2_out%freqmask = data_l2_in%freqmask
 
        if (.not. allocated(data_l2_out%acceptrate)) allocate(data_l2_out%acceptrate(nsb,ndet))
@@ -1154,12 +1189,12 @@ contains
           !    write(22) corrs
           !    close(22)
           ! end if
-          ! if (.true.) then
-          !    write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_', data_l2%pixels(i), '_', o, '_', id,'.unf' 
-          !    open(22, file=filename, form="unformatted") ! Adjusted open statement
-          !    write(22) corrs
-          !    close(22)
-          ! end if
+          if (.false.) then
+             write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
+             open(22, file=filename, form="unformatted") ! Adjusted open statement
+             write(22) corrs
+             close(22)
+          end if
 
           if (data_l2%use_freq_filter) then
              
@@ -1185,12 +1220,12 @@ contains
              corrs(nfreq+1:,nfreq+1:) = corrs(nfreq+1:,nfreq+1:) - corr_template * merge(1.d0,0.d0,corrs(nfreq+1:,nfreq+1:) /= 0.d0)
           end if
 
-          ! if (.true.) then
-          !    write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_after_', data_l2%pixels(i), '_', o, '_', id,'.unf' 
-          !    open(22, file=filename, form="unformatted") ! Adjusted open statement
-          !    write(22) corrs
-          !    close(22)
-          ! end if
+          if (.false.) then
+             write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_after_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
+             open(22, file=filename, form="unformatted") ! Adjusted open statement
+             write(22) corrs
+             close(22)
+          end if
 
           
           ! if (i == 12 .and. o == 1) then
@@ -1884,8 +1919,8 @@ contains
    real(dp),                                   intent(in)    :: fknee_W, alpha_W
    integer(i4b) :: i, j, k, l, n, nsamp, nfreq, nsb, ndet, stat, err, nomp, feed, sb, n_order
    real(dp) :: detinv, samprate, nu, mu, t3, t4, t5, t6, sigma0, dnu
-   real(dp), allocatable, dimension(:,:) :: F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY
-   real(dp), allocatable, dimension(:) :: Cf, sigma0_prior, fknee_prior, alpha_prior
+   real(sp), allocatable, dimension(:,:) :: F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY
+   real(sp), allocatable, dimension(:) :: Cf, sigma0_prior, fknee_prior, alpha_prior
    real(sp),     allocatable, dimension(:) :: dt
    complex(spc), allocatable, dimension(:) :: dv
    integer*8    :: plan_fwd, plan_back
@@ -1975,7 +2010,7 @@ contains
             Cf(i) = sigma0_prior(data_l2%pixels(feed))**2*(nu/fknee_prior(data_l2%pixels(feed)))**alpha_prior(data_l2%pixels(feed))
             Cf(i) = Cf(i)/(1.d0 + (nu/fknee_W)**alpha_W)
          end do
-         Cf(0) = 1.d0      
+         Cf(0) = 1.d0      ! Should this be zero?
 
          ! Create P and F matrices.
          do i = 1, nfreq
@@ -1999,9 +2034,15 @@ contains
          PTP_inv(2,2) = +detinv * PTP(1,1)
 
          ! Solve for the Z-matrix and the scalar quantity z.
-         FTZ = MATMUL(TRANSPOSE(F), Z)
+         !!!!!! This is how this section used to look, which makes no sense to me, since Z is not initialized
+         ! FTZ = MATMUL(TRANSPOSE(F), Z)
+         ! Z = I_mat - MATMUL(MATMUL(P, PTP_inv), TRANSPOSE(P))
+         ! z_scalar = MATMUL(FTZ, F)
+         !!!!!! This is the new version that makes sense to me
          Z = I_mat - MATMUL(MATMUL(P, PTP_inv), TRANSPOSE(P))
+         FTZ = MATMUL(TRANSPOSE(F), Z)
          z_scalar = MATMUL(FTZ, F)
+
 
          ! Solve F^T*Z*y, which is the RHS of the linear equation for a.
          FTZY = 0.d0
@@ -2009,6 +2050,7 @@ contains
          !$OMP DO SCHEDULE(guided)
          do i=1,nsamp
             do j=1,nfreq
+               if (data_l2%freqmask_full(j,sb,feed) == 0.d0) cycle
                FTZY(1,i) = FTZY(1,i) + FTZ(1,j)*data_l2%tod(i,j,sb,feed)
             end do
          end do
@@ -2044,20 +2086,33 @@ contains
          !$OMP END PARALLEL
          m = MATMUL(PTP_inv, m)
 
+         if ((sum(a(1,:)) .ne. sum(a(1,:))) .or. (sum(m(1,:)) .ne. sum(m(1,:))) .and. (sum(m(2,:)) .ne. sum(m(2,:)))) then
+            write(*,*) "Problem 2 in freq filter: ", a(1,1), m(1,1), m(2,1), feed, sb, scan%id
+            data_l2%freqmask_full(:,sb,feed) = 0.d0
+            cycle
+         end if
+
          ! Subtract the gain and temperature fluctuations from the TOD.
          !$OMP PARALLEL PRIVATE(i, j)
          !$OMP DO SCHEDULE(guided)
          do i=1,nsamp
-            if ((a(1,i) == a(1,i)) .and. (m(1,i) == m(1,i)) .and. (m(2,i) == m(2,i))) then
-               do j=1,nfreq
-                  data_l2%tod(i,j,sb,feed) = data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i) - P(j,1)*m(1,i) - P(j,2)*m(2,i)
-               end do
-               data_l2%dg(i,sb,feed) = a(1,i)
-               data_l2%T_cont(i,sb,feed,1) = m(1,i)
-               data_l2%T_cont(i,sb,feed,2) = m(2,i)
-            else
-               write(*,*) "Probelm in freq filter: ", a(1,i), m(1,i), m(2,i), scan%id
-            end if
+            data_l2%tod(i,:,sb,feed) = data_l2%tod(i,:,sb,feed) - F(:,1)*a(1,i) - P(:,1)*m(1,i) - P(:,2)*m(2,i)
+            data_l2%dg(i,sb,feed) = a(1,i)
+            data_l2%T_cont(i,sb,feed,1) = m(1,i)
+            data_l2%T_cont(i,sb,feed,2) = m(2,i)
+            ! if ((a(1,i) == a(1,i)) .and. (m(1,i) == m(1,i)) .and. (m(2,i) == m(2,i))) then
+            !    ! do j=1,nfreq
+            !    !    data_l2%tod(i,j,sb,feed) = data_l2%tod(i,j,sb,feed) - F(j,1)*a(1,i) - P(j,1)*m(1,i) - P(j,2)*m(2,i)
+            !    ! end do
+            !    data_l2%tod(i,:,sb,feed) = data_l2%tod(i,:,sb,feed) - F(:,1)*a(1,i) - P(:,1)*m(1,i) - P(:,2)*m(2,i)
+            !    data_l2%dg(i,sb,feed) = a(1,i)
+            !    data_l2%T_cont(i,sb,feed,1) = m(1,i)
+            !    data_l2%T_cont(i,sb,feed,2) = m(2,i)
+            ! else
+            !    write(*,*) "Problem in freq filter: ", a(1,i), m(1,i), m(2,i), scan%id
+            !    data_l2%freqmask_full(:,sb,feed) = 0.d0
+            !    exit
+            ! end if
          end do
          !$OMP END DO
          !$OMP END PARALLEL
@@ -2066,6 +2121,7 @@ contains
    end do
    deallocate(dt, dv)
    deallocate(F, FTZ, a, P, PTP, PTP_inv, m, I_mat, Z, z_scalar, FTZY)
+   deallocate(sigma0_prior, fknee_prior, alpha_prior, Cf)
    call wall_time(t6)
    write(*,*) "Time spent on frequency filter: ", t6 - t5
 
@@ -2478,8 +2534,8 @@ end subroutine frequency_filter_TOD
        allocate(data_out%acceptrate(nsb,ndet))
        allocate(data_out%diagnostics(size(data_in%nu,1),nsb,ndet,size(data_in%diagnostics,4)))
        allocate(data_out%cut_params(size(data_in%cut_params,1),size(data_in%cut_params,2)))
-       allocate(data_out%AB_mask(size(data_in%nu,1,1),nsb,ndet))
-       allocate(data_out%leak_mask(size(data_in%nu,1,1),nsb,ndet))
+       allocate(data_out%AB_mask(size(data_in%nu,1,1),nsb,20))
+       allocate(data_out%leak_mask(size(data_in%nu,1,1),nsb,20))
        data_out%acceptrate    = data_in%acceptrate
        data_out%diagnostics   = data_in%diagnostics
        data_out%cut_params    = data_in%cut_params
@@ -3159,6 +3215,9 @@ end subroutine frequency_filter_TOD
     type(hdf_file)                                :: file
     real(dp)                                      :: mean_tod, P_hot, P_cold
     real(dp), dimension(:,:,:,:), allocatable     :: tsys_fullres, buffer
+    real(dp), dimension(:,:), allocatable         :: buff_T
+    real(dp), dimension(:,:,:), allocatable       :: buff_time
+    integer(i4b), dimension(:,:), allocatable     :: buff_succ
     integer(i4b)                                  :: nfreq_fullres, nsb, ndet, i, j, k, l, mjd_index1,mjd_index2, nsamp, dnu, n_hot, n_cold
     integer(i4b)                                  :: nsamp_gain(7), num_bin, n, mean_count, tsys_ind(2), n_tsys, cal_id(2), n_cal
     !integer(i4b), dimension(:), allocatable       :: scanID, vane_in_index, vane_out_index
@@ -3265,14 +3324,26 @@ end subroutine frequency_filter_TOD
     
     if (.not. (trim(cal_db) == '')) then
        allocate(buffer(2, nfreq_fullres, nsb, 20))
+       allocate(buff_T(2, 20))
+       allocate(buff_time(2, 2, 20))
+       allocate(buff_succ(2, 20))
        call open_hdf_file(cal_db, file, "r")
-       write(db_string, '(A,I7.7)') 'obsid/', 15376 !scan%id
+       write(db_string, '(A,I7.7)') 'obsid/', scan%id !15376 !scan%id
+!       write(*,*) db_string, data%pixels
        call read_hdf(file, trim(db_string) // '/Phot', buffer)
-       data%Phot(2, data%pixels, :, :, :) = buffer
-       call read_hdf(file, trim(db_string) // '/Thot', data%Thot(2, :))
-       call read_hdf(file, trim(db_string) // '/calib_times', data%time_hot(2, :))
+       data%Phot(2, :, :, :, :) = buffer(:,:,:,data%pixels)   !!!!! is this right now?
+       call read_hdf(file, trim(db_string) // '/Thot', buff_T) 
+       call read_hdf(file, trim(db_string) // '/successful', buff_succ) 
+       data%Thot(2, :) = buff_T(:, 1)
+       !call read_hdf(file, trim(db_string) // '/calib_times', buff_time)
+       if (buff_succ(1, 1) == 1) then
+          data%time_hot(2, 1) = 0.5d0 * (scan%ss(cal_id(1))%mjd(1) + scan%ss(cal_id(1))%mjd(2))
+       end if
+       if (buff_succ(2, 1) == 1) then
+          data%time_hot(2, 2) = 0.5d0 * (scan%ss(cal_id(2))%mjd(1) + scan%ss(cal_id(2))%mjd(2))
+       end if
        call close_hdf_file(file)
-       deallocate(buffer)
+       deallocate(buffer, buff_T, buff_time, buff_succ)
     end if
 
     data%cal_method = cal_method
@@ -3286,7 +3357,7 @@ end subroutine frequency_filter_TOD
     if (n_cal < 1) then
        data%freqmask_full(:,:,:) = 0.d0
        if (verb) then
-          write(*,*) "no valid ambient measurments, Obsid: ", scan%id
+          write(*,*) "No valid ambient load measurments, Obsid: ", scan%id
        end if
     end if
 
@@ -3481,6 +3552,11 @@ end subroutine frequency_filter_TOD
     time_hot = data_l2_fullres%time_hot(cal_method, :)
     if (data_l2_fullres%n_cal == 2) then
        x0 = time_hot(1); x1 = time_hot(2)
+       if (x0 == x1) then
+          data_l2_fullres%freqmask_full(:,:,:) = 0.d0
+          write(*,*) "Should not have been n_cal=2!! ", x0, x1, cal_method, scan%id
+          return
+       end if
        y0 = T_hot(1); y1 = T_hot(2)
        interp1d_T_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
     end if
@@ -3506,6 +3582,7 @@ end subroutine frequency_filter_TOD
                 if (interp1d_P_hot == mean_tod) then
                    data_l2_fullres%freqmask_full(k,j,i) = 0.d0
                    write(*,*) "Phot = Pcold", i, j, k, scan%id
+                   cycle
                 end if
                 tsys = (interp1d_T_hot - T_cold)/(interp1d_P_hot/mean_tod-1.d0)
                 data_l2_fullres%Tsys(k,j,i) = tsys
@@ -3537,7 +3614,11 @@ end subroutine frequency_filter_TOD
        do j = 1, nsb
           do k = 1, nfreq
              if (data_l2_fullres%freqmask_full(k,j,i) == 0.d0) cycle
-             if (data_l2_fullres%Tsys(k,j,i) > max_tsys) then
+             if (data_l2_fullres%Tsys(k,j,i) .ne. data_l2_fullres%Tsys(k,j,i)) then
+                write(*,*) "tsys is nan!!", i, j, k
+                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+                data_l2_fullres%freqmask_reason(k,j,i) = 70
+             else if (data_l2_fullres%Tsys(k,j,i) > max_tsys) then
                 data_l2_fullres%freqmask_full(k,j,i) = 0.d0
                 data_l2_fullres%freqmask_reason(k,j,i) = 60
              else
