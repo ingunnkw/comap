@@ -52,7 +52,7 @@ program tod2comap
   integer(i4b)          :: d 
 
   character(len=512)    :: param_dir, runlist_in, scheme
-  character(len=1024)   :: param_name, param_name_raw, runlist_name, runlist_name_raw
+  character(len=1024)   :: param_name, param_name_raw, runlist_name, runlist_name_raw, acceptfile_raw, acceptfile_copy
   logical               :: exist, fit_baselines
 
   integer(i4b)          :: name_len
@@ -99,7 +99,6 @@ program tod2comap
   if (scheme .eq. "baselines") then
      fit_baselines = .true.
   end if
-
   if (myid == 0) then 
      ! Copy parameter file and runlists to l2-file output directory 
      ! Copy parameter file to map-file output directory
@@ -113,31 +112,39 @@ program tod2comap
       
       param_name_raw = trim(param_dir)//"/param_"
       runlist_name_raw = trim(param_dir)//"/runlist_"
+
       param_name_raw = trim(param_name_raw)//trim(map_name)
       runlist_name_raw = trim(runlist_name_raw)//trim(map_name)
-      
+      acceptfile_raw   = trim(param_dir) // '/jk_data' // trim(acc_id) // trim(split_id) // '_' // trim(object)
+
       write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), 0, ".txt"
       write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), 0, ".txt"
+      write(acceptfile_copy, "(A512, A1, I6.6, A3)") trim(acceptfile_raw), "_", 0, ".h5"
       
       inquire(file=trim(param_name), exist=exist)
-      
+            
       if (.not. exist) then
          call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
          call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+         call execute_command_line("cp "//trim(acceptfile)//" "//acceptfile_copy, wait=.true.)
          irun = irun + 1
       else     
          irun = 1
          exist = .true.
+
          do while (exist)
             write(param_name, "(A512, I6.6, A4)") trim(param_name_raw), irun, ".txt"
             write(runlist_name, "(A512, I6.6, A4)") trim(runlist_name_raw), irun, ".txt"
+            write(acceptfile_copy, "(A512, A1, I6.6, A3)") trim(acceptfile_raw), "_", irun, ".h5"
             inquire(file=trim(param_name), exist=exist)
             irun = irun + 1
          end do      
          call execute_command_line("cp "//trim(parfile)//" "//param_name, wait=.true.)
          call execute_command_line("cp "//trim(runlist_in)//" "//runlist_name, wait=.true.)
+         call execute_command_line("cp "//trim(acceptfile)//" "//acceptfile_copy, wait=.true.)
       end if
-      print *, "Run number: ", irun - 1
+      
+      print *, "Run number: ", irun
    end if
    
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
@@ -182,7 +189,7 @@ program tod2comap
   !stop
 
    
-
+  
   if (myid==0) write(*,*) "Initialising mapmaker"
   if (fit_baselines .and. myid==0) write(*,*) "Using baseline destriper"
   call initialize_mapmaker(map_scan, parfile, pinfo, split_info)
