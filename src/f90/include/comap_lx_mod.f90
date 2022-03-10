@@ -31,6 +31,7 @@ module comap_lx_mod
      ! Level 2 fields
      integer(i4b)                                    :: polyorder     ! Polynomial order for frequency filter
      integer(i4b)                                    :: n_pca_comp    ! Number of leading pca-components to subtract
+     integer(i4b)                                    :: n_pca_comp_feed    ! Number of leading feed-pca-components to subtract
      integer(i4b)                                    :: decimation_time, decimation_nu
      integer(i4b)                                    :: mask_outliers
      integer(i4b)                                    :: irun          ! Run number identification
@@ -55,6 +56,11 @@ module comap_lx_mod
      real(sp),     allocatable, dimension(:,:,:,:)   :: pca_ampl      ! amplitudes of pca-components (frec,sb,det,comp)
      real(sp),     allocatable, dimension(:,:)       :: pca_comp      ! actual pca component timestreams (time,comp)
      real(sp),     allocatable, dimension(:)         :: pca_eigv      ! eigenvalues of pca components (comp)
+
+     real(sp),     allocatable, dimension(:, :, :, :)   :: pca_ampl_feed   ! amplitudes of pca-components (frec, sb, det, comp)
+     real(sp),     allocatable, dimension(:, :, :)       :: pca_comp_feed     ! actual pca component timestreams (det, time, comp)
+     real(sp),     allocatable, dimension(:, :)         :: pca_eigv_feed      ! eigenvalues of pca components (det, comp)
+
      real(sp),     allocatable, dimension(:,:)       :: acceptrate    ! fraction of freqs not masked (sb,det)
      real(sp),     allocatable, dimension(:,:,:,:)   :: diagnostics   ! various diagnostics used to make freqmask
      real(dp),     allocatable, dimension(:,:,:,:,:) :: spike_data    ! spike and jump data (n_spikes,spike/jump,info) info = (amp,mjd,samp,sb,feed)
@@ -361,6 +367,16 @@ contains
        call read_hdf(file, "pca_eigv",         data%pca_eigv)
     end if
 
+    call read_hdf(file, "n_pca_comp_feed",         data%n_pca_comp_feed)
+    if (data%n_pca_comp_feed > 0) then
+      allocate(data%pca_ampl_feed(nfreq_full, nsb, ndet, data%n_pca_comp_feed)) 
+      allocate(data%pca_comp_feed(ndet, nsamp, data%n_pca_comp_feed))
+      allocate(data%pca_eigv_feed(ndet, data%n_pca_comp_feed))
+      call read_hdf(file, "pca_ampl_feed",         data%pca_ampl_feed)
+      call read_hdf(file, "pca_comp_feed",         data%pca_comp_feed)
+      call read_hdf(file, "pca_eigv_feed",         data%pca_eigv_feed)
+   end if
+
     call read_hdf(file, "mask_outliers",    data%mask_outliers)
     !if (data%mask_outliers == 1) then
     
@@ -537,6 +553,11 @@ contains
     if(allocated(data%pca_ampl))      deallocate(data%pca_ampl)
     if(allocated(data%pca_comp))      deallocate(data%pca_comp)
     if(allocated(data%pca_eigv))      deallocate(data%pca_eigv)
+    
+    if(allocated(data%pca_ampl_feed))      deallocate(data%pca_ampl_feed)
+    if(allocated(data%pca_comp_feed))      deallocate(data%pca_comp_feed)
+    if(allocated(data%pca_eigv_feed))      deallocate(data%pca_eigv_feed)
+
     if(allocated(data%acceptrate))    deallocate(data%acceptrate)
     if(allocated(data%diagnostics))   deallocate(data%diagnostics)
     if(allocated(data%spike_data))    deallocate(data%spike_data)
@@ -621,6 +642,14 @@ contains
        call write_hdf(file, "pca_comp",       data%pca_comp)
        call write_hdf(file, "pca_eigv",       data%pca_eigv)
     end if
+    
+    call write_hdf(file, "n_pca_comp_feed",   data%n_pca_comp_feed)
+    if (data%n_pca_comp_feed > 0) then
+       call write_hdf(file, "pca_ampl_feed",       data%pca_ampl_feed)
+       call write_hdf(file, "pca_comp_feed",       data%pca_comp_feed)
+       call write_hdf(file, "pca_eigv_feed",       data%pca_eigv_feed)
+    end if
+    
     call write_hdf(file, "spike_data",        data%spike_data)
     call write_hdf(file, "mask_outliers",     data%mask_outliers)
     !write(*,*) "middle", data%mask_outliers
@@ -830,6 +859,7 @@ contains
     lx_out%decimation_time = lx_in%decimation_time
     lx_out%decimation_nu = lx_in%decimation_nu
     lx_out%n_pca_comp = lx_in%n_pca_comp
+    lx_out%n_pca_comp_feed = lx_in%n_pca_comp_feed
     lx_out%mask_outliers = lx_in%mask_outliers
     lx_out%cal_method = lx_in%cal_method
     lx_out%n_cal = lx_in%n_cal
@@ -1003,6 +1033,21 @@ contains
        allocate(lx_out%pca_eigv(size(lx_in%pca_eigv,1)))
        lx_out%pca_eigv = lx_in%pca_eigv
     end if
+
+
+    if(allocated(lx_in%pca_ampl_feed))   then
+      allocate(lx_out%pca_ampl_feed(size(lx_in%pca_ampl_feed, 1), size(lx_in%pca_ampl_feed, 2), size(lx_in%pca_ampl_feed, 3), size(lx_in%pca_ampl_feed, 4)))
+      lx_out%pca_ampl_feed = lx_in%pca_ampl_feed
+   end if
+   if(allocated(lx_in%pca_comp_feed))   then
+      allocate(lx_out%pca_comp_feed(size(lx_in%pca_comp_feed, 1),size(lx_in%pca_comp_feed, 2), size(lx_in%pca_comp_feed, 3)))
+      lx_out%pca_comp_feed = lx_in%pca_comp_feed
+   end if
+   if(allocated(lx_in%pca_eigv_feed))   then
+      allocate(lx_out%pca_eigv_feed(size(lx_in%pca_eigv_feed, 1), size(lx_in%pca_eigv_feed, 2)))
+      lx_out%pca_eigv_feed = lx_in%pca_eigv_feed
+   end if
+
     if(allocated(lx_in%acceptrate))   then
        allocate(lx_out%acceptrate(size(lx_in%acceptrate,1),size(lx_in%acceptrate,2)))
        lx_out%acceptrate = lx_in%acceptrate

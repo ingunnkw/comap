@@ -22,8 +22,8 @@ program l2gen
   character(len=512)   :: param_dir, runlist_in
   character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw, cal_db
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
-  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, pca_max_iter, tsys_ind(2), cal_method
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store, n_pca_store_feed
+  integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, n_pca_comp_feed, pca_max_iter, tsys_ind(2), cal_method
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
@@ -49,6 +49,7 @@ program l2gen
   call get_parameter(unit, parfile, 'GAIN_NORMALIZATION_ALPHA',  par_dp=alpha_gain)
   call get_parameter(unit, parfile, 'BANDPASS_FILTER_ORDER',     par_int=bp_filter0)
   call get_parameter(unit, parfile, 'N_PCA_COMPONENTS',          par_int=n_pca_comp)
+  call get_parameter(unit, parfile, 'N_FEED_PCA_COMPONENTS',     par_int=n_pca_comp_feed)
   call get_parameter(unit, parfile, 'PCA_ERROR_TOLERANCE',       par_dp=pca_err_tol)
   call get_parameter(unit, parfile, 'PCA_MAX_ITERATIONS',        par_int=pca_max_iter)
   call get_parameter(unit, parfile, 'MASK_OUTLIERS',             par_int=mask_outliers)
@@ -246,6 +247,7 @@ program l2gen
         if (diag_l2) then
            polyorder_store = data_l2_fullres%polyorder
            n_pca_store     = data_l2_fullres%n_pca_comp
+           n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
            data_l2_fullres%mask_outliers = 0
@@ -259,6 +261,7 @@ program l2gen
            call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_1_before_norm")))
            data_l2_fullres%polyorder = polyorder_store
            data_l2_fullres%n_pca_comp = n_pca_store
+           data_l2_fullres%n_pca_comp_feed = n_pca_store_feed
         end if
         
         ! Normalize gain
@@ -271,6 +274,7 @@ program l2gen
         if (diag_l2) then
            polyorder_store = data_l2_fullres%polyorder
            n_pca_store     = data_l2_fullres%n_pca_comp
+           n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
 
@@ -282,6 +286,7 @@ program l2gen
            call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_2_after_norm")))
            data_l2_fullres%polyorder = polyorder_store
            data_l2_fullres%n_pca_comp = n_pca_store
+           data_l2_fullres%n_pca_comp_feed = n_pca_store_feed
         end if
         
         if (rem_el) then
@@ -305,8 +310,10 @@ program l2gen
         if (diag_l2) then
            polyorder_store = data_l2_fullres%polyorder
            n_pca_store     = data_l2_fullres%n_pca_comp
+           n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%n_pca_comp_feed = 0
 
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
            
@@ -316,6 +323,7 @@ program l2gen
            call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_3_after_template_subtr")))
            data_l2_fullres%polyorder = polyorder_store
            data_l2_fullres%n_pca_comp = n_pca_store
+           data_l2_fullres%n_pca_comp_feed = n_pca_store_feed
         end if
 
         if (verb) then           
@@ -350,6 +358,7 @@ program l2gen
            end if
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%n_pca_comp_feed = 0
            data_l2_fullres%use_freq_filter = .false.
            data_l2_fullres%mask_outliers = 0
            
@@ -424,6 +433,11 @@ program l2gen
               ! pca filter copied data
               call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
               call update_status(status, 'pca_filter0')
+            
+              ! pca filter copied data
+              call pca_filter_feed_TOD(data_l2_filter, n_pca_comp_feed, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
+              call update_status(status, 'pca_feed_filter0')
+            
 
               if (diag_l2) then
                  data_l2_filter%mask_outliers = 0
@@ -502,6 +516,7 @@ program l2gen
         ! Write diagnostic l2_file to disc
         if (diag_l2) then
            n_pca_store     = data_l2_fullres%n_pca_comp
+           n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%n_pca_comp = 0
 
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
@@ -511,6 +526,7 @@ program l2gen
            write(*,*) "Writing out l2-data for diagnostcs ", adjustl(trim("_5_after_poly"))
            call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_5_after_poly")))
            data_l2_fullres%n_pca_comp = n_pca_store
+           data_l2_fullres%n_pca_comp_feed = n_pca_store_feed
         end if
         
         if ((mask_outliers == 0) .and. (bp_filter > -1)) then
@@ -523,6 +539,9 @@ program l2gen
         if (trim(pinfo%type) == 'cosmo') then
            call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter')
+
+           call pca_filter_feed_TOD(data_l2_fullres, n_pca_comp_feed, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
+           call update_status(status, 'pca_feed_filter')
         end if
         
         ! Write diagnostic l2_file to disc
@@ -1068,7 +1087,7 @@ contains
     else if (data_l2%polyorder == 1) then
        allocate(corr_template(nfreq,nfreq))
 
-       call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
+       call open_hdf_file("/mn/stornext/d22/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
        call read_hdf(file, "corr", corr_template)
        call close_hdf_file(file)
     end if
@@ -1823,6 +1842,124 @@ contains
     deallocate(r, s)
     
   end subroutine pca_filter_TOD
+
+
+  
+  subroutine pca_filter_feed_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
+   implicit none
+   type(Lx_struct),           intent(inout) :: data_l2
+   integer(i4b),              intent(in)    :: n_pca_comp, pca_max_iter
+   real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
+   logical(lgt),              intent(in)    :: verb
+   integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
+   real(dp)     :: eigenv, dotsum, amp, err, ssum 
+   real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
+   real(dp),     allocatable, dimension(:)   :: r, s, mys
+   CHARACTER(LEN=128) :: number
+   
+   !=======================================================================
+   !====                     Feed PCA filter                          =====
+   !=======================================================================
+
+   data_l2%n_pca_comp_feed = n_pca_comp
+   if (n_pca_comp == 0) return
+
+   nsamp       = size(data_l2%tod,1)
+   nfreq       = size(data_l2%tod,2)
+   nsb         = size(data_l2%tod,3)
+   ndet        = size(data_l2%tod,4)
+
+   ! Thresholds for removing PCA-components
+   std_tol = pca_sig_rem / sqrt(real(nsamp))
+   dnu = (data_l2%nu(2, 1, 1) - data_l2%nu(3, 1, 1)) * 1d9
+   radiometer = 1 / sqrt(dnu * 1.0 / data_l2%samprate)
+   amp_lim = std_tol * radiometer
+!    write(*,*) dnu
+   allocate(r(nsamp), s(nsamp))
+           
+   
+   if(.not. allocated(data_l2%pca_ampl_feed)) allocate(data_l2%pca_ampl_feed(nfreq, nsb, ndet, n_pca_comp)) 
+   if(.not. allocated(data_l2%pca_comp_feed)) allocate(data_l2%pca_comp_feed(ndet, nsamp, n_pca_comp))
+   if(.not. allocated(data_l2%pca_eigv_feed)) allocate(data_l2%pca_eigv_feed(ndet, n_pca_comp))
+   data_l2%pca_ampl_feed = 0.d0
+   data_l2%pca_comp_feed = 0.d0
+   data_l2%pca_eigv_feed = 0.d0
+   
+   do l = 1, n_pca_comp 
+      do i = 1, ndet
+         if (.not. is_alive(data_l2%pixels(i))) cycle
+            err = 1.d0
+            r(:) = sum(sum(data_l2%tod(:, :, :, i), 2), 2) !sum of all freqs
+            if (verb) then
+               if (sum(r) == 0.d0) then
+                  write(*,*) "PCA initialized with zero vector"
+               end if
+               if (sum(r) .ne. sum(r)) then
+                  write(*,*) "NaN in initial PCA vector"
+               end if
+            end if       
+            iters = 0
+            do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
+               s = 0.d0
+               !$OMP PARALLEL PRIVATE(k, i, j, dotsum, mys)
+               allocate(mys(nsamp))
+               mys = 0.d0
+               !$OMP DO SCHEDULE(guided)
+               do k = 1, nfreq
+                  do j = 1, nsb
+                     if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle   
+                     dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
+
+                     mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
+                  end do
+               end do
+               !$OMP END DO
+               !$OMP CRITICAL
+               s(:) = s(:) + mys(:)
+               !$OMP END CRITICAL
+               deallocate(mys)
+               !$OMP END PARALLEL
+               eigenv = sum(s(:) * r(:))
+               err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
+               ! write(*,*) sum(s(:) ** 2)
+               ! write(*,*) s(1), s(170)
+               ! write(*,*) iters, l
+               ssum = sqrt(sum(s(:) ** 2))
+               if (ssum == 0.d0) then
+                  write(*,*) "Weird stuff happening in PCA-filter"
+                  r(:) = 1.d0 / sqrt(1.d0 * nsamp)
+               else
+                  r(:) = s(:)/ssum
+               end if
+               iters = iters + 1
+            end do
+            data_l2%pca_eigv_feed(i, l) = eigenv
+            data_l2%pca_comp_feed(i, :, l) = r(:)
+            !means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
+            !vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
+
+            comp_std = sqrt(abs(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2))
+            !$OMP PARALLEL PRIVATE(k,i,j,dotsum,mys)
+            !$OMP DO SCHEDULE(guided)
+            do k = 1, nfreq
+               do j = 1, nsb
+                  if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle
+                  data_l2%pca_ampl_feed(k, j, i, l) = sum(r(:) * data_l2%tod(:, k, j, i))
+
+                  if (abs(data_l2%pca_ampl_feed(k, j, i, l)) > amp_lim / comp_std) then
+                     data_l2%tod(:, k, j, i) = data_l2%tod(:, k, j, i) - data_l2%pca_ampl_feed(k, j, i, l) * r(:)
+                  end if
+               end do
+            end do
+            !$OMP END DO
+            !$OMP END PARALLEL
+            if (.not. (any(sum(abs(data_l2%pca_ampl_feed(:, :, i, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
+      end do
+   end do
+   deallocate(r, s)
+   
+  end subroutine pca_filter_feed_TOD
+
 
   subroutine polyfilter_TOD(data_l2, bp_filter)
     implicit none
