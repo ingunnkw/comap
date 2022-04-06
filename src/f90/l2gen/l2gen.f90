@@ -80,7 +80,7 @@ program l2gen
   if (import_freqmask .and. .not. mask_outliers) then 
      mask_outliers = .true. 
   end if 
-
+  
   check_existing = .true.
   call mkdirs(trim(l2dir), .false.)
   call initialize_scan_mod(parfile)
@@ -129,6 +129,7 @@ program l2gen
      print *, "Run number: ", irun - 1
   end if
 
+
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
      call get_scan_info(snum, scan)
@@ -145,6 +146,7 @@ program l2gen
 
      write(*,fmt="(i3,a,i10,a)") myid, " processing obsid ", scan%id, " (" // trim(itoa(snum)) // "/" // trim(itoa(nscan)) // ")"
      call update_status(status, 'scan_start')
+
 
      ! Read in Level 1 file
      call wall_time(t1)
@@ -228,6 +230,7 @@ program l2gen
         stop
      end if
 
+
      do k = 2, scan%nsub-1
         ! Reformat L1 data into L2 format, and truncate
         call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
@@ -242,6 +245,7 @@ program l2gen
            write(*,'(A, I8, 2A)') " Number of samples, observed patch: ", size(data_l2_fullres%time, 1), "  ", trim(scan%object)
            write(*,*) "Scan type: ", trim(scan%ss(k)%scanmode)
         end if
+
         
         ! Write diagnostic l2_file to disc
         if (diag_l2) then
@@ -250,6 +254,7 @@ program l2gen
            n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%n_pca_comp_feed = 0
            data_l2_fullres%mask_outliers = 0
         
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
@@ -277,6 +282,7 @@ program l2gen
            n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%n_pca_comp_feed = 0
 
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
            
@@ -449,6 +455,7 @@ program l2gen
                  call write_l2_file(scan, k, data_l2_decimated, adjustl(trim("_4_before_mask")))
                  data_l2_filter%mask_outliers = mask_outliers
               end if
+
               ! flag correlations and variance
               call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
               call update_status(status, 'flag_corr')
@@ -474,6 +481,7 @@ program l2gen
            end if
            data_l2_fullres%polyorder = -1
            data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%n_pca_comp_feed = 0
            data_l2_fullres%use_freq_filter = .false.
 
            ! If necessary, decimate L2 file in both time and frequency
@@ -518,6 +526,7 @@ program l2gen
            n_pca_store     = data_l2_fullres%n_pca_comp
            n_pca_store_feed     = data_l2_fullres%n_pca_comp_feed
            data_l2_fullres%n_pca_comp = 0
+           data_l2_fullres%n_pca_comp_feed = 0
 
            call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
            
@@ -628,6 +637,7 @@ program l2gen
      end do        
      call free_lx_struct(data_l1)
   end do
+
   call mpi_finalize(ierr)
 
   call free_status(status)
@@ -1829,9 +1839,9 @@ contains
                 if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
                 data_l2%pca_ampl(k,j,i,l) = sum(r(:) * data_l2%tod(:,k,j,i))
                 !write(*,*) data_l2%pca_ampl(k,j,i,l), amp_lim / comp_std, l
-                if (abs(data_l2%pca_ampl(k,j,i,l)) > amp_lim / comp_std) then
-                   data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - data_l2%pca_ampl(k,j,i,l) * r(:)
-                end if
+                !if (abs(data_l2%pca_ampl(k,j,i,l)) > amp_lim / comp_std) then
+                data_l2%tod(:,k,j,i) = data_l2%tod(:,k,j,i) - data_l2%pca_ampl(k,j,i,l) * r(:)
+                !end if
              end do
           end do
        end do
@@ -1852,14 +1862,17 @@ contains
    real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
    logical(lgt),              intent(in)    :: verb
    integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
-   real(dp)     :: eigenv, dotsum, amp, err, ssum 
-   real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
+   real(dp)     :: eigenv, dotsum, amp, err, ssum, decimation_nu
+   real(dp)     :: std_tol, comp_std, amp_lim, dnu
    real(dp),     allocatable, dimension(:)   :: r, s, mys
+   real(sp),     allocatable, dimension(:,:,:,:)   :: tod_downsamp  ! (time, freq, sideband, detector) used for temporary downsampled tod
+
    CHARACTER(LEN=128) :: number
    
    !=======================================================================
    !====                     Feed PCA filter                          =====
    !=======================================================================
+   
 
    data_l2%n_pca_comp_feed = n_pca_comp
    if (n_pca_comp == 0) return
@@ -1876,7 +1889,8 @@ contains
    amp_lim = std_tol * radiometer
 !    write(*,*) dnu
    allocate(r(nsamp), s(nsamp))
-           
+   
+
    
    if(.not. allocated(data_l2%pca_ampl_feed)) allocate(data_l2%pca_ampl_feed(nfreq, nsb, ndet, n_pca_comp)) 
    if(.not. allocated(data_l2%pca_comp_feed)) allocate(data_l2%pca_comp_feed(ndet, nsamp, n_pca_comp))
@@ -1885,78 +1899,84 @@ contains
    data_l2%pca_comp_feed = 0.d0
    data_l2%pca_eigv_feed = 0.d0
    
-   do l = 1, n_pca_comp 
-      do i = 1, ndet
-         if (.not. is_alive(data_l2%pixels(i))) cycle
-            err = 1.d0
-            r(:) = sum(sum(data_l2%tod(:, :, :, i), 2), 2) !sum of all freqs
-            if (verb) then
-               if (sum(r) == 0.d0) then
-                  write(*,*) "PCA initialized with zero vector"
-               end if
-               if (sum(r) .ne. sum(r)) then
-                  write(*,*) "NaN in initial PCA vector"
-               end if
-            end if       
-            iters = 0
-            do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
-               s = 0.d0
-               !$OMP PARALLEL PRIVATE(k, i, j, dotsum, mys)
-               allocate(mys(nsamp))
-               mys = 0.d0
-               !$OMP DO SCHEDULE(guided)
-               do k = 1, nfreq
-                  do j = 1, nsb
-                     if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle   
-                     dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
+   do i = 1, ndet
+      if (.not. is_alive(data_l2%pixels(i))) cycle
+      if (sum(sum(data_l2%freqmask_full(:, :, i), 1), 1) <= n_pca_comp) cycle
+      do l = 1, n_pca_comp 
+         err = 1.d0
+         r(:) = sum(sum(data_l2%tod(:, :, :, i), 2), 2) !sum of all freqs
+         if (verb) then
+            if (sum(r) == 0.d0) then
+               write(*,*) "PCA initialized with zero vector"
+            end if
+            if (sum(r) .ne. sum(r)) then
+               write(*,*) "NaN in initial PCA vector"
+            end if
+         end if 
 
-                     mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
-                  end do
-               end do
-               !$OMP END DO
-               !$OMP CRITICAL
-               s(:) = s(:) + mys(:)
-               !$OMP END CRITICAL
-               deallocate(mys)
-               !$OMP END PARALLEL
-               eigenv = sum(s(:) * r(:))
-               err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
-               ! write(*,*) sum(s(:) ** 2)
-               ! write(*,*) s(1), s(170)
-               ! write(*,*) iters, l
-               ssum = sqrt(sum(s(:) ** 2))
-               if (ssum == 0.d0) then
-                  write(*,*) "Weird stuff happening in PCA-filter"
-                  r(:) = 1.d0 / sqrt(1.d0 * nsamp)
-               else
-                  r(:) = s(:)/ssum
-               end if
-               iters = iters + 1
-            end do
-            data_l2%pca_eigv_feed(i, l) = eigenv
-            data_l2%pca_comp_feed(i, :, l) = r(:)
-            !means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
-            !vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
+         iters = 0
+         do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
+            s = 0.d0
+            !$OMP PARALLEL PRIVATE(k, j, dotsum, mys)
+            allocate(mys(nsamp))
+            mys = 0.d0
 
-            comp_std = sqrt(abs(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2))
-            !$OMP PARALLEL PRIVATE(k,i,j,dotsum,mys)
             !$OMP DO SCHEDULE(guided)
             do k = 1, nfreq
                do j = 1, nsb
-                  if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle
-                  data_l2%pca_ampl_feed(k, j, i, l) = sum(r(:) * data_l2%tod(:, k, j, i))
+                  if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle   
+                  dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
 
-                  if (abs(data_l2%pca_ampl_feed(k, j, i, l)) > amp_lim / comp_std) then
-                     data_l2%tod(:, k, j, i) = data_l2%tod(:, k, j, i) - data_l2%pca_ampl_feed(k, j, i, l) * r(:)
-                  end if
+                  mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
                end do
             end do
             !$OMP END DO
+            !$OMP CRITICAL
+            s(:) = s(:) + mys(:)
+            !$OMP END CRITICAL
+            deallocate(mys)
             !$OMP END PARALLEL
-            if (.not. (any(sum(abs(data_l2%pca_ampl_feed(:, :, i, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
+            eigenv = sum(s(:) * r(:))
+            err = sqrt(sum((eigenv * r(:) - s(:)) ** 2))
+            ! write(*,*) sum(s(:) ** 2)
+            ! write(*,*) s(1), s(170)
+            ! write(*,*) iters, l
+            ssum = sqrt(sum(s(:) ** 2))
+            if (ssum == 0.d0) then
+               write(*,*) "Weird stuff happening in PCA-filter", i
+               r(:) = 1.d0 / sqrt(1.d0 * nsamp)
+            else
+               r(:) = s(:)/ssum
+            end if
+            iters = iters + 1
+         end do
+
+         data_l2%pca_eigv_feed(i, l) = eigenv
+         data_l2%pca_comp_feed(i, :, l) = r(:)
+         !means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
+         !vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
+
+         comp_std = sqrt(abs(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2))
+         !$OMP PARALLEL PRIVATE(k,j,dotsum,mys)
+         !$OMP DO SCHEDULE(guided)
+         do k = 1, nfreq
+            do j = 1, nsb
+               if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle
+               data_l2%pca_ampl_feed(k, j, i, l) = sum(r(:) * data_l2%tod(:, k, j, i))
+
+               !if (abs(data_l2%pca_ampl_feed(k, j, i, l)) > amp_lim / comp_std) then
+               data_l2%tod(:, k, j, i) = data_l2%tod(:, k, j, i) - data_l2%pca_ampl_feed(k, j, i, l) * r(:)
+               !end if
+            end do
+         end do
+         !$OMP END DO
+         !$OMP END PARALLEL
+         !if (.not. (any(sum(abs(data_l2%pca_ampl_feed(:, :, i, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
       end do
    end do
+
    deallocate(r, s)
+   deallocate(tod_downsamp)
    
   end subroutine pca_filter_feed_TOD
 
@@ -2715,6 +2735,7 @@ end subroutine frequency_filter_TOD
 !    data_out%spike_data    = data_in%spike_data
     data_out%n_nan         = data_in%n_nan
     data_out%n_pca_comp    = data_in%n_pca_comp
+    data_out%n_pca_comp_feed    = data_in%n_pca_comp_feed
 
     data_out%use_freq_filter = data_in%use_freq_filter
 
@@ -2728,6 +2749,16 @@ end subroutine frequency_filter_TOD
        data_out%pca_eigv      = data_in%pca_eigv
     end if
 
+
+    if (data_in%n_pca_comp_feed > 0) then
+      allocate(data_out%pca_ampl_feed(size(data_in%nu, 1), nsb, ndet, size(data_in%pca_ampl_feed, 4)))
+      allocate(data_out%pca_comp_feed(ndet, size(data_in%pca_comp_feed, 2), size(data_in%pca_comp_feed, 3)))
+      allocate(data_out%pca_eigv_feed(ndet, size(data_in%pca_eigv_feed, 2)))
+
+      data_out%pca_ampl_feed      = data_in%pca_ampl_feed
+      data_out%pca_comp_feed      = data_in%pca_comp_feed
+      data_out%pca_eigv_feed      = data_in%pca_eigv_feed
+   end if
 
     if (data_in%use_freq_filter) then
        if (data_in%mask_outliers == 1) then

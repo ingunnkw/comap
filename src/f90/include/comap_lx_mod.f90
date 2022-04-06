@@ -36,6 +36,7 @@ module comap_lx_mod
      integer(i4b)                                    :: mask_outliers
      integer(i4b)                                    :: irun          ! Run number identification
      integer(i4b)                                    :: n_cal         ! Number of successful ambient measurments
+     integer(i4b)                                    :: n_freq_downsamp   ! Number of frequencies in temporary PCA downsampling
      integer(i4b)                                    :: cal_method  ! (1 = old, 2 = Jonas, 3 = from l1)
      logical(lgt)                                    :: use_freq_filter ! use the new frequency filter (T/F)
      real(dp),     allocatable, dimension(:,:)       :: Thot        ! (nmethods=3, start/end)
@@ -375,7 +376,7 @@ contains
       call read_hdf(file, "pca_ampl_feed",         data%pca_ampl_feed)
       call read_hdf(file, "pca_comp_feed",         data%pca_comp_feed)
       call read_hdf(file, "pca_eigv_feed",         data%pca_eigv_feed)
-   end if
+    end if
 
     call read_hdf(file, "mask_outliers",    data%mask_outliers)
     !if (data%mask_outliers == 1) then
