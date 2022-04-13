@@ -128,6 +128,8 @@ program l2gen
      print *, "Run number: ", irun - 1
   end if
 
+   call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
+
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
      call get_scan_info(snum, scan)
@@ -1068,7 +1070,7 @@ contains
     else if (data_l2%polyorder == 1) then
        allocate(corr_template(nfreq,nfreq))
 
-       call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
+       call open_hdf_file("/mn/stornext/d22/cmbco/comap/protodir/auxiliary/corr_template.h5", file, "r")
        call read_hdf(file, "corr", corr_template)
        call close_hdf_file(file)
     end if
@@ -1198,7 +1200,7 @@ contains
 
           if (data_l2%use_freq_filter) then
              
-             call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_templates_band.h5", file, "r")
+             call open_hdf_file("/mn/stornext/d22/cmbco/comap/protodir/auxiliary/corr_templates_band.h5", file, "r")
              if (o == 1) then
                 write(template_name, "(A, I0.2, A)") 'corr_templates_', data_l2%pixels(i), '_A' 
              else 
@@ -1963,7 +1965,7 @@ contains
    allocate(alpha_prior(20))
 
    ! Load in the feed-specific 1/f prior parameters on the gain fluctuations.
-   call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/Cf_prior_data.hdf5", prior_file, "r")  ! get from parameter file 
+   call open_hdf_file("/mn/stornext/d22/cmbco/comap/protodir/auxiliary/Cf_prior_data.hdf5", prior_file, "r")  ! get from parameter file 
    call read_hdf(prior_file, "sigma0_prior", sigma0_prior)
    call read_hdf(prior_file, "fknee_prior", fknee_prior)
    call read_hdf(prior_file, "alpha_prior", alpha_prior)
