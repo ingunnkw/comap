@@ -132,6 +132,8 @@ program l2gen
   
   call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
 
+   call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
+
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
      call get_scan_info(snum, scan)
