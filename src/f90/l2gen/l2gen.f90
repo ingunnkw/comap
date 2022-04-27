@@ -1893,8 +1893,6 @@ contains
 
    numfreq_out = data_l2%n_freq_downsamp
    
-   write(*,*) "Hei0", numfreq_out
-
    if (numfreq_out /= 0) then
       allocate(tod_downsamp(nsamp, numfreq_out, nsb, ndet))
       tod_downsamp = 0.d0
@@ -1932,7 +1930,6 @@ contains
                   if (weight > 0.d0) then
                      Tsys_downsamp = sqrt(delta_nu / weight)  ! (delta_nu) = delta_nu_lowres / delta_nu_highres
                      tod_downsamp(i,k,j,l) = tod_downsamp(i,k,j,l) / (weight * Tsys_downsamp) 
-                     !write(*,*) "Hei", weight, tod_downsamp(i,k,j,l), Tsys_downsamp
                   else
                      tod_downsamp(i,k,j,l) = 0.d0
                   end if
@@ -1942,7 +1939,6 @@ contains
          end do
       end do
    end if
-   write(*,*) "Hei1"
 
    ! Thresholds for removing PCA-components
    std_tol = pca_sig_rem / sqrt(real(nsamp))
@@ -1951,7 +1947,6 @@ contains
    amp_lim = std_tol * radiometer
 !    write(*,*) dnu
    allocate(r(nsamp), s(nsamp))
-   write(*,*) "Hei3"
    
    if(.not. allocated(data_l2%pca_ampl_feed)) allocate(data_l2%pca_ampl_feed(nfreq, nsb, ndet, n_pca_comp)) 
    if(.not. allocated(data_l2%pca_comp_feed)) allocate(data_l2%pca_comp_feed(ndet, nsamp, n_pca_comp))
@@ -1959,7 +1954,6 @@ contains
    data_l2%pca_ampl_feed = 0.d0
    data_l2%pca_comp_feed = 0.d0
    data_l2%pca_eigv_feed = 0.d0
-   write(*,*) "Hei4"
    
    do i = 1, ndet
       if (.not. is_alive(data_l2%pixels(i))) cycle
@@ -1979,8 +1973,6 @@ contains
                write(*,*) "NaN in initial PCA vector"
             end if
          end if 
-         write(*,*) "Hei5"
-
 
          iters = 0
          do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
@@ -2051,7 +2043,6 @@ contains
             end if
             iters = iters + 1
          end do
-         write(*,*) "Hei6"
 
          data_l2%pca_eigv_feed(i, l) = eigenv
          data_l2%pca_comp_feed(i, :, l) = r(:)
@@ -2076,7 +2067,6 @@ contains
          !if (.not. (any(sum(abs(data_l2%pca_ampl_feed(:, :, i, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
       end do
    end do
-   write(*,*) "Hei7"
 
    deallocate(r, s)
    if (allocated(tod_downsamp)) deallocate(tod_downsamp)
