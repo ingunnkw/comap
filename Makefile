@@ -81,7 +81,7 @@ else
 		export LAPACK_LINK := -L/usr/local/lib -llapack -lblas
 	endif
 	ifndef F90FLAGS_DEBUG
-		export F90FLAGS_DEBUG := -g -O0
+		export F90FLAGS_DEBUG := -g -O0 -C -traceback -fpe0 
 	endif
 	ifndef FFLAGS_DEBUG
 		export FFLAGS_DEBUG := -g -O0

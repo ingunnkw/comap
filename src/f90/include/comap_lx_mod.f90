@@ -369,6 +369,7 @@ contains
     end if
 
     call read_hdf(file, "n_pca_comp_feed",         data%n_pca_comp_feed)
+    !data%n_pca_comp_feed  = 0
     if (data%n_pca_comp_feed > 0) then
       allocate(data%pca_ampl_feed(nfreq_full, nsb, ndet, data%n_pca_comp_feed)) 
       allocate(data%pca_comp_feed(ndet, nsamp, data%n_pca_comp_feed))

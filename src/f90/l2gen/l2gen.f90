@@ -9,7 +9,7 @@ program l2gen
   use rngmod
   use quiet_fft_mod
   use spline_1D_mod
-  use quiet_status_mod
+  use quiet_status_mod 
   use comap_gain_mod
   use comap_patch_mod
   use comap_ephem_mod
@@ -22,7 +22,7 @@ program l2gen
   character(len=512)   :: param_dir, runlist_in
   character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw, cal_db
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
-  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store, n_pca_store_feed
+  integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store, n_pca_store_feed, numfreq_pca_downsamp
   integer(i4b)         :: debug, num_l1_files, seed, bp_filter, bp_filter0, n_pca_comp, n_pca_comp_feed, pca_max_iter, tsys_ind(2), cal_method
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
@@ -69,6 +69,7 @@ program l2gen
   call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
   call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
   call get_parameter(unit, parfile, 'USE_FREQ_FILTER',           par_lgt=use_freq_filter)
+  call get_parameter(unit, parfile, 'NUMFREQ_PCA_DOWNSAMPLER',   par_int=numfreq_pca_downsamp)
 
   if (import_freqmask) then 
      call get_parameter(unit, parfile, 'FREQMASK_L2_FOLDER',     par_string=freq_import_dir)
@@ -128,7 +129,8 @@ program l2gen
      end if
      print *, "Run number: ", irun - 1
   end if
-
+  
+  call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
 
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
@@ -240,7 +242,7 @@ program l2gen
         call update_status(status, 'find tsys')
         
         if (verb) then
-           write(*,*) "Starting analysis of scan", scan%ss(k)%id
+           write(*,*) "Rank:", myid, "Starting analysis of scan", scan%ss(k)%id
            write(*,'(A, F18.7, F9.4)') " Time and duration (in mins) of scan: ", data_l2_fullres%time(1), (data_l2_fullres%time(size(data_l2_fullres%time, 1)) - data_l2_fullres%time(1)) * 24 * 60
            write(*,'(A, I8, 2A)') " Number of samples, observed patch: ", size(data_l2_fullres%time, 1), "  ", trim(scan%object)
            write(*,*) "Scan type: ", trim(scan%ss(k)%scanmode)
@@ -357,7 +359,7 @@ program l2gen
               
               call free_lx_struct(data_l2_import)
         end if 
-
+        
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
            if (verb) then
               write(*,*) "All channels masked before masking!!!!!!! Scan: ", scan%ss(k)%id
@@ -396,7 +398,6 @@ program l2gen
            
         end if
 
-        
         data_l2_fullres%use_freq_filter = use_freq_filter !.true.
         data_l2_fullres%mask_outliers = mask_outliers
         data_l2_fullres%import_freqmask = import_freqmask
@@ -435,16 +436,18 @@ program l2gen
 
               call find_spikes(data_l2_filter, verb, scan%ss(k)%id)
               call update_status(status, 'find_spikes')
-
+              
+              
               ! pca filter copied data
               call pca_filter_TOD(data_l2_filter, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
               call update_status(status, 'pca_filter0')
-            
+              
               ! pca filter copied data
+              data_l2_filter%n_freq_downsamp = numfreq_pca_downsamp
+
               call pca_filter_feed_TOD(data_l2_filter, n_pca_comp_feed, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
               call update_status(status, 'pca_feed_filter0')
             
-
               if (diag_l2) then
                  data_l2_filter%mask_outliers = 0
                  call decimate_L2_data(samprate, numfreq, data_l2_filter, data_l2_decimated)
@@ -462,12 +465,13 @@ program l2gen
 
               ! replace freqmask in original tod
               call transfer_diagnostics(data_l2_filter, data_l2_fullres)
-               
+              
 
               call update_freqmask(data_l2_fullres, min_acceptrate, scan%ss(k)%id, .false.)
               call update_status(status, 'made_freqmask')
-              
+                      
               call free_lx_struct(data_l2_filter)
+
            end if 
         end if
 
@@ -476,6 +480,7 @@ program l2gen
 
         !!! All channels masked!!
         if (sum(data_l2_fullres%freqmask_full) == 0.d0) then
+           
            if (verb) then
               write(*,*) "All channels masked! Scan: ", scan%ss(k)%id
            end if
@@ -509,7 +514,7 @@ program l2gen
            cycle
 
         end if
-
+        
         ! Poly-filter if requested
         bp_filter = -1; if (trim(pinfo%type) == 'cosmo') bp_filter = bp_filter0
         
@@ -548,6 +553,8 @@ program l2gen
         if (trim(pinfo%type) == 'cosmo') then
            call pca_filter_TOD(data_l2_fullres, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_filter')
+           
+           data_l2_fullres%n_freq_downsamp = numfreq_pca_downsamp
 
            call pca_filter_feed_TOD(data_l2_fullres, n_pca_comp_feed, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
            call update_status(status, 'pca_feed_filter')
@@ -601,7 +608,6 @@ program l2gen
            end if
         end if
         
-        
         ! If necessary, decimate L2 file in both time and frequency
         
         call decimate_L2_data(samprate, numfreq, data_l2_fullres, data_l2_decimated)
@@ -624,7 +630,6 @@ program l2gen
         if (verb) then
            write(*,*) 'Writing ', scan%ss(k)%id, ' to disk2', trim(scan%ss(k)%l2file)
         end if
-
         data_l2_decimated%irun = irun - 1
         call mkdirs(trim(scan%ss(k)%l2file), .true.)
         call write_l2_file(scan, k, data_l2_decimated)
@@ -633,7 +638,7 @@ program l2gen
         ! Clean up data structures
         call free_lx_struct(data_l2_decimated)
         call free_lx_struct(data_l2_fullres)
-     
+        
      end do        
      call free_lx_struct(data_l1)
   end do
@@ -1227,7 +1232,7 @@ contains
 
           if (data_l2%use_freq_filter) then
              
-             call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/corr_templates_band.h5", file, "r")
+             call open_hdf_file("/mn/stornext/d22/cmbco/comap/protodir/auxiliary/corr_templates_band.h5", file, "r")
              if (o == 1) then
                 write(template_name, "(A, I0.2, A)") 'corr_templates_', data_l2%pixels(i), '_A' 
              else 
@@ -1861,9 +1866,9 @@ contains
    integer(i4b),              intent(in)    :: n_pca_comp, pca_max_iter
    real(dp),                  intent(in)    :: pca_err_tol, pca_sig_rem
    logical(lgt),              intent(in)    :: verb
-   integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters
-   real(dp)     :: eigenv, dotsum, amp, err, ssum, decimation_nu
-   real(dp)     :: std_tol, comp_std, amp_lim, dnu
+   integer(i4b) :: i, j, k, l, nsamp, nfreq, nsb, ndet, stat, iters, numfreq_out, delta_nu
+   real(dp)     :: eigenv, dotsum, amp, err, ssum, w, weight, Tsys_downsamp
+   real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
    real(dp),     allocatable, dimension(:)   :: r, s, mys
    real(sp),     allocatable, dimension(:,:,:,:)   :: tod_downsamp  ! (time, freq, sideband, detector) used for temporary downsampled tod
 
@@ -1874,6 +1879,7 @@ contains
    !=======================================================================
    
 
+
    data_l2%n_pca_comp_feed = n_pca_comp
    if (n_pca_comp == 0) return
 
@@ -1882,6 +1888,60 @@ contains
    nsb         = size(data_l2%tod,3)
    ndet        = size(data_l2%tod,4)
 
+
+   numfreq_out = data_l2%n_freq_downsamp
+   
+   write(*,*) "Hei0", numfreq_out
+
+   if (numfreq_out /= 0) then
+      allocate(tod_downsamp(nsamp, numfreq_out, nsb, ndet))
+      tod_downsamp = 0.d0
+      delta_nu                    = size(data_l2%nu, 1) / numfreq_out
+      call assert(delta_nu >= 1, 'Cannot ask for more frequencies than in input files')
+      
+      
+      do i = 1, nsamp
+         do j = 1, nsb
+            do k = 1, numfreq_out
+               do l = 1, ndet           ! Time-ordered data
+                  if (.not. is_alive(data_l2%pixels(l))) cycle
+                  tod_downsamp(i,k,j,l) = 0.d0
+                  weight                = 0.d0
+                  do n = (k-1)*delta_nu+1, k*delta_nu
+                     if (data_l2%freqmask_full(n,j,l) == 0) cycle
+                     
+                     if (data_l2%Tsys(n,j,l) .ne. data_l2%Tsys(n,j,l)) then
+                        write(*,*) "Tsys: I have become NaN, destroyer of codes:", i, j, k, l, data_l2%Tsys(n,j,l)
+                     end if
+
+                     if (data_l2%Tsys(n,j,l) <= 0) then
+                        w = 0.d0
+                     else
+                        w  = 1.d0 / (data_l2%Tsys(n,j,l)) * data_l2%freqmask_full(n,j,l)
+                     end if
+                     weight = weight + w * w 
+                     tod_downsamp(i,k,j,l) = tod_downsamp(i,k,j,l) + w * data_l2%tod(i,n,j,l) 
+                  end do
+                  
+                  if (weight .ne. weight) then
+                     write(*,*) "weight: I have become NaN, destroyer of codes:", i, j, k, l, weight
+                  end if
+
+                  if (weight > 0.d0) then
+                     Tsys_downsamp = sqrt(delta_nu / weight)  ! (delta_nu) = delta_nu_lowres / delta_nu_highres
+                     tod_downsamp(i,k,j,l) = tod_downsamp(i,k,j,l) / (weight * Tsys_downsamp) 
+                     !write(*,*) "Hei", weight, tod_downsamp(i,k,j,l), Tsys_downsamp
+                  else
+                     tod_downsamp(i,k,j,l) = 0.d0
+                  end if
+
+               end do
+            end do
+         end do
+      end do
+   end if
+   write(*,*) "Hei1"
+
    ! Thresholds for removing PCA-components
    std_tol = pca_sig_rem / sqrt(real(nsamp))
    dnu = (data_l2%nu(2, 1, 1) - data_l2%nu(3, 1, 1)) * 1d9
@@ -1889,8 +1949,7 @@ contains
    amp_lim = std_tol * radiometer
 !    write(*,*) dnu
    allocate(r(nsamp), s(nsamp))
-   
-
+   write(*,*) "Hei3"
    
    if(.not. allocated(data_l2%pca_ampl_feed)) allocate(data_l2%pca_ampl_feed(nfreq, nsb, ndet, n_pca_comp)) 
    if(.not. allocated(data_l2%pca_comp_feed)) allocate(data_l2%pca_comp_feed(ndet, nsamp, n_pca_comp))
@@ -1898,13 +1957,18 @@ contains
    data_l2%pca_ampl_feed = 0.d0
    data_l2%pca_comp_feed = 0.d0
    data_l2%pca_eigv_feed = 0.d0
+   write(*,*) "Hei4"
    
    do i = 1, ndet
       if (.not. is_alive(data_l2%pixels(i))) cycle
       if (sum(sum(data_l2%freqmask_full(:, :, i), 1), 1) <= n_pca_comp) cycle
       do l = 1, n_pca_comp 
          err = 1.d0
-         r(:) = sum(sum(data_l2%tod(:, :, :, i), 2), 2) !sum of all freqs
+         if (numfreq_out == 0) then
+            r(:) = sum(sum(data_l2%tod(:, :, :, i), 2), 2) !sum of all freqs
+         else
+            r(:) = sum(sum(tod_downsamp(:, :, :, i), 2), 2) !sum of all freqs
+         end if
          if (verb) then
             if (sum(r) == 0.d0) then
                write(*,*) "PCA initialized with zero vector"
@@ -1913,6 +1977,8 @@ contains
                write(*,*) "NaN in initial PCA vector"
             end if
          end if 
+         write(*,*) "Hei5"
+
 
          iters = 0
          do while ((err > pca_err_tol) .and. (iters < pca_max_iter))
@@ -1921,16 +1987,37 @@ contains
             allocate(mys(nsamp))
             mys = 0.d0
 
-            !$OMP DO SCHEDULE(guided)
-            do k = 1, nfreq
-               do j = 1, nsb
-                  if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle   
-                  dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
+            if (numfreq_out == 0) then
+               !$OMP DO SCHEDULE(guided)
+               do k = 1, nfreq
+               !do k = 1, numfreq_out
+                  do j = 1, nsb
+                     if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle   
+                
+                     dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
+                     !dotsum = sum(tod_downsamp(:, k, j, i) * r(:))
 
-                  mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
+                     mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
+                     !mys(:) = mys(:) + dotsum * tod_downsamp(:,k,j,i)
+                  end do
                end do
-            end do
-            !$OMP END DO
+               !$OMP END DO
+            else
+               !$OMP DO SCHEDULE(guided)
+               !do k = 1, nfreq
+               do k = 1, numfreq_out
+                  do j = 1, nsb
+                     if (data_l2%freqmask(k, j, i) == 0.d0) cycle   
+                     
+                     !dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
+                     dotsum = sum(tod_downsamp(:, k, j, i) * r(:))
+
+                     !mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
+                     mys(:) = mys(:) + dotsum * tod_downsamp(:,k,j,i)
+                  end do
+               end do
+               !$OMP END DO
+            end if
             !$OMP CRITICAL
             s(:) = s(:) + mys(:)
             !$OMP END CRITICAL
@@ -1942,6 +2029,18 @@ contains
             ! write(*,*) s(1), s(170)
             ! write(*,*) iters, l
             ssum = sqrt(sum(s(:) ** 2))
+            
+            if (ssum .ne. ssum) then
+
+               write(*,*) "NaN in ssum"
+            end if
+            do k = 1, nsamp
+               if (r(k) .ne. r(k)) then
+
+                  write(*,*) "NaN in r(k)"
+               end if
+            end do
+
             if (ssum == 0.d0) then
                write(*,*) "Weird stuff happening in PCA-filter", i
                r(:) = 1.d0 / sqrt(1.d0 * nsamp)
@@ -1950,6 +2049,7 @@ contains
             end if
             iters = iters + 1
          end do
+         write(*,*) "Hei6"
 
          data_l2%pca_eigv_feed(i, l) = eigenv
          data_l2%pca_comp_feed(i, :, l) = r(:)
@@ -1974,9 +2074,10 @@ contains
          !if (.not. (any(sum(abs(data_l2%pca_ampl_feed(:, :, i, l)), 1) / nfreq > amp_lim / comp_std))) EXIT
       end do
    end do
+   write(*,*) "Hei7"
 
    deallocate(r, s)
-   deallocate(tod_downsamp)
+   if (allocated(tod_downsamp)) deallocate(tod_downsamp)
    
   end subroutine pca_filter_feed_TOD
 
@@ -2120,7 +2221,7 @@ contains
    allocate(alpha_prior(20))
 
    ! Load in the feed-specific 1/f prior parameters on the gain fluctuations.
-   call open_hdf_file("/mn/stornext/d16/cmbco/comap/protodir/auxiliary/Cf_prior_data.hdf5", prior_file, "r")  ! get from parameter file 
+   call open_hdf_file("/mn/stornext/d22/cmbco/comap/protodir/auxiliary/Cf_prior_data.hdf5", prior_file, "r")  ! get from parameter file 
    call read_hdf(prior_file, "sigma0_prior", sigma0_prior)
    call read_hdf(prior_file, "fknee_prior", fknee_prior)
    call read_hdf(prior_file, "alpha_prior", alpha_prior)
@@ -3510,6 +3611,7 @@ end subroutine frequency_filter_TOD
        if (buff_succ(2, 1) == 1) then
           data%time_hot(2, 2) = 0.5d0 * (scan%ss(cal_id(2))%mjd(1) + scan%ss(cal_id(2))%mjd(2))
        end if
+
        call close_hdf_file(file)
        deallocate(buffer, buff_T, buff_time, buff_succ)
     end if
@@ -3702,6 +3804,7 @@ end subroutine frequency_filter_TOD
     real(dp),        intent(in)    :: sim_tsys
 !    real(dp),    intent(in)        :: tsys_time(2)
     logical(lgt), intent(in)       :: is_sim, verb
+    logical(lgt)                   :: tsys_nan
     real(dp)                       :: interp1d_P_hot, interp1d_T_hot, mean_tod, y0, y1, x0, x1, x, scan_time
     real(dp)                       :: T_cold, T_hot(2), tsys, time_hot(2)
     integer(i4b) :: i, j, k, ndet, nfreq, nsb, l2_nsamp, n_print, cal_method
@@ -3711,7 +3814,9 @@ end subroutine frequency_filter_TOD
     ndet     = size(data_l2_fullres%tod,4)
     T_cold = 2.725
     scan_time = data_l2_fullres%time(l2_nsamp/2)
-
+    
+    tsys_nan = .false.
+   
     if (.not. allocated(data_l2_fullres%Tsys)) allocate(data_l2_fullres%Tsys(nfreq, nsb, ndet))
     data_l2_fullres%Tsys = 0
     
@@ -3763,9 +3868,22 @@ end subroutine frequency_filter_TOD
                    data_l2_fullres%Tsys(k,j,i) = tsys
                 end if
              end if
+            
+             ! Masking failed Tsys measurements
+             if (tsys .ne. tsys) then
+                write(*,*) "Found NaN in Tsys!!!"
+                tsys_nan = .true.
+                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
+                data_l2_fullres%Tsys(k,j,i) = tsys
+             end if
           end do
        end do
     end do
+   
+    if (verb .and. tsys_nan) then
+      write(*,*) "Masked NaN Tsys values!"
+   end if
+
   end subroutine find_tsys
 
   subroutine calibrate_tod(data_l2_fullres, max_tsys)

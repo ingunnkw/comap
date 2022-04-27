@@ -147,6 +147,8 @@ program tod2comap
       print *, "Run number: ", irun
    end if
    
+   call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr) 
+
   call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
 
   !call get_parameter(0, parfile, 'BIN_SPLIT', par_)
