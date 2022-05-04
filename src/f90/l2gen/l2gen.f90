@@ -1872,7 +1872,8 @@ contains
    real(dp)     :: eigenv, dotsum, amp, err, ssum, w, weight, Tsys_downsamp
    real(dp)     :: std_tol, comp_std, amp_lim, dnu, radiometer
    real(dp),     allocatable, dimension(:)   :: r, s, mys
-   real(sp),     allocatable, dimension(:,:,:,:)   :: tod_downsamp  ! (time, freq, sideband, detector) used for temporary downsampled tod
+   real(sp),     allocatable, dimension(:,:,:,:)   :: tod_downsamp   ! (time, freq, sideband, detector) used for temporary downsampled tod
+   real(sp),     allocatable, dimension(:,:,:,:)   :: pca_ampl_feed_lr   ! (freq, sideband, detector, ncomp) used for temporary downsampled tod
 
    CHARACTER(LEN=128) :: number
    
@@ -1938,6 +1939,9 @@ contains
             end do
          end do
       end do
+   
+      if(.not. allocated(pca_ampl_feed_lr)) allocate(pca_ampl_feed_lr(numfreq_out, nsb, ndet, n_pca_comp)) 
+
    end if
 
    ! Thresholds for removing PCA-components
@@ -1991,7 +1995,7 @@ contains
                      dotsum = sum(data_l2%tod(:, k, j, i) * r(:))
                      !dotsum = sum(tod_downsamp(:, k, j, i) * r(:))
 
-                     mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
+                     mys(:) = mys(:) + dotsum * data_l2%tod(:, k, j, i)
                      !mys(:) = mys(:) + dotsum * tod_downsamp(:,k,j,i)
                   end do
                end do
@@ -2007,7 +2011,7 @@ contains
                      dotsum = sum(tod_downsamp(:, k, j, i) * r(:))
 
                      !mys(:) = mys(:) + dotsum * data_l2%tod(:,k,j,i)
-                     mys(:) = mys(:) + dotsum * tod_downsamp(:,k,j,i)
+                     mys(:) = mys(:) + dotsum * tod_downsamp(:, k, j, i)
                   end do
                end do
                !$OMP END DO
@@ -2052,15 +2056,21 @@ contains
          comp_std = sqrt(abs(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2))
          !$OMP PARALLEL PRIVATE(k,j,dotsum,mys)
          !$OMP DO SCHEDULE(guided)
-         do k = 1, nfreq
-            do j = 1, nsb
+         do j = 1, nsb
+            do k = 1, nfreq
                if (data_l2%freqmask_full(k, j, i) == 0.d0) cycle
                data_l2%pca_ampl_feed(k, j, i, l) = sum(r(:) * data_l2%tod(:, k, j, i))
-
                !if (abs(data_l2%pca_ampl_feed(k, j, i, l)) > amp_lim / comp_std) then
                data_l2%tod(:, k, j, i) = data_l2%tod(:, k, j, i) - data_l2%pca_ampl_feed(k, j, i, l) * r(:)
                !end if
             end do
+
+            if (numfreq_out /= 0) then
+               do k = 1, numfreq_out
+                  pca_ampl_feed_lr(k, j, i, l) = sum(r(:) * tod_downsamp(:, k, j, i))
+                  tod_downsamp(:, k, j, i) = tod_downsamp(:, k, j, i) - pca_ampl_feed_lr(k, j, i, l) * r(:)
+               end do
+            end if
          end do
          !$OMP END DO
          !$OMP END PARALLEL
@@ -2070,6 +2080,7 @@ contains
 
    deallocate(r, s)
    if (allocated(tod_downsamp)) deallocate(tod_downsamp)
+   if (allocated(pca_ampl_feed_lr)) deallocate(pca_ampl_feed_lr)
    
   end subroutine pca_filter_feed_TOD
 
