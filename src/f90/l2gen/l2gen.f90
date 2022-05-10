@@ -148,6 +148,7 @@ program l2gen
      ! Read in Level 1 file
      call wall_time(t1)
      call read_l1_file(scan%l1file, data_l1, scan%id, verb, init=.false.)
+     call update_status(status, 'read_l1')
      
      ! Initialize frequency mask
      !if (.not. import_freqmask) then
@@ -155,7 +156,6 @@ program l2gen
      call update_status(status, 'freq_mask1')
      !end if
      
-     call update_status(status, 'read_l1')
      if (size(data_l1%tod,1) <100) then
         write(*,*) 'Too few samples in ', scan%id
         cycle
