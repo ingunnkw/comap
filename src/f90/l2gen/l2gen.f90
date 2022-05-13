@@ -3579,7 +3579,7 @@ end subroutine frequency_filter_TOD
              else if (data_l2_fullres%n_cal == 2) then  ! Two good ambient load measurements
                 ! Interpolate Tsys to current time for each detector
                 
-                y0 = data_l2_fullres%Phot(cal_method,1,k,j,i); y1 = data_l2_fullres%Phot(cal_method,1,k,j,i)
+                y0 = data_l2_fullres%Phot(cal_method,1,k,j,i); y1 = data_l2_fullres%Phot(cal_method,2,k,j,i)
                 interp1d_P_hot = (y0*(x1-scan_time) + y1*(scan_time - x0))/(x1-x0)
                 if (interp1d_P_hot == mean_tod) then
                    data_l2_fullres%freqmask_full(k,j,i) = 0.d0
