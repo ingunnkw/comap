@@ -6,9 +6,11 @@ program l2gen
   use comap_scan_mod
   use comap_detector_mod
   use comap_Lx_mod
+  use comap_sim2tod_mod
   use rngmod
   use quiet_fft_mod
   use spline_1D_mod
+  use spline_2D_mod
   use quiet_status_mod
   use comap_gain_mod
   use comap_patch_mod
@@ -19,7 +21,7 @@ program l2gen
   character(len=9)     :: id_old
   character(len = 1024)  :: freq_import_name, sigma_import_name
   character(len=10)    :: target_name
-  character(len=512)   :: param_dir, runlist_in
+  character(len=512)   :: param_dir, runlist_in, simulation_path
   character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw, cal_db
   integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
   integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store
@@ -27,14 +29,17 @@ program l2gen
   real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
   real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
   logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-  logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2, use_freq_filter
+  logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2, use_freq_filter, is_sim2tod
   logical(lgt)         :: import_freqmask, import_sigma
-  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
+  real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2, boost_factor
+  real(sp)             :: signal 
   type(comap_scan_info) :: scan
   type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter, data_l2_import
   type(planck_rng)     :: rng_handle 
   type(status_file)    :: status
   type(patch_info)     :: pinfo
+  type(simulation_struct) :: simdata
+
   !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
    
   call getarg(1, parfile)
@@ -68,6 +73,11 @@ program l2gen
   call get_parameter(unit, parfile, 'TARGET_NAME',               par_string=target_name)
   call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
   call get_parameter(unit, parfile, 'USE_FREQ_FILTER',           par_lgt=use_freq_filter)
+
+  call get_parameter(unit, parfile, 'RUN_SIM2TOD',               par_lgt = is_sim2tod)
+  call get_parameter(unit, parfile, 'DATACUBE',                  par_string = simulation_path)
+  call get_parameter(unit, parfile, 'BOOST_FACTOR',              par_dp = boost_factor)
+  
 
   if (import_freqmask) then 
      call get_parameter(unit, parfile, 'FREQMASK_L2_FOLDER',     par_string=freq_import_dir)
@@ -128,7 +138,13 @@ program l2gen
      print *, "Run number: ", irun - 1
   end if
 
-   call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
+  call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
+
+  if (is_sim2tod) then
+    write(*, *) "Reading signal simulation realization."
+    call read_sim_file(simulation_path, simdata)
+    simdata%boost = boost_factor
+  end if
 
   nscan    = get_num_scans()
   do snum = myid+1, nscan, nproc     
@@ -229,6 +245,7 @@ program l2gen
         stop
      end if
 
+
      do k = 2, scan%nsub-1
         ! Reformat L1 data into L2 format, and truncate
         call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
@@ -236,6 +253,13 @@ program l2gen
 
         call find_tsys(data_l2_fullres, is_sim, sim_tsys, scan%ss(k), verb)
         call update_status(status, 'find tsys')
+        
+        if (is_sim2tod) then
+            write(*, *) "Adding simulations to TODs"
+            call sim2tod(data_l2_fullres, simdata, pinfo)
+            call update_status(status, 'Add simulated signal')
+        end if 
+        
         
         if (verb) then
            write(*,*) "Starting analysis of scan", scan%ss(k)%id
@@ -611,11 +635,107 @@ program l2gen
      end do        
      call free_lx_struct(data_l1)
   end do
+  call free_simulation_struct(simdata)
   call mpi_finalize(ierr)
 
   call free_status(status)
 
 contains
+
+
+  subroutine sim2tod(data_l2, simdata, pinfo)
+   implicit none 
+   type(Lx_struct),              intent(inout) :: data_l2
+   type(simulation_struct),      intent(in)    :: simdata
+   type(patch_info),             intent(in)    :: pinfo
+   real(dp), allocatable, dimension(:) :: x, y, ra, dec
+   real(dp), allocatable, dimension(:,:,:,:) :: coeff
+   real(dp), allocatable, dimension(:,:,:,:,:,:) :: allcoeff
+
+   integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
+   real(dp)        :: signal
+
+   nsamp       = size(data_l2%tod,1)
+   nfreq       = size(data_l2%freqmask_full,1)
+   nsb         = size(data_l2%tod,3)
+   ndet        = size(data_l2%tod,4)
+   
+   nx        = size(simdata%x, 1) - 1
+   ny        = size(simdata%y, 1) - 1
+   
+   allocate(x(nx))
+   allocate(y(ny))
+   allocate(ra(nsamp))
+   allocate(dec(nsamp))
+   allocate(coeff(4, 4, nx, ny))
+   allocate(allcoeff(4, 4, nx, ny, nsb, nfreq))
+
+   ! NB! This way of adding signal only makes sense for co2 field (field 1) due to it being at Dec = 0 giving no
+   ! projection effects. Add projection before using co6 or co7.
+
+   do i = 1, nx
+      x(i) = 0.5 * (simdata%x(i) + simdata%x(i + 1)) + pinfo%pos(1) 
+   end do
+   do i = 1, ny
+      y(i) = 0.5 * (simdata%y(i) + simdata%y(i + 1)) + pinfo%pos(2)
+   end do
+
+   write(*,*) "Preparing simulation interpolation."
+
+   !$OMP PARALLEL PRIVATE(sb, freq)
+   !$OMP DO SCHEDULE(guided)    
+   do sb = 1, nsb 
+      do freq = 1, nfreq
+         call splie2_full_precomp(x, y, simdata%boost * simdata%simcube(:, :, freq, sb), coeff)
+         allcoeff(:, :, :, :, sb, freq) = coeff
+      end do
+   end do
+   !$OMP END DO
+   !$OMP END PARALLEL
+   
+   write(*,*) "Adding interpolated signal to TOD."
+ 
+   !$OMP PARALLEL PRIVATE(ra, dec, feed, i, sb, freq)
+   !$OMP DO SCHEDULE(guided)    
+   do feed = 1, ndet 
+      if (.not. is_alive(data_l2%pixels(feed))) cycle
+      write(*,*) "Adding signal to feed:", feed
+      ra = 0.d0
+      dec = 0.d0
+      do i = 1, nsamp
+         ra(i)  = data_l2%point_cel(1, i, feed)
+         dec(i) = data_l2%point_cel(2, i, feed)
+      end do
+      do sb = 1, nsb 
+         if (sum(data_l2%freqmask_full(:, sb, feed)) == 0.d0) cycle
+         do freq = 1, nfreq
+            if (data_l2%freqmask_full(freq, sb, feed) == 0.d0) cycle
+            if (data_l2%Tsys(freq, sb, feed) /= data_l2%Tsys(freq, sb, feed)) then 
+               write(*,*) "Tsys became NaN"
+               cycle
+            end if
+            if (data_l2%Tsys(freq, sb, feed) == 0) then
+               write(*,*) "Tsys is zero! No signal added!", freq, sb, feed 
+               !data_l2%tod(i, freq, sb, feed) = 0
+               cycle
+            end if 
+            do i = 1, nsamp
+               signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra(i), dec(i))
+               !signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra, dec)
+               data_l2%tod(i, freq, sb, feed) = data_l2%tod(i, freq, sb, feed) * (1 + signal / data_l2%Tsys(freq, sb, feed))
+            end do
+         end do
+      end do
+   end do
+   !$OMP END DO
+   !$OMP END PARALLEL
+   
+   deallocate(x)
+   deallocate(y)
+   deallocate(coeff)
+   deallocate(allcoeff)
+   
+  end subroutine sim2tod
 
   subroutine find_spikes(data_l2, verb, id)
     implicit none
