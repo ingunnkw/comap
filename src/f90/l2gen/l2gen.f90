@@ -245,6 +245,9 @@ program l2gen
         stop
      end if
 
+     if (is_sim2tod) then
+        call prepare_sim_interpolation(data_l2_fullres, simdata, pinfo)
+     end if 
 
      do k = 2, scan%nsub-1
         ! Reformat L1 data into L2 format, and truncate
@@ -256,7 +259,7 @@ program l2gen
         
         if (is_sim2tod) then
             write(*, *) "Adding simulations to TODs"
-            call sim2tod(data_l2_fullres, simdata, pinfo)
+            call sim2tod(data_l2_fullres, simdata)
             call update_status(status, 'Add simulated signal')
         end if 
         
@@ -642,15 +645,59 @@ program l2gen
 
 contains
 
+  subroutine prepare_sim_interpolation(data_l2, simdata, pinfo)
+   implicit none 
+   type(Lx_struct),              intent(inout) :: data_l2
+   type(simulation_struct),      intent(inout)    :: simdata
+   type(patch_info),             intent(in)    :: pinfo
+   real(dp), allocatable, dimension(:,:,:,:)   :: coeff
+   integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
 
-  subroutine sim2tod(data_l2, simdata, pinfo)
+   nx        = size(simdata%simcube, 1)
+   ny        = size(simdata%simcube, 2)
+   nfreq     = size(simdata%simcube, 3)
+   nsb       = size(simdata%simcube, 4)
+   
+   
+   allocate(coeff(4, 4, nx, ny))
+   allocate(simdata%allcoeff(4, 4, nx, ny, nsb, nfreq))
+   allocate(simdata%x(nx))
+   allocate(simdata%y(ny))
+
+   simdata%allcoeff = 0.d0
+   coeff = 0.d0
+   ! NB! This way of adding signal only makes sense for co2 field (field 1) due to it being at Dec = 0 giving no
+   ! projection effects. Add projection before using co6 or co7.
+
+    do i = 1, nx
+      simdata%x(i) = 0.5 * (simdata%edgex(i) + simdata%edgex(i + 1)) + pinfo%pos(1) 
+    end do
+    do i = 1, ny
+      simdata%y(i) = 0.5 * (simdata%edgey(i) + simdata%edgey(i + 1)) + pinfo%pos(2)
+    end do
+
+    write(*,*) "Preparing simulation interpolation."
+
+    !$OMP PARALLEL PRIVATE(coeff, sb, freq)
+    !$OMP DO SCHEDULE(guided)    
+    do sb = 1, nsb 
+        do freq = 1, nfreq
+          call splie2_full_precomp(simdata%y, simdata%x, simdata%boost * simdata%simcube(:, :, freq, sb), coeff)
+          simdata%allcoeff(:, :, :, :, sb, freq) = coeff
+        end do
+    end do
+    !$OMP END DO
+    !$OMP END PARALLEL
+ 
+    deallocate(coeff)
+
+  end subroutine prepare_sim_interpolation
+
+  subroutine sim2tod(data_l2, simdata)
    implicit none 
    type(Lx_struct),              intent(inout) :: data_l2
    type(simulation_struct),      intent(in)    :: simdata
-   type(patch_info),             intent(in)    :: pinfo
-   real(dp), allocatable, dimension(:) :: x, y, ra, dec
-   real(dp), allocatable, dimension(:,:,:,:) :: coeff
-   real(dp), allocatable, dimension(:,:,:,:,:,:) :: allcoeff
+   real(dp), allocatable, dimension(:) :: ra, dec
 
    integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
    real(dp)        :: signal
@@ -660,40 +707,11 @@ contains
    nsb         = size(data_l2%tod,3)
    ndet        = size(data_l2%tod,4)
    
-   nx        = size(simdata%x, 1) - 1
-   ny        = size(simdata%y, 1) - 1
+   nx        = size(simdata%x, 1)
+   ny        = size(simdata%y, 1)
    
-   allocate(x(nx))
-   allocate(y(ny))
    allocate(ra(nsamp))
    allocate(dec(nsamp))
-   allocate(coeff(4, 4, nx, ny))
-   allocate(allcoeff(4, 4, nx, ny, nsb, nfreq))
-
-   ! NB! This way of adding signal only makes sense for co2 field (field 1) due to it being at Dec = 0 giving no
-   ! projection effects. Add projection before using co6 or co7.
-
-   do i = 1, nx
-      x(i) = 0.5 * (simdata%x(i) + simdata%x(i + 1)) + pinfo%pos(1) 
-   end do
-   do i = 1, ny
-      y(i) = 0.5 * (simdata%y(i) + simdata%y(i + 1)) + pinfo%pos(2)
-   end do
-
-   write(*,*) "Preparing simulation interpolation."
-
-   !$OMP PARALLEL PRIVATE(sb, freq)
-   !$OMP DO SCHEDULE(guided)    
-   do sb = 1, nsb 
-      do freq = 1, nfreq
-         call splie2_full_precomp(y, x, simdata%boost * simdata%simcube(:, :, freq, sb), coeff)
-         allcoeff(:, :, :, :, sb, freq) = coeff
-      end do
-   end do
-   !$OMP END DO
-   !$OMP END PARALLEL
-   
-   write(*,*) "Adding interpolated signal to TOD."
  
    !$OMP PARALLEL PRIVATE(ra, dec, feed, i, sb, freq)
    !$OMP DO SCHEDULE(guided)    
@@ -720,7 +738,7 @@ contains
                cycle
             end if 
             do i = 1, nsamp
-               signal  = splin2_full_precomp(y, x, allcoeff(:, :, :, :, sb, freq), dec(i), ra(i))
+               signal  = splin2_full_precomp(simdata%y, simdata%x, simdata%allcoeff(:, :, :, :, sb, freq), dec(i), ra(i))
                !signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra, dec)
                data_l2%tod(i, freq, sb, feed) = data_l2%tod(i, freq, sb, feed) * (1 + signal / data_l2%Tsys(freq, sb, feed))
             end do
@@ -729,12 +747,9 @@ contains
    end do
    !$OMP END DO
    !$OMP END PARALLEL
-   
-   deallocate(x)
-   deallocate(y)
-   deallocate(coeff)
-   deallocate(allcoeff)
-   
+
+   deallocate(ra)
+   deallocate(dec)   
   end subroutine sim2tod
 
   subroutine find_spikes(data_l2, verb, id)
