@@ -246,7 +246,7 @@ program l2gen
      end if
 
      if (is_sim2tod) then
-        call prepare_sim_interpolation(data_l2_fullres, simdata, pinfo)
+        call prepare_sim_interpolation(simdata, pinfo)
      end if 
 
      do k = 2, scan%nsub-1
@@ -640,18 +640,17 @@ program l2gen
   end do
   call free_simulation_struct(simdata)
   call mpi_finalize(ierr)
-
+  
   call free_status(status)
 
 contains
 
-  subroutine prepare_sim_interpolation(data_l2, simdata, pinfo)
+  subroutine prepare_sim_interpolation(simdata, pinfo)
    implicit none 
-   type(Lx_struct),              intent(inout) :: data_l2
    type(simulation_struct),      intent(inout)    :: simdata
    type(patch_info),             intent(in)    :: pinfo
    real(dp), allocatable, dimension(:,:,:,:)   :: coeff
-   integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
+   integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny
 
    nx        = size(simdata%simcube, 1)
    ny        = size(simdata%simcube, 2)
@@ -659,10 +658,10 @@ contains
    nsb       = size(simdata%simcube, 4)
    
    
-   allocate(coeff(4, 4, nx, ny))
-   allocate(simdata%allcoeff(4, 4, nx, ny, nsb, nfreq))
-   allocate(simdata%x(nx))
-   allocate(simdata%y(ny))
+   if (.not. allocated(coeff)) allocate(coeff(4, 4, nx, ny))
+   if (.not. allocated(simdata%allcoeff)) allocate(simdata%allcoeff(4, 4, nx, ny, nsb, nfreq))
+   if (.not. allocated(simdata%x)) allocate(simdata%x(nx))
+   if (.not. allocated(simdata%y)) allocate(simdata%y(ny))
 
    simdata%allcoeff = 0.d0
    coeff = 0.d0
@@ -678,12 +677,13 @@ contains
 
     write(*,*) "Preparing simulation interpolation."
 
-    !$OMP PARALLEL PRIVATE(coeff, sb, freq)
+    !$OMP PARALLEL PRIVATE(coeff, sb, freq, i)
     !$OMP DO SCHEDULE(guided)    
     do sb = 1, nsb 
-        do freq = 1, nfreq
+        do i = 1, nfreq
+          freq = simdata%freqidx(sb, i)   ! Using flipped frequency index for sb = 1 and 3
           call splie2_full_precomp(simdata%y, simdata%x, simdata%boost * simdata%simcube(:, :, freq, sb), coeff)
-          simdata%allcoeff(:, :, :, :, sb, freq) = coeff
+          simdata%allcoeff(:, :, :, :, sb, i) = coeff
         end do
     end do
     !$OMP END DO

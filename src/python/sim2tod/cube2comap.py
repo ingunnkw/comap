@@ -106,7 +106,6 @@ class MapMakerLight():
                 self.cube = infile["simulation"][()] 
                 self.cube *= 1e-6 * self.norm
                 cubeshape = self.cube.shape
-                self.cube[(0, 2), :, :, :] = self.cube[(0, 2), ::-1, :, :]
                 self.cube = self.cube.reshape(cubeshape[0], cubeshape[1] // 16, 16, cubeshape[2], cubeshape[3])
                 self.cube = np.mean(self.cube, axis = 2)
 
