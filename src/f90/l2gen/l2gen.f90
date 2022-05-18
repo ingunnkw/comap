@@ -1013,7 +1013,42 @@ program l2gen
  
    end subroutine remove_corr_templates
  
- 
+   
+   ! subroutine remove_pca_corr_templates(corrs, ampl)
+   !    ! Fits and removes the correlation pattern induced by Feed-PCA filter.
+
+   !    implicit none
+   !    real(sp), allocatable, dimension(:, :),     intent(inout) :: corrs
+
+   !    real(dp), allocatable, dimension(:, :, :),  intent(in)    :: ampl
+   !    real(dp), allocatable, dimension(:,:)                     :: L, Delta, ata
+   !    integer(i4b)                                              :: i, j, k, l, m, n, nfreq, ncomp, nu, comp
+      
+   !    nfreq = size(corrs, 1)
+   !    ncomp = size(ampl, 3)
+
+   !    if (.not. allocated(ata)) allocate(ata(ncomp, ncomp))
+   !    if (.not. allocated(L)) allocate(L(nfreq, nfreq))
+   !    if (.not. allocated(Delta)) allocate(Delta(nfreq, nfreq))
+
+   !    do i = 1, ncomp
+   !       do j = 1, ncomp
+   !          do nu = 1, nfreq
+   !             ata(i, j) = ampl(i, nu) * ampl(j, nu)
+   !          end do
+   !       end do
+   !    end do
+
+   !    write(*,*) ata
+   !    call invert_matrix(ata)
+
+
+
+
+
+   ! end subroutine remove_pca_corr_templates
+
+
    subroutine flag_correlations(data_l2, id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
      implicit none
      type(Lx_struct),          intent(inout) :: data_l2
