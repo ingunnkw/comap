@@ -1014,39 +1014,101 @@ program l2gen
    end subroutine remove_corr_templates
  
    
-   ! subroutine remove_pca_corr_templates(corrs, ampl)
-   !    ! Fits and removes the correlation pattern induced by Feed-PCA filter.
-
-   !    implicit none
-   !    real(sp), allocatable, dimension(:, :),     intent(inout) :: corrs
-
-   !    real(dp), allocatable, dimension(:, :, :),  intent(in)    :: ampl
-   !    real(dp), allocatable, dimension(:,:)                     :: L, Delta, ata
-   !    integer(i4b)                                              :: i, j, k, l, m, n, nfreq, ncomp, nu, comp
+   subroutine get_pca_corr_templates(ampl, Delta)
+      ! Fits and removes the correlation pattern induced by Feed-PCA filter.
+      implicit none
+      !real(dp), allocatable, dimension(:, :, :),  intent(in)    :: ampl, at !(freq, sb, comp)
+      real(sp), dimension(:, :, :),               intent(in)    :: ampl      !(freq, sb, comp)
+      real(sp), allocatable, dimension(:,:),      intent(inout) :: Delta
+      real(sp), allocatable, dimension(:, :)                    :: B         !(nsb * nfreq, comp) Basis matrix
+      real(sp), allocatable, dimension(:)                       :: magnitudes !(comp) magnitudes of ampl
+      real(sp), allocatable, dimension(:,:)                     :: L, LLt, BBt
       
-   !    nfreq = size(corrs, 1)
-   !    ncomp = size(ampl, 3)
+      integer(i4b)                                              :: i, j, k, nfreq, nsb, nchl, ncomp, nu, comp
+      
+      nchl  = size(ampl, 1) ! Number of channels per sideband 
+      nsb   = size(ampl, 2) ! Number of sidebands
+      ncomp = size(ampl, 3) ! Number of subtracted PCA components
 
-   !    if (.not. allocated(ata)) allocate(ata(ncomp, ncomp))
-   !    if (.not. allocated(L)) allocate(L(nfreq, nfreq))
-   !    if (.not. allocated(Delta)) allocate(Delta(nfreq, nfreq))
+      nfreq  = nsb * nfreq  ! Total number of frequency channels
 
-   !    do i = 1, ncomp
-   !       do j = 1, ncomp
-   !          do nu = 1, nfreq
-   !             ata(i, j) = ampl(i, nu) * ampl(j, nu)
-   !          end do
-   !       end do
-   !    end do
+      !if (.not. allocated(at)) allocate(at(size(a, 2), size(a, 1))) ! at is the transposed of amplitude matrix
+      if (.not. allocated(BBt)) allocate(BBt(ncomp, ncomp))
+      if (.not. allocated(L)) allocate(L(nfreq, nfreq))
+      if (.not. allocated(LLt)) allocate(LLt(nfreq, nfreq))
+      if (.not. allocated(magnitudes)) allocate(magnitudes(ncomp))
+      
+      Delta = 0
+      B   = 0
+      BBt = 0
+      LLt = 0
+      L = 0
+      ! at = transpose(a)
 
-   !    write(*,*) ata
-   !    call invert_matrix(ata)
+      ! ata = matmul(at, a)
+      ! write(*,*) ata
+      ! ata = invert_matrix(ata)
+      ! write(*,*) ata
 
+      ! L     = matmul(matmul(a, ata), at)
+      
+      ! do i = 1, nfreq
+      !    L(i, i) = 1 - L(i, i)
+      ! end do 
+      
+      ! Delta = - matmul(L, Lt)      
+      ! do i = 1, nfreq
+      !    Delta(i, i) = 1 - Delta(i, i)
+      ! end do 
 
+      !  Flattening and normalising amplitude basis
+      !$OMP PARALLEL PRIVATE(i, j, magnitudes)
+      !$OMP DO SCHEDULE(guided)    
+      do i = 1, ncomp
+         magnitudes(i) =  sqrt(sum(sum(ampl(:, :, i) * ampl(:, :, i), 1), 1))
+         do j = 1, nsb
+            do k = 1, nfreq
+               B((k - 1) * nsb + j, i) = ampl(j, k, i) / magnitudes(i)
+            end do
+         end do
+      end do
+      !$OMP END DO
+      !$OMP END PARALLEL
 
+      !$OMP PARALLEL PRIVATE(i, j)
+      !$OMP DO SCHEDULE(guided)  
+      do i = 1, nfreq
+         do j = 1, nfreq 
+            BBt(i, j) = sum(B(:, i) * B(:, j))
+            if (i == j) then 
+               L(i, j) = 1
+            end if
+            L(i, j) = L(i, j) - BBt(i, j)
+         end do
+      end do 
+      !$OMP END DO
+      !$OMP END PARALLEL
 
+      !$OMP PARALLEL PRIVATE(i, j)
+      !$OMP DO SCHEDULE(guided)  
+      do i = 1, nfreq
+         do j = 1, nfreq 
+            LLt(i, j) = sum(L(:, i) * L(:, j))
+            if (i == j) then 
+               Delta(i, j) = 1
+            end if
+            Delta(i, j) = Delta(i, j) - LLt(i, j)
+         end do
+      end do 
+      !$OMP END DO
+      !$OMP END PARALLEL
 
-   ! end subroutine remove_pca_corr_templates
+      deallocate(BBt)
+      deallocate(L)
+      deallocate(LLt)
+      deallocate(magnitudes)
+
+   end subroutine get_pca_corr_templates
 
 
    subroutine flag_correlations(data_l2, id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
@@ -1069,6 +1131,7 @@ program l2gen
      real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod
      real(sp),     allocatable, dimension(:,:,:)     :: corr_templates
      real(sp),     allocatable, dimension(:,:)       :: corr_template
+     real(sp),     allocatable, dimension(:,:)       :: corr_template_pca
      real(dp),     allocatable, dimension(:,:)       :: outlier_mask
      logical(lgt) :: mask_edge_corrs, rm_outliers, verb
      character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
@@ -1221,10 +1284,18 @@ program l2gen
         end do
         vars = vars * data_l2%freqmask_full       
      end if
- !    allocate(box_offsets(3), prod_offsets(3))
+     !    allocate(box_offsets(3), prod_offsets(3))
      
+     if (data_l2%n_pca_comp_feed > 0) write(*,*) "Cleaning PCA template from correlation matrix"
      do i = 1, ndet
         if (.not. is_alive(data_l2%pixels(i))) cycle
+
+        if (data_l2%n_pca_comp_feed > 0) then
+            if (.not. allocated(corr_template_pca)) allocate(corr_template_pca(nsb * nfreq, nsb * nfreq))
+            corr_template_pca = 0.d0
+         call get_pca_corr_templates(data_l2%pca_ampl_feed(:, :, i, :), corr_template_pca)         
+        end if
+ 
         do o = 1, nsb / 2
            corrs = 0.d0
            !$OMP PARALLEL PRIVATE(k,l,p,q,j,m,n,corr)
@@ -1254,6 +1325,9 @@ program l2gen
            !$OMP END DO
            !$OMP END PARALLEL
            
+           if (data_l2%n_pca_comp_feed > 0) then
+               corrs = corrs - corr_template_pca(( o - 1) * nsb * nfreq / 2:o * nsb * nfreq / 2, ( o - 1) * nsb * nfreq / 2:o * nsb * nfreq / 2)
+           end if
            
            ! if (i == 12 .and. o == 1) then
            !    open(22, file="corr_12_12_before.unf", form="unformatted") ! Adjusted open statement
@@ -1579,6 +1653,10 @@ program l2gen
         deallocate(corr_template)
      end if
      
+     if (data_l2%n_pca_comp_feed > 0) then
+        deallocate(corr_template_pca)
+     end if 
+
      deallocate(vars)
      deallocate(means)
      deallocate(median)
@@ -2130,7 +2208,6 @@ program l2gen
           data_l2%pca_comp_feed(i, :, l) = r(:)
           !means(k,j,i) = sum(data_l2%tod(:,k,j,i)) / nsamp
           !vars(k,j,i) = sum(data_l2%tod(:,k,j,i) ** 2) / nsamp - means(k,j,i) ** 2
- 
           comp_std = sqrt(abs(sum(r ** 2) / nsamp - (sum(r) / nsamp) ** 2))
           !$OMP PARALLEL PRIVATE(k,j,dotsum,mys)
           !$OMP DO SCHEDULE(guided)
