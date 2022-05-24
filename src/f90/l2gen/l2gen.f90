@@ -13,7 +13,7 @@ program l2gen
    use comap_gain_mod
    use comap_patch_mod
    use comap_ephem_mod
-    use comap_sim2tod_mod
+   use comap_sim2tod_mod
    implicit none
 
    character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile, freq_import_dir, freq_dir, sigma_import_dir, sigma_dir
@@ -239,12 +239,12 @@ program l2gen
          stop
       end if
  
-     if (is_sim2tod) then
-        write(*, *) "Reading signal simulation realization."
-        call read_sim_file(simulation_path, simdata)
-        simdata%boost = boost_factor
-     end if
-     
+      if (is_sim2tod) then
+         write(*, *) "Reading signal simulation realization."
+         call read_sim_file(simulation_path, simdata)
+         simdata%boost = boost_factor
+      end if
+      
       do k = 2, scan%nsub-1
          ! Reformat L1 data into L2 format, and truncate
          call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
@@ -252,11 +252,13 @@ program l2gen
  
          call find_tsys(data_l2_fullres, is_sim, sim_tsys, scan%ss(k), verb)
          call update_status(status, 'find tsys')
+         
          if (is_sim2tod) then
              write(*, *) "Adding simulations to TODs"
              call sim2tod(data_l2_fullres, simdata)
              call update_status(status, 'Add simulated signal')
          end if 
+
          if (verb) then
             write(*,*) "Rank:", myid, "Starting analysis of scan", scan%ss(k)%id
             write(*,'(A, F18.7, F9.4)') " Time and duration (in mins) of scan: ", data_l2_fullres%time(1), (data_l2_fullres%time(size(data_l2_fullres%time, 1)) - data_l2_fullres%time(1)) * 24 * 60
@@ -665,64 +667,64 @@ program l2gen
  
  contains
 
-  subroutine sim2tod(data_l2, simdata)
-   implicit none 
-   type(Lx_struct),              intent(inout) :: data_l2
-   type(simulation_struct),      intent(in)    :: simdata
-   real(dp), allocatable, dimension(:) :: ra, dec
+   subroutine sim2tod(data_l2, simdata)
+      implicit none 
+      type(Lx_struct),              intent(inout) :: data_l2
+      type(simulation_struct),      intent(in)    :: simdata
+      real(dp), allocatable, dimension(:) :: ra, dec
 
-   integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
-   real(dp)        :: signal
+      integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
+      real(dp)        :: signal
 
-   nsamp       = size(data_l2%tod,1)
-   nfreq       = size(data_l2%freqmask_full,1)
-   nsb         = size(data_l2%tod,3)
-   ndet        = size(data_l2%tod,4)
+      nsamp       = size(data_l2%tod,1)
+      nfreq       = size(data_l2%freqmask_full,1)
+      nsb         = size(data_l2%tod,3)
+      ndet        = size(data_l2%tod,4)
+      
+      nx        = size(simdata%x, 1)
+      ny        = size(simdata%y, 1)
+      
+      allocate(ra(nsamp))
+      allocate(dec(nsamp))
    
-   nx        = size(simdata%x, 1)
-   ny        = size(simdata%y, 1)
-   
-   allocate(ra(nsamp))
-   allocate(dec(nsamp))
- 
-   !$OMP PARALLEL PRIVATE(ra, dec, feed, i, sb, freq)
-   !$OMP DO SCHEDULE(guided)    
-   do feed = 1, ndet 
-      if (.not. is_alive(data_l2%pixels(feed))) cycle
-      write(*,*) "Adding signal to feed:", feed
-      ra = 0.d0
-      dec = 0.d0
-      do i = 1, nsamp
-         ra(i)  = data_l2%point_cel(1, i, feed)
-         dec(i) = data_l2%point_cel(2, i, feed)
-      end do
-      do sb = 1, nsb 
-         if (sum(data_l2%freqmask_full(:, sb, feed)) == 0.d0) cycle
-         do freq = 1, nfreq
-            if (data_l2%freqmask_full(freq, sb, feed) == 0.d0) cycle
-            if (data_l2%Tsys(freq, sb, feed) /= data_l2%Tsys(freq, sb, feed)) then 
-               write(*,*) "Tsys became NaN"
-               cycle
-            end if
-            if (data_l2%Tsys(freq, sb, feed) == 0) then
-               write(*,*) "Tsys is zero! No signal added!", freq, sb, feed 
-               !data_l2%tod(i, freq, sb, feed) = 0
-               cycle
-            end if 
-            do i = 1, nsamp
-               signal  = splin2_full_precomp(simdata%y, simdata%x, simdata%allcoeff(:, :, :, :, sb, freq), dec(i), ra(i))
-               !signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra, dec)
-               data_l2%tod(i, freq, sb, feed) = data_l2%tod(i, freq, sb, feed) * (1 + signal / data_l2%Tsys(freq, sb, feed))
+      !$OMP PARALLEL PRIVATE(ra, dec, feed, i, sb, freq)
+      !$OMP DO SCHEDULE(guided)    
+      do feed = 1, ndet 
+         if (.not. is_alive(data_l2%pixels(feed))) cycle
+         write(*,*) "Adding signal to feed:", feed
+         ra = 0.d0
+         dec = 0.d0
+         do i = 1, nsamp
+            ra(i)  = data_l2%point_cel(1, i, feed)
+            dec(i) = data_l2%point_cel(2, i, feed)
+         end do
+         do sb = 1, nsb 
+            if (sum(data_l2%freqmask_full(:, sb, feed)) == 0.d0) cycle
+            do freq = 1, nfreq
+               if (data_l2%freqmask_full(freq, sb, feed) == 0.d0) cycle
+               if (data_l2%Tsys(freq, sb, feed) /= data_l2%Tsys(freq, sb, feed)) then 
+                  write(*,*) "Tsys became NaN"
+                  cycle
+               end if
+               if (data_l2%Tsys(freq, sb, feed) == 0) then
+                  write(*,*) "Tsys is zero! No signal added!", freq, sb, feed 
+                  !data_l2%tod(i, freq, sb, feed) = 0
+                  cycle
+               end if 
+               do i = 1, nsamp
+                  signal  = splin2_full_precomp(simdata%y, simdata%x, simdata%allcoeff(:, :, :, :, sb, freq), dec(i), ra(i))
+                  !signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra, dec)
+                  data_l2%tod(i, freq, sb, feed) = data_l2%tod(i, freq, sb, feed) * (1 + signal / data_l2%Tsys(freq, sb, feed))
+               end do
             end do
          end do
       end do
-   end do
-   !$OMP END DO
-   !$OMP END PARALLEL
+      !$OMP END DO
+      !$OMP END PARALLEL
 
-   deallocate(ra)
-            deallocate(dec)   
-  end subroutine sim2tod
+      deallocate(ra)
+      deallocate(dec)   
+   end subroutine sim2tod
 
 
    subroutine find_spikes(data_l2, verb, id)
