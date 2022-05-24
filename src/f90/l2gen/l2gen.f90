@@ -13,13 +13,14 @@ program l2gen
    use comap_gain_mod
    use comap_patch_mod
    use comap_ephem_mod
+    use comap_sim2tod_mod
    implicit none
-   
+
    character(len=512)   :: parfile, runlist, l1dir, l2dir, tmpfile, freqmaskfile, monitor_file_name, tsysfile, freq_import_dir, freq_dir, sigma_import_dir, sigma_dir
    character(len=9)     :: id_old
-   character(len = 1024)  :: freq_import_name, sigma_import_name
+   character(len = 1024)  :: freq_import_name, sigma_import_name      
+   character(len=512)   :: param_dir, runlist_in, simulation_path
    character(len=10)    :: target_name
-   character(len=512)   :: param_dir, runlist_in
    character(len=1024)  :: param_name, param_name_raw, runlist_name, runlist_name_raw, cal_db
    integer(i4b)         :: i, j, k, l, m, n, snum, nscan, unit, myid, nproc, ierr, ndet, npercore, irun
    integer(i4b)         :: mstep, i2, decimation, nsamp, numfreq, n_nb, mask_outliers, n_tsys, polyorder_store, n_pca_store, n_pca_store_feed, numfreq_pca_downsamp
@@ -27,16 +28,17 @@ program l2gen
    real(dp)             :: todsize, nb_factor, min_acceptrate, pca_sig_rem, var_max, corr_max, tsys_mjd_max, tsys_mjd_min, tsys_time(2)
    real(dp)             :: pca_err_tol, corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, sim_tsys, max_tsys
    logical(lgt)         :: exist, reprocess, check_existing, gonext, found, rm_outliers
-   logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2, use_freq_filter
    logical(lgt)         :: import_freqmask, import_sigma
-   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2
    type(comap_scan_info) :: scan
    type(Lx_struct)      :: data_l1, data_l2_fullres, data_l2_decimated, data_l2_filter, data_l2_import
    type(planck_rng)     :: rng_handle 
    type(status_file)    :: status
    type(patch_info)     :: pinfo
    !real(dp),     allocatable, dimension(:,:,:,:)   :: store_l2_tod
-    
+   logical(lgt)         :: process, is_sim, rem_el, verb, diag_l2, use_freq_filter, is_sim2tod
+   type(simulation_struct) :: simdata
+   real(dp)             :: timing_offset, mjd(2), dt_error, samprate_in, samprate, scanfreq, nu_gain, alpha_gain, t1, t2, boost_factor
+   
    call getarg(1, parfile)
    call get_parameter(unit, parfile, 'TSYS_LOC',                  par_string=tsysfile)
    call get_parameter(unit, parfile, 'L2_SAMPRATE',               par_dp=samprate)
@@ -70,7 +72,10 @@ program l2gen
    call get_parameter(unit, parfile, 'RUNLIST',                   par_string=runlist_in)
    call get_parameter(unit, parfile, 'USE_FREQ_FILTER',           par_lgt=use_freq_filter)
    call get_parameter(unit, parfile, 'NUMFREQ_PCA_DOWNSAMPLER',   par_int=numfreq_pca_downsamp)
- 
+   call get_parameter(unit, parfile, 'RUN_SIM2TOD',               par_lgt = is_sim2tod)
+   call get_parameter(unit, parfile, 'DATACUBE',                  par_string = simulation_path)
+   call get_parameter(unit, parfile, 'BOOST_FACTOR',              par_dp = boost_factor)
+   
    if (import_freqmask) then 
       call get_parameter(unit, parfile, 'FREQMASK_L2_FOLDER',     par_string=freq_import_dir)
    else if (import_sigma) then
@@ -234,7 +239,12 @@ program l2gen
          stop
       end if
  
- 
+     if (is_sim2tod) then
+        write(*, *) "Reading signal simulation realization."
+        call read_sim_file(simulation_path, simdata)
+        simdata%boost = boost_factor
+     end if
+     
       do k = 2, scan%nsub-1
          ! Reformat L1 data into L2 format, and truncate
          call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
@@ -242,7 +252,11 @@ program l2gen
  
          call find_tsys(data_l2_fullres, is_sim, sim_tsys, scan%ss(k), verb)
          call update_status(status, 'find tsys')
-         
+         if (is_sim2tod) then
+             write(*, *) "Adding simulations to TODs"
+             call sim2tod(data_l2_fullres, simdata)
+             call update_status(status, 'Add simulated signal')
+         end if 
          if (verb) then
             write(*,*) "Rank:", myid, "Starting analysis of scan", scan%ss(k)%id
             write(*,'(A, F18.7, F9.4)') " Time and duration (in mins) of scan: ", data_l2_fullres%time(1), (data_l2_fullres%time(size(data_l2_fullres%time, 1)) - data_l2_fullres%time(1)) * 24 * 60
@@ -650,7 +664,67 @@ program l2gen
    call free_status(status)
  
  contains
+
+  subroutine sim2tod(data_l2, simdata)
+   implicit none 
+   type(Lx_struct),              intent(inout) :: data_l2
+   type(simulation_struct),      intent(in)    :: simdata
+   real(dp), allocatable, dimension(:) :: ra, dec
+
+   integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny 
+   real(dp)        :: signal
+
+   nsamp       = size(data_l2%tod,1)
+   nfreq       = size(data_l2%freqmask_full,1)
+   nsb         = size(data_l2%tod,3)
+   ndet        = size(data_l2%tod,4)
+   
+   nx        = size(simdata%x, 1)
+   ny        = size(simdata%y, 1)
+   
+   allocate(ra(nsamp))
+   allocate(dec(nsamp))
  
+   !$OMP PARALLEL PRIVATE(ra, dec, feed, i, sb, freq)
+   !$OMP DO SCHEDULE(guided)    
+   do feed = 1, ndet 
+      if (.not. is_alive(data_l2%pixels(feed))) cycle
+      write(*,*) "Adding signal to feed:", feed
+      ra = 0.d0
+      dec = 0.d0
+      do i = 1, nsamp
+         ra(i)  = data_l2%point_cel(1, i, feed)
+         dec(i) = data_l2%point_cel(2, i, feed)
+      end do
+      do sb = 1, nsb 
+         if (sum(data_l2%freqmask_full(:, sb, feed)) == 0.d0) cycle
+         do freq = 1, nfreq
+            if (data_l2%freqmask_full(freq, sb, feed) == 0.d0) cycle
+            if (data_l2%Tsys(freq, sb, feed) /= data_l2%Tsys(freq, sb, feed)) then 
+               write(*,*) "Tsys became NaN"
+               cycle
+            end if
+            if (data_l2%Tsys(freq, sb, feed) == 0) then
+               write(*,*) "Tsys is zero! No signal added!", freq, sb, feed 
+               !data_l2%tod(i, freq, sb, feed) = 0
+               cycle
+            end if 
+            do i = 1, nsamp
+               signal  = splin2_full_precomp(simdata%y, simdata%x, simdata%allcoeff(:, :, :, :, sb, freq), dec(i), ra(i))
+               !signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra, dec)
+               data_l2%tod(i, freq, sb, feed) = data_l2%tod(i, freq, sb, feed) * (1 + signal / data_l2%Tsys(freq, sb, feed))
+            end do
+         end do
+      end do
+   end do
+   !$OMP END DO
+   !$OMP END PARALLEL
+
+   deallocate(ra)
+            deallocate(dec)   
+  end subroutine sim2tod
+
+
    subroutine find_spikes(data_l2, verb, id)
      implicit none
      type(Lx_struct),     intent(inout) :: data_l2
@@ -707,6 +781,7 @@ program l2gen
         write(*,*) "Found ", n_spikes(2), " jumps"
         write(*,*) "Found ", n_spikes(3), " anomalies"
         write(*,*) "Found ", n_spikes(4), " edge spikes"
+
      end if
      deallocate(ampsum)
  
@@ -1223,6 +1298,7 @@ program l2gen
         call open_hdf_file(aliasing_filename, file, "r")
         if(.not. allocated(data_l2%AB_mask)) allocate(data_l2%AB_mask(nfreq,nsb,20)) 
         if(.not. allocated(data_l2%leak_mask)) allocate(data_l2%leak_mask(nfreq,nsb,20)) 
+
         
         ! Read telescope coordinates
         call read_hdf(file, "AB_mask",            data_l2%AB_mask)
@@ -1948,6 +2024,7 @@ program l2gen
  
    
    subroutine pca_filter_feed_TOD(data_l2, n_pca_comp, pca_max_iter, pca_err_tol, pca_sig_rem, verb)
+
     implicit none
     type(Lx_struct),           intent(inout) :: data_l2
     integer(i4b),              intent(in)    :: n_pca_comp, pca_max_iter

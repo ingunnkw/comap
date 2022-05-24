@@ -12,6 +12,7 @@ import argparse
 import os
 import re
 import ctypes
+from scipy import interpolate
 
 
 class MapMakerLight():
@@ -87,17 +88,37 @@ class MapMakerLight():
         """
         Read the simulated datacube into memory.
         """
-        cube = np.load(self.infile)
-        cubeshape = cube.shape
+        if ".npy" in self.infile[-4:]:
+            cube = np.load(self.infile)
+            cubeshape = cube.shape
 
-        cube *= 1e-6 * self.norm    # Normalization of cube by input value
-        print("Maximum of cube", np.nanmax(cube), " Kelvin")
-        cube = cube.reshape(cubeshape[0], cubeshape[1], 4, 1024)  # Flatten the x/y dims, and split the frequency (depth) dim in 4 sidebands.
-        cube = cube.reshape(cubeshape[0], cubeshape[1], 4, 64, 16)
-        cube = np.mean(cube, axis = 4)                            # Averaging over 16 frequency channels
-        cube = cube.transpose(2, 3, 0, 1)
+            cube *= 1e-6 * self.norm    # Normalization of cube by input value
+            print("Maximum of cube", np.nanmax(cube), " Kelvin")
+            cube = cube.reshape(cubeshape[0], cubeshape[1], 4, 1024)  # Flatten the x/y dims, and split the frequency (depth) dim in 4 sidebands.
+            cube = cube.reshape(cubeshape[0], cubeshape[1], 4, 64, 16)
+            cube = np.mean(cube, axis = 4)                            # Averaging over 16 frequency channels
+            cube = cube.transpose(2, 3, 0, 1)
 
-        self.cube = cube
+            self.cube = cube
+
+        else:
+            with h5py.File(self.infile, "r") as infile:
+                self.cube = infile["simulation"][()] 
+                self.cube *= 1e-6 * self.norm
+                cubeshape = self.cube.shape
+                self.cube = self.cube.reshape(cubeshape[0], cubeshape[1] // 16, 16, cubeshape[2], cubeshape[3])
+                self.cube = np.mean(self.cube, axis = 2)
+
+
+                
+
+                print(self.cube.shape)
+                self.cube_x = infile["x"][()]   # x bin edges
+                self.cube_y = infile["y"][()]   # y bin edges
+
+                self.cube_x = 0.5 * (self.cube_x[:-1] + self.cube_x[1:]) # converting to bin centers
+                self.cube_y = 0.5 * (self.cube_y[:-1] + self.cube_y[1:])
+    
 
     def make_map_cube(self):
         """
@@ -105,7 +126,7 @@ class MapMakerLight():
         """
         if self.inmap != None:
             inmap   = h5py.File(self.inmap, "r")
-
+            
             try:
                 inhits    = np.array(inmap["nhit_coadd"])[()]
             except KeyError:
@@ -140,7 +161,7 @@ class MapMakerLight():
         Function copying copying the template file to be filled
         with map and hits coadded over feeds.
         """
-        template_file = "/mn/stornext/d16/cmbco/comap/nils/COMAP_general/data/maps/templates/"
+        template_file = "/mn/stornext/d22/cmbco/comap/nils/COMAP_general/data/maps/templates/"
         if self.field == "co2":
             template_file = template_file + "co2_template_map.h5"
         elif self.field == "co6":
