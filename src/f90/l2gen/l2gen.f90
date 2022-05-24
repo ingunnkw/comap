@@ -1017,14 +1017,12 @@ program l2gen
    subroutine get_pca_corr_templates(ampl, Delta, freqmask)
       ! Fits and removes the correlation pattern induced by Feed-PCA filter.
       implicit none
-      !real(dp), allocatable, dimension(:, :, :),  intent(in)    :: ampl, at !(freq, sb, comp)
       real(sp), dimension(:, :, :),               intent(in)    :: ampl      !(freq, sb, comp)
       real(sp), dimension(:, :),                  intent(in)    :: freqmask  !(sb, freq)
-      real(sp), allocatable, dimension(:,:,:),    intent(inout) :: Delta
-      real(sp), allocatable, dimension(:, :)                    :: B         !(nsb * nfreq, comp) Basis matrix
+      real(sp),  dimension(:,:),                intent(inout) :: Delta
+      real(sp), allocatable, dimension(:, :)                    :: B          !(nsb * nfreq, comp) Basis matrix
       real(sp), allocatable, dimension(:)                       :: magnitudes !(comp) magnitudes of ampl
-      real(sp), allocatable, dimension(:,:)                     :: L, BBt
-      real(sp)                                                  :: LLt
+      real(sp), allocatable, dimension(:,:)                     :: L
       
       integer(i4b)                                              :: i, j, k, n, m, o, p, idx1, idx2, nfreq, nsb, nchl, ncomp, nu, comp
       
@@ -1034,127 +1032,45 @@ program l2gen
 
       nfreq  = nsb * nchl  ! Total number of frequency channels
 
-      !if (.not. allocated(at)) allocate(at(size(a, 2), size(a, 1))) ! at is the transposed of amplitude matrix
-      if (.not. allocated(B)) allocate(B(nfreq, ncomp))
-      if (.not. allocated(BBt)) allocate(BBt(nfreq, nfreq))
+      if (.not. allocated(B)) allocate(B(nfreq, ncomp))  
       if (.not. allocated(L)) allocate(L(nfreq, nfreq))
       if (.not. allocated(magnitudes)) allocate(magnitudes(ncomp))
       
-      Delta = 0
-      B   = 0
-      BBt = 0
-      LLt = 0
-      L = 0
-      magnitudes = 0
-      
-      ! at = transpose(a)
+      Delta = 0.d0
+      B   = 0.d0
+      L = 0.d0
+      magnitudes = 0.d0
 
-      ! ata = matmul(at, a)
-      ! write(*,*) ata
-      ! ata = invert_matrix(ata)
-      ! write(*,*) ata
 
-      ! L     = matmul(matmul(a, ata), at)
-      
-      ! do i = 1, nfreq
-      !    L(i, i) = 1 - L(i, i)
-      ! end do 
-      
-      ! Delta = - matmul(L, Lt)      
-      ! do i = 1, nfreq
-      !    Delta(i, i) = 1 - Delta(i, i)
-      ! end do 
-
-      !  Flattening and normalising amplitude basis
-      write(*,*) "hei1"
-      !$OMP PARALLEL PRIVATE(i, j, k, magnitudes)
+      ! Normalizing and flattening frequency amplitudes.
+      !$OMP PARALLEL PRIVATE(i, j, k, magnitudes)  
       !$OMP DO SCHEDULE(guided)    
       do i = 1, ncomp
          magnitudes(i) =  sqrt(sum(sum(ampl(:, :, i) * ampl(:, :, i), 1), 1))
-         !write(*,*) magnitudes(i)
          if (magnitudes(i) == 0.d0) cycle
          do j = 1, nsb
-            do k = 1, nchl
-               !if (freqmask(j, k) == 0.d0) cycle
-               !write(*,*) ampl(k, j, i) / magnitudes(i)
-               !write(*,*) j, k, (j - 1) * nchl + k, i, shape(B)
+            do k = 1, nchl 
+               if (freqmask(k, j) == 0.d0) cycle
                B((j - 1) * nchl + k, i) = ampl(k, j, i) / magnitudes(i)
             end do
          end do
       end do
       !$OMP END DO
       !$OMP END PARALLEL
-      write(*,*) "hei2"
 
-      !$OMP PARALLEL PRIVATE(i, j)
-      !$OMP DO SCHEDULE(guided)  
       do i = 1, nfreq
-         do j = 1, nfreq 
-            BBt(i, j) = sum(B(i, :) * B(j, :))
-            if (i == j) then 
-               L(i, j) = 1 - BBt(i, j)
-            else 
-               L(i, j) = - BBt(i, j)
-            end if
-         end do
-      end do 
-      !$OMP END DO
-      !$OMP END PARALLEL
-      write(*,*) "hei3"
+         L(i, i) = 1.0  ! Filling diagonal with 1, i.e. the identity
+      end do
 
-      ! do i = 1, nfreq
-      !    do j = 1, nfreq 
-      !       ssum = 0.d0
-      !       do k = 1, nfreq
-      !          ssum = ssum + L(i, k) * L(j, k)
-      !       end do
-      !       LLt(i, j) = ssum
-      !       if (i == j) then 
-      !          Delta(i, j) = 1 - LLt(i, j)
-      !       else 
-      !          Delta(i, j) = - LLt(i, j)
-      !       end if
-      !    end do
-      ! end do 
+      call sgemm("N", "T", nfreq, nfreq, ncomp, -1.0, B, nfreq, B, nfreq, 1.0, L, nfreq)  ! BLAS computes L := I - LL^T
+   
+      do i = 1, nfreq
+         Delta(i, i) = 1.0 ! Filling diagonal with 1, i.e. the identity
+      end do
 
-      write(*, *) "Shape: L", shape(L)
-      write(*, *) "Shape: Delta", shape(Delta)
+      call sgemm("N", "T", nfreq, nfreq, nfreq, -1.0, L, nfreq, L, nfreq, 1.0, Delta, nfreq) ! BLAS computes: Delta := I - LL^T
 
-
-      LLt = 0.d0
-      do k = 1, 2
-         !write(*,*) "hallo", k
-         !!$OMP PARALLEL PRIVATE(i, j, n, m, l, p, idx1, idx2)
-         !$OMP PARALLEL PRIVATE(i, j, idx1, idx2, LLt)
-         !$OMP DO SCHEDULE(guided)  
-         do i = 1, 2 * nchl 
-            !o = (k-1) * 2 + 1 + (i-1) / nchl
-            !n = mod((i - 1), nchl) + 1
-            !idx1 = (o - 1) * nsb + n
-            idx1 = (k - 1) * nfreq / 2 + i
-            !do j = i + 2, 2 * nchl 
-            do j = 1, 2 * nchl 
-               !p = (k-1) * 2 + 1 + (j-1) / nchl
-               !m = mod((j - 1), nchl) + 1
-               !idx2 = (p - 1)* nsb + m
-               idx2 = (k - 1) * nfreq / 2 + j 
-               !write(*,*), "First", k, i, j, idx1, idx2
-               
-               LLt = sum(L(idx1, :) * L(idx2, :))
-               if (i == j) then 
-                  Delta(k, i, j) = 1 - LLt
-               else 
-                  Delta(k, i, j) = - LLt
-               end if
-               !write(*,*), "Second", Delta(k, i, j), LLt
-            end do
-         end do
-         !$OMP END DO
-         !$OMP END PARALLEL
-      end do 
-      write(*,*) "hei4"
-
-      deallocate(BBt)
+      deallocate(B)
       deallocate(L)
       deallocate(magnitudes)
 
@@ -1181,7 +1097,7 @@ program l2gen
      real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod
      real(sp),     allocatable, dimension(:,:,:)     :: corr_templates
      real(sp),     allocatable, dimension(:,:)       :: corr_template
-     real(sp),     allocatable, dimension(:,:,:)       :: corr_template_pca
+     real(sp),     allocatable, dimension(:,:)       :: corr_template_pca
      real(dp),     allocatable, dimension(:,:)       :: outlier_mask
      logical(lgt) :: mask_edge_corrs, rm_outliers, verb
      character(len=512) :: box_offset_str, stripe_offset_str, nsigma_prod_stripe_str
@@ -1340,17 +1256,17 @@ program l2gen
      do i = 1, ndet
         if (.not. is_alive(data_l2%pixels(i))) cycle
 
-        if (data_l2%n_pca_comp_feed > 0) write(*,*) "FEED: ", i
         if (data_l2%n_pca_comp_feed > 0) then
-            if (.not. allocated(corr_template_pca)) allocate(corr_template_pca(2, 2 * nfreq, 2 * nfreq))
+            if (.not. allocated(corr_template_pca)) allocate(corr_template_pca(nsb * nfreq, nsb * nfreq))
             corr_template_pca = 0.d0
-            if (sum(data_l2%pca_ampl_feed(:, :, i, :)) /= 0) then
+            if sum(data_l2%pca_ampl_feed(:, :, i, :)) /= 0) then
                call get_pca_corr_templates(data_l2%pca_ampl_feed(:, :, i, :), corr_template_pca, data_l2%freqmask_full(:,:,i))         
             end if
         end if
         
         do o = 1, nsb / 2
            corrs = 0.d0
+
            !$OMP PARALLEL PRIVATE(k,l,p,q,j,m,n,corr)
            !$OMP DO SCHEDULE(guided)    
            do p = 1, 2 * nfreq
@@ -1377,30 +1293,11 @@ program l2gen
            end do
            !$OMP END DO
            !$OMP END PARALLEL
-           
-           if (data_l2%n_pca_comp_feed > 0) then
-               ! Subtracting band wise correlation template
-               if (.false.) then
-                  write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_mask_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
-                  open(22, file=filename, form="unformatted") ! Adjusted open statement
-                  write(22) data_l2%freqmask_full(:,:,l)
-                  close(22)
-               end if
 
-               if (.false.) then
-                  write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_before_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
-                  open(22, file=filename, form="unformatted") ! Adjusted open statement
-                  write(22) corrs
-                  close(22)
-               end if
-               write(*,*) "Subtracting template", shape(corrs), shape(corr_template_pca)
-               corrs = corrs + corr_template_pca(o, :, :)
-               if (.false.) then
-                  write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_after_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
-                  open(22, file=filename, form="unformatted") ! Adjusted open statement
-                  write(22) corrs
-                  close(22)
-               end if    
+
+           if (data_l2%n_pca_comp_feed > 0) then
+               corrs = corrs + corr_template_pca((o - 1) * 2 * nfreq:o * 2 * nfreq, &
+                                               & (o - 1) * 2 * nfreq:o * 2 * nfreq)
            end if
            
            ! if (i == 12 .and. o == 1) then
