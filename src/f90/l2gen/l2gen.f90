@@ -9,6 +9,7 @@ program l2gen
    use rngmod
    use quiet_fft_mod
    use spline_1D_mod
+   use spline_2D_mod
    use quiet_status_mod 
    use comap_gain_mod
    use comap_patch_mod
