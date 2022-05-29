@@ -101,8 +101,9 @@ program l2gen
    !call dset(id=myid,level=debug)
  
    call initialize_random_seeds(MPI_COMM_WORLD, seed, rng_handle)
- 
+   
    if (myid == 0) then 
+      irun = 1
       ! Copy parameter file and runlists to l2-file output directory 
       param_dir = trim(l2dir)//"/"//trim(target_name)//"/param4level2"
       inquire(directory=trim(param_dir), exist=exist)
@@ -137,7 +138,13 @@ program l2gen
    end if
    
    call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
-  
+   
+   if (is_sim2tod) then
+      write(*, *) "Reading signal simulation realization."
+      call read_sim_file(simulation_path, simdata)
+      simdata%boost = boost_factor
+    end if
+
    nscan    = get_num_scans()
    do snum = myid+1, nscan, nproc     
       call get_scan_info(snum, scan)
@@ -237,13 +244,11 @@ program l2gen
          call mpi_finalize(ierr)
          stop
       end if
- 
-      if (is_sim2tod) then
-         write(*, *) "Reading signal simulation realization."
-         call read_sim_file(simulation_path, simdata)
-         simdata%boost = boost_factor
-      end if
       
+      if (is_sim2tod) then
+         call prepare_sim_interpolation(simdata, pinfo)
+      end if 
+
       do k = 2, scan%nsub-1
          ! Reformat L1 data into L2 format, and truncate
          call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
@@ -253,7 +258,7 @@ program l2gen
          call update_status(status, 'find tsys')
          
          if (is_sim2tod) then
-             write(*, *) "Adding simulations to TODs"
+             write(*, *) "Adding simulations to TODs ", "Rank:", myid  
              call sim2tod(data_l2_fullres, simdata)
              call update_status(status, 'Add simulated signal')
          end if 
@@ -666,6 +671,54 @@ program l2gen
  
  contains
 
+   subroutine prepare_sim_interpolation(simdata, pinfo)
+      implicit none 
+      type(simulation_struct),      intent(inout)    :: simdata
+      type(patch_info),             intent(in)    :: pinfo
+      real(dp), allocatable, dimension(:,:,:,:)   :: coeff
+      integer(i4b)    :: i, sb, freq, feed, nfreq, nsb, ndet, nsamp, nx, ny
+
+      nx        = size(simdata%simcube, 1)
+      ny        = size(simdata%simcube, 2)
+      nfreq     = size(simdata%simcube, 3)
+      nsb       = size(simdata%simcube, 4)
+      
+      
+      if (.not. allocated(coeff)) allocate(coeff(4, 4, nx, ny))
+      if (.not. allocated(simdata%allcoeff)) allocate(simdata%allcoeff(4, 4, nx, ny, nsb, nfreq))
+      if (.not. allocated(simdata%x)) allocate(simdata%x(nx))
+      if (.not. allocated(simdata%y)) allocate(simdata%y(ny))
+
+      simdata%allcoeff = 0.d0
+      coeff = 0.d0
+      ! NB! This way of adding signal only makes sense for co2 field (field 1) due to it being at Dec = 0 giving no
+      ! projection effects. Add projection before using co6 or co7.
+
+      do i = 1, nx
+         simdata%x(i) = 0.5 * (simdata%edgex(i) + simdata%edgex(i + 1)) + pinfo%pos(1) 
+      end do
+      do i = 1, ny
+         simdata%y(i) = 0.5 * (simdata%edgey(i) + simdata%edgey(i + 1)) + pinfo%pos(2)
+      end do
+
+      write(*,*) "Preparing simulation interpolation."
+
+      !$OMP PARALLEL PRIVATE(coeff, sb, freq, i)
+      !$OMP DO SCHEDULE(guided)    
+      do sb = 1, nsb 
+         do i = 1, nfreq
+            freq = simdata%freqidx(sb, i)   ! Using flipped frequency index for sb = 1 and 3
+            call splie2_full_precomp(simdata%y, simdata%x, simdata%boost * simdata%simcube(:, :, freq, sb), coeff)
+            simdata%allcoeff(:, :, :, :, sb, i) = coeff
+         end do
+      end do
+      !$OMP END DO
+      !$OMP END PARALLEL
+   
+      deallocate(coeff)
+
+   end subroutine prepare_sim_interpolation
+
    subroutine sim2tod(data_l2, simdata)
       implicit none 
       type(Lx_struct),              intent(inout) :: data_l2
@@ -685,7 +738,6 @@ program l2gen
       
       allocate(ra(nsamp))
       allocate(dec(nsamp))
-   
       !$OMP PARALLEL PRIVATE(ra, dec, feed, i, sb, freq)
       !$OMP DO SCHEDULE(guided)    
       do feed = 1, ndet 
@@ -694,10 +746,12 @@ program l2gen
          ra = 0.d0
          dec = 0.d0
          do i = 1, nsamp
+
             ra(i)  = data_l2%point_cel(1, i, feed)
             dec(i) = data_l2%point_cel(2, i, feed)
          end do
          do sb = 1, nsb 
+
             if (sum(data_l2%freqmask_full(:, sb, feed)) == 0.d0) cycle
             do freq = 1, nfreq
                if (data_l2%freqmask_full(freq, sb, feed) == 0.d0) cycle
@@ -705,16 +759,18 @@ program l2gen
                   write(*,*) "Tsys became NaN"
                   cycle
                end if
+
                if (data_l2%Tsys(freq, sb, feed) == 0) then
                   write(*,*) "Tsys is zero! No signal added!", freq, sb, feed 
                   !data_l2%tod(i, freq, sb, feed) = 0
                   cycle
                end if 
+
                do i = 1, nsamp
                   signal  = splin2_full_precomp(simdata%y, simdata%x, simdata%allcoeff(:, :, :, :, sb, freq), dec(i), ra(i))
-                  !signal  = splin2_full_precomp(x, y, allcoeff(:, :, :, :, sb, freq), ra, dec)
                   data_l2%tod(i, freq, sb, feed) = data_l2%tod(i, freq, sb, feed) * (1 + signal / data_l2%Tsys(freq, sb, feed))
                end do
+
             end do
          end do
       end do
@@ -724,8 +780,7 @@ program l2gen
       deallocate(ra)
       deallocate(dec)   
    end subroutine sim2tod
-
-
+   
    subroutine find_spikes(data_l2, verb, id)
      implicit none
      type(Lx_struct),     intent(inout) :: data_l2

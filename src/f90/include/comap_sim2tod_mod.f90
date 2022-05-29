@@ -16,6 +16,7 @@ module comap_sim2tod_mod
        real(dp),     allocatable, dimension(:,:,:,:) :: simcube_hr ! (nx_hr, ny_hr, nfreq, nsb) data cube
        real(dp),     allocatable, dimension(:) :: x, y, edgex, edgey   ! (nx), (ny) RA, Dec grid
        real(dp),     allocatable, dimension(:, :, :, :, :, :) :: allcoeff    ! (4, 4, nx, ny, nsb, nfreq) interpolation coefficients 
+       integer(i4b), allocatable, dimension(:, :)             :: freqidx ! (nsb, nfreq) array to store flipped frequency indcies
     end type simulation_struct
   
   contains
@@ -25,7 +26,7 @@ module comap_sim2tod_mod
       character(len=*), intent(in)           :: filename
       type(simulation_struct)                :: data
       type(hdf_file)                         :: file
-      integer(i4b)                           :: i, j, k, l, nx, ny, nfreq, nsb
+      integer(i4b)                           :: i, j, k, l
       integer(i4b), allocatable, dimension(:)       :: buffer_int
       real(dp),     allocatable, dimension(:)       :: buffer_1d
       real(sp),     allocatable, dimension(:,:,:)   :: buffer_3d
@@ -50,6 +51,16 @@ module comap_sim2tod_mod
       call read_hdf(file, "y",              data%edgey)
    
       deallocate(buffer_4d)
+
+      if (.not. allocated(data%freqidx)) allocate(data%freqidx(data%nsb, data%nfreq))
+
+      do i = 1, data%nfreq
+        data%freqidx(1, i) = data%nfreq + 1 - i! flipped sideband
+        data%freqidx(3, i) = data%nfreq + 1 - i! flipped sideband
+
+        data%freqidx(2, i) = i
+        data%freqidx(4, i) = i
+      end do
 
     end subroutine read_sim_file
   

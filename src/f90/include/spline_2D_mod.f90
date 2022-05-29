@@ -147,7 +147,8 @@ contains
           
 
           ! Solve linear system
-          call solve_system_real(A, z, b)
+         !  call solve_system_real(A, z, b)
+          call solve_linear_system(A, z, b)
 
           ! Re-organize coefficients into 4x4 ordering
           do k = 1, 4
