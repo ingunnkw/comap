@@ -73,6 +73,7 @@ module comap_sim2tod_mod
       if(allocated(data%edgex))   deallocate(data%edgex)
       if(allocated(data%edgey))   deallocate(data%edgey)
       if(allocated(data%allcoeff))   deallocate(data%allcoeff)
+      if(allocated(data%freqidx) deallocate(data%freqidx))
     end subroutine
   
   
@@ -97,6 +98,7 @@ module comap_sim2tod_mod
         allocate(sim_out%simcube_hr(sim_in%nx_hr, sim_in%ny_hr, sim_in%nfreq, sim_in%nsb))
         sim_out%simcube_hr = sim_in%simcube_hr
      end if
+     
     end subroutine copy_simulation_struct
     
   end module comap_sim2tod_mod

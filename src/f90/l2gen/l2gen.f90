@@ -258,7 +258,7 @@ program l2gen
          call update_status(status, 'find tsys')
          
          if (is_sim2tod) then
-             write(*, *) "Adding simulations to TODs ", "Rank:", myid  
+             write(*, *)  "Rank:", myid, "Adding simulations to TODs. "  
              call sim2tod(data_l2_fullres, simdata)
              call update_status(status, 'Add simulated signal')
          end if 
@@ -742,7 +742,7 @@ program l2gen
       !$OMP DO SCHEDULE(guided)    
       do feed = 1, ndet 
          if (.not. is_alive(data_l2%pixels(feed))) cycle
-         write(*,*) "Adding signal to feed:", feed
+         !write(*,*) "Adding signal to feed:", feed
          ra = 0.d0
          dec = 0.d0
          do i = 1, nsamp
