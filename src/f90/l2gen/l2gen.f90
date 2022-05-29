@@ -137,9 +137,7 @@ program l2gen
    end if
    
    call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
- 
-    call mpi_bcast(irun,  1, mpi_integer, 0, mpi_comm_world, ierr)
- 
+  
    nscan    = get_num_scans()
    do snum = myid+1, nscan, nproc     
       call get_scan_info(snum, scan)
@@ -251,7 +249,7 @@ program l2gen
          call excise_subscan(scan%ss(k)%mjd, data_l1, data_l2_fullres)
          call update_status(status, 'excise')
  
-         call find_tsys(data_l2_fullres, is_sim, sim_tsys, scan%ss(k), verb)
+         call find_tsys(data_l2_fullres, is_sim, sim_tsys, scan%ss(k), verb, myid)
          call update_status(status, 'find tsys')
          
          if (is_sim2tod) then
@@ -479,7 +477,7 @@ program l2gen
                end if
  
                ! flag correlations and variance
-               call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
+               call flag_correlations(data_l2_filter, scan%ss(k)%id, parfile, myid)!corr_cut, mean_corr_cut, mean_abs_corr_cut, med_cut, var_cut, n_nb, nb_factor, var_max, corr_max)
                call update_status(status, 'flag_corr')
  
                ! replace freqmask in original tod
@@ -1098,9 +1096,10 @@ program l2gen
       implicit none
       real(sp), dimension(:, :, :),               intent(in)    :: ampl      !(freq, sb, comp)
       real(sp), dimension(:, :),                  intent(in)    :: freqmask  !(sb, freq)
-      real(sp),  dimension(:,:),                intent(inout) :: Delta
+      real(sp),  dimension(:,:),                intent(inout)   :: Delta
       real(sp), allocatable, dimension(:, :)                    :: B          !(nsb * nfreq, comp) Basis matrix
-      real(sp), allocatable, dimension(:)                       :: magnitudes !(comp) magnitudes of ampl
+      ! real(sp), allocatable, dimension(:)                       :: magnitudes !(comp) magnitudes of ampl
+      real(sp)                                                  :: magnitudes ! magnitudes of ampl
       real(sp), allocatable, dimension(:,:)                     :: L
       
       integer(i4b)                                              :: i, j, k, n, m, o, p, idx1, idx2, nfreq, nsb, nchl, ncomp, nu, comp
@@ -1110,32 +1109,30 @@ program l2gen
       ncomp = size(ampl, 3) ! Number of subtracted PCA components
 
       nfreq  = nsb * nchl  ! Total number of frequency channels
-
       if (.not. allocated(B)) allocate(B(nfreq, ncomp))  
       if (.not. allocated(L)) allocate(L(nfreq, nfreq))
-      if (.not. allocated(magnitudes)) allocate(magnitudes(ncomp))
+      !if (.not. allocated(magnitudes)) allocate(magnitudes(ncomp))
       
-      Delta = 0.d0
       B   = 0.d0
       L = 0.d0
-      magnitudes = 0.d0
+      magnitudes = 1.d0
 
 
       ! Normalizing and flattening frequency amplitudes.
-      !$OMP PARALLEL PRIVATE(i, j, k, magnitudes)  
-      !$OMP DO SCHEDULE(guided)    
+      
       do i = 1, ncomp
-         magnitudes(i) =  sqrt(sum(sum(ampl(:, :, i) * ampl(:, :, i), 1), 1))
-         if (magnitudes(i) == 0.d0) cycle
+         magnitudes =  sqrt(sum(sum(ampl(:, :, i) * ampl(:, :, i), 1), 1))
+         if (magnitudes == 0.d0) cycle
+         if (magnitudes .ne. magnitudes) then
+            cycle
+         end if
          do j = 1, nsb
             do k = 1, nchl 
                if (freqmask(k, j) == 0.d0) cycle
-               B((j - 1) * nchl + k, i) = ampl(k, j, i) / magnitudes(i)
+               B((j - 1) * nchl + k, i) = ampl(k, j, i) / magnitudes
             end do
          end do
       end do
-      !$OMP END DO
-      !$OMP END PARALLEL
 
       do i = 1, nfreq
          L(i, i) = 1.0  ! Filling diagonal with 1, i.e. the identity
@@ -1151,15 +1148,15 @@ program l2gen
 
       deallocate(B)
       deallocate(L)
-      deallocate(magnitudes)
+      ! deallocate(magnitudes)
 
    end subroutine get_pca_corr_templates
 
 
-   subroutine flag_correlations(data_l2, id, parfile)!corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
+   subroutine flag_correlations(data_l2, id, parfile, rank)!corr_cut, mean_corr_cut, mean_abs_corr_cut, median_cut, var_cut, n_neighbor, neighbor_factor, var_max, corr_max)
      implicit none
      type(Lx_struct),          intent(inout) :: data_l2
-     integer(i4b),             intent(in)    :: id
+     integer(i4b),             intent(in)    :: id, rank
      type(hdf_file)                          :: file
      character(len=512),       intent(in)    :: parfile
      integer(i4b) :: i, j, k, l, m, n, o, p, p2, q, q2, pp, qq, kk, nn, reason
@@ -1332,7 +1329,7 @@ program l2gen
      end if
      !    allocate(box_offsets(3), prod_offsets(3))
      
-     if (data_l2%n_pca_comp_feed > 0) write(*,*) "Cleaning PCA template from correlation matrix"
+     if (data_l2%n_pca_comp_feed > 0) write(*,*) "Cleaning PCA template from correlation matrix",  " Rank:", rank, "id:", id
      do i = 1, ndet
         if (.not. is_alive(data_l2%pixels(i))) cycle
 
@@ -1376,8 +1373,20 @@ program l2gen
 
 
            if (data_l2%n_pca_comp_feed > 0) then
-               corrs = corrs + corr_template_pca((o - 1) * 2 * nfreq:o * 2 * nfreq, &
-                                               & (o - 1) * 2 * nfreq:o * 2 * nfreq)
+               if (.false.) then
+                  write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_before_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
+                  open(22, file=filename, form="unformatted") ! Adjusted open statement
+                  write(22) corrs
+                  close(22)
+               end if
+               corrs = corrs + corr_template_pca((o - 1) * 2 * nfreq + 1 : o * 2 * nfreq, &
+                                               & (o - 1) * 2 * nfreq + 1 : o * 2 * nfreq)
+               if (.false.) then
+                  write(filename, "(A, I0.3, A, I0.3, A, I0.3, A)") 'corr_after_', data_l2%pixels(i), '_', o, '_', id,'_sp.unf' 
+                  open(22, file=filename, form="unformatted") ! Adjusted open statement
+                  write(22) corrs
+                  close(22)
+               end if
            end if
            
            ! if (i == 12 .and. o == 1) then
@@ -3845,8 +3854,6 @@ program l2gen
 
   end subroutine prepare_calibration
 
-
-
   ! subroutine compute_P_hot(tsys_file, data, tsys_ind, n_tsys, is_sim, verb)
   !   implicit none
   !   character(len=*),            intent(in)       :: tsys_file
@@ -4007,14 +4014,13 @@ program l2gen
 
   ! end subroutine compute_Tsys_per_tp
 
-
-
  
-  subroutine find_tsys(data_l2_fullres, is_sim, sim_tsys, scan, verb)
+  subroutine find_tsys(data_l2_fullres, is_sim, sim_tsys, scan, verb, rank)
    implicit none
    type(lx_struct), intent(inout) :: data_l2_fullres
    type(comap_subscan), intent(in) :: scan
    real(dp),        intent(in)    :: sim_tsys
+   integer(i4b),        intent(in)    :: rank
 !    real(dp),    intent(in)        :: tsys_time(2)
    logical(lgt), intent(in)       :: is_sim, verb
    logical(lgt)                   :: tsys_nan
@@ -4084,7 +4090,7 @@ program l2gen
            
             ! Masking failed Tsys measurements
             if (tsys .ne. tsys) then
-               write(*,*) "Found NaN in Tsys!!!"
+               write(*,*) "Rank: ", rank, "Found NaN in Tsys!!!"
                tsys_nan = .true.
                data_l2_fullres%freqmask_full(k,j,i) = 0.d0
                data_l2_fullres%Tsys(k,j,i) = tsys
@@ -4092,11 +4098,6 @@ program l2gen
          end do
       end do
    end do
-  
-   if (verb .and. tsys_nan) then
-     write(*,*) "Masked NaN Tsys values!"
-   end if
- 
    end subroutine find_tsys
  
    subroutine calibrate_tod(data_l2_fullres, max_tsys)

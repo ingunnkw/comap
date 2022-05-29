@@ -54,13 +54,13 @@ else
 		export MPF90 := mpif90
 	endif
 	ifndef F90FLAGS
-		export F90FLAGS := -g -O2
+		export F90FLAGS := -g -O2 -traceback
 	endif
 	ifndef MPF77
 		export MPF77 := mpif77
 	endif
 	ifndef FFLAGS
-		export FFLAGS := -g -O2
+		export FFLAGS := -g -O2 -traceback
 	endif
 	ifndef MPCC
 		export MPCC := cc
