@@ -73,7 +73,7 @@ module comap_sim2tod_mod
       if(allocated(data%edgex))   deallocate(data%edgex)
       if(allocated(data%edgey))   deallocate(data%edgey)
       if(allocated(data%allcoeff))   deallocate(data%allcoeff)
-      if(allocated(data%freqidx) deallocate(data%freqidx))
+      if(allocated(data%freqidx)) deallocate(data%freqidx)
     end subroutine
   
   
