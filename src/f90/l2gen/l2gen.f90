@@ -1225,7 +1225,7 @@ program l2gen
      real(dp),     allocatable, dimension(:, :, :)   :: temp_freqmask !corrsum
      real(sp),     allocatable, dimension(:, :, :)   :: corrsum_mask
      real(dp),     allocatable, dimension(:)         :: subt, median, smedian, minimum, ampl
-     real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod
+     real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod, 
      real(sp),     allocatable, dimension(:,:,:)     :: corr_templates
      real(sp),     allocatable, dimension(:,:)       :: corr_template
      real(sp),     allocatable, dimension(:,:)       :: corr_template_pca
@@ -1283,6 +1283,7 @@ program l2gen
  !    allocate(corr_prod(2 * nfreq-1, 2 * nfreq))
      allocate(subt(nsamp-1), median(nfreq))
      allocate(temp_freqmask(nfreq,nsb,ndet))
+     allocate(tod_subset(nsamp,2*nfreq))
  
      data_l2%diagnostics = 0.d0
      
@@ -1395,36 +1396,45 @@ program l2gen
                call get_pca_corr_templates(data_l2%pca_ampl_feed(:, :, i, :), corr_template_pca, data_l2%freqmask_full(:,:,i))         
             end if
         end if
-        
-        do o = 1, nsb / 2
-           corrs = 0.d0
+      
+      do o = 1, nsb / 2
+         corrs = 0.d0
+         tod_subset = 0.d0
+         do p = 1, 2 * nfreq
+            k = mod((p-1), nfreq) + 1
+            j = (o-1) * 2 + 1 + (p-1) / nfreq
+            tod_subset(:,p) = data_l2%tod(:,k,j,i) - means(k,j,i)
+         end do
+         call sgemm("T", "N", 2*nfreq, 2*nfreq, nsamp, 1.0, tod_subset, nsamp, tod_subset, nsamp, 0.0, corrs, 2*nfreq)
 
-           !$OMP PARALLEL PRIVATE(k,l,p,q,j,m,n,corr)
-           !$OMP DO SCHEDULE(guided)    
-           do p = 1, 2 * nfreq
-              j = (o-1) * 2 + 1 + (p-1) / nfreq
-              k = mod((p-1), nfreq) + 1
-              if (data_l2%freqmask_full(k,j,i) == 0.d0) cycle
-              !do l = i, ndet
-              !   if (.not. is_alive(l)) cycle
-              !   do m = j, nsb
-              l = i
-              !m = j
-              do q = p + 2, 2 * nfreq
-                 m = (o-1) * 2 + 1 + (q-1) / nfreq
-                 n = mod((q-1), nfreq) + 1
-                 if (data_l2%freqmask_full(n,m,l) == 0.d0) cycle
-                 corr = sum((data_l2%tod(:,k,j,i) - means(k,j,i)) * (data_l2%tod(:,n,m,l) - means(n,m,l))) / nsamp
-                 corr = corr / sqrt(vars(k,j,i) * vars(n,m,l))
-                 if (.not. data_l2%use_freq_filter .and. ((j == m) .and. (data_l2%polyorder == 0))) then 
-                    corr = corr + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
-                 end if
-                 corrs(p,q) = corr
-                 corrs(q,p) = corr
-              end do
-           end do
-           !$OMP END DO
-           !$OMP END PARALLEL
+
+         do p = 1, 2 * nfreq
+            k = mod((p-1), nfreq) + 1
+            j = (o-1) * 2 + 1 + (p-1) / nfreq
+            if (data_l2%freqmask_full(k,j,i) == 0.d0) then
+               corrs(p,:) = 0.d0
+               corrs(:,p) = 0.d0
+               cycle
+            end if
+            do q = p + 2, 2 * nfreq
+               m = (o-1) * 2 + 1 + (q-1) / nfreq
+               n = mod((q-1), nfreq) + 1
+               if (data_l2%freqmask_full(n,m,i) == 0.d0) cycle
+               corrs(p,q) = corrs(p,q) / sqrt(vars(k,j,i) * vars(n,m,i))
+               corrs(p,q) = corrs(p,q) / nsamp
+               if (.not. data_l2%use_freq_filter .and. ((j == m) .and. (data_l2%polyorder == 0))) then 
+                  corrs(p,q) = corrs(p,q) + 1.d0 / (nfreq - 3)  ! -3 because we mask 3 freqs always before poly-filter
+               end if
+               corrs(q,p) = corrs(p,q)
+            end do
+         end do
+         do p = 1, 2*nfreq
+            corrs(p,p) = 0.d0
+         end do
+         do p = 1, 2*nfreq - 1
+            corrs(p,p+1) = 0.d0
+            corrs(p+1,p) = 0.d0
+         end do
 
 
            if (data_l2%n_pca_comp_feed > 0) then
@@ -1776,6 +1786,7 @@ program l2gen
      deallocate(means)
      deallocate(median)
      deallocate(corrs)
+     deallocate(tod_subset)
      deallocate(subt)
      deallocate(maxcorr)
      deallocate(meancorr)
