@@ -1225,7 +1225,7 @@ program l2gen
      real(dp),     allocatable, dimension(:, :, :)   :: temp_freqmask !corrsum
      real(sp),     allocatable, dimension(:, :, :)   :: corrsum_mask
      real(dp),     allocatable, dimension(:)         :: subt, median, smedian, minimum, ampl
-     real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod, 
+     real(sp),     allocatable, dimension(:,:)       :: corrs, corr_prod, tod_subset
      real(sp),     allocatable, dimension(:,:,:)     :: corr_templates
      real(sp),     allocatable, dimension(:,:)       :: corr_template
      real(sp),     allocatable, dimension(:,:)       :: corr_template_pca
