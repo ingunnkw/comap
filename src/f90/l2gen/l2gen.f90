@@ -714,7 +714,6 @@ program l2gen
       end do
       !$OMP END DO
       !$OMP END PARALLEL
-   
       deallocate(coeff)
 
    end subroutine prepare_sim_interpolation
@@ -3879,7 +3878,7 @@ program l2gen
     end do
     deallocate(vanemask)
     
-    if (.not. (trim(cal_db) == '')) then
+    if (.not. (trim(cal_db) == '') .and. (cal_method == 2)) then
        allocate(buffer(2, nfreq_fullres, nsb, 20))
        allocate(buff_T(2, 20))
        allocate(buff_time(2, 2, 20))
