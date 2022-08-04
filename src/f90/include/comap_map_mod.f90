@@ -193,7 +193,7 @@ contains
             
             do j = map%n_ctrl + 1, 1, -1
                bytes(j) = mod(num, 2)
-               num = num / 2
+               num = num / 2 
             end do
             
             write(map_name, "(A4, A4, I1.1)") "map_", map%split_def(map%nsplit + map%n_ctrl + k), bytes(1)

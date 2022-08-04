@@ -1079,7 +1079,6 @@ contains
 !
 !  end subroutine l12hitmap
 
- 
 
 
 end module
