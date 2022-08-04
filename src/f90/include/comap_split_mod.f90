@@ -125,7 +125,8 @@ contains
         end do
      end do
      split%nsplit = split%nsplit - split%n_test - split%n_ctrl
-     !write(*,*) split%split
+
+      
   end subroutine read_acceptlist
 
 

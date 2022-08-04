@@ -878,7 +878,8 @@ def plot_two_TFs_and_diff(simpath_1, l2mappath_1, noisepath_1,
                     vmin = 0, vmax = 1, rasterized=True)
                     #vmin = 0, vmax = 5.0, rasterized=True)
     img2 = ax0[2].imshow(TF_diff, interpolation='none', origin='lower', extent=[0, 1, 0, 1], cmap = cmap2,
-                    vmin = -0.15, vmax = 0.15, rasterized=True)
+                    # vmin = 0.8, vmax = 2.0, rasterized=True)
+                    vmin = -0.25, vmax = 0.25, rasterized=True)
                     #norm=colors.SymLogNorm(linthresh=0.01, linscale=0.01,
                     #                          vmin=-30, vmax=-1e-2, base=10)) 
 
@@ -921,6 +922,7 @@ def plot_two_TFs_and_diff(simpath_1, l2mappath_1, noisepath_1,
     cbar2 = fig0.colorbar(img2, ax = ax0[2], cax = cax2, orientation = "horizontal")
     cbar0.set_label(r'$\tilde{T}_{\parallel, \bot}(k)$')
     cbar1.set_label(r'$\tilde{T}_{\parallel, \bot}(k)$')
+    # cbar2.set_label(r'$\tilde{T}_{\parallel, \bot}(k)^\mathrm{(b)} / \tilde{T}_{\parallel, \bot}(k)^\mathrm{(b)}$')
     cbar2.set_label(r'$\Delta \tilde{T}_{\parallel, \bot}(k)$')
     
     for i in range(len(ax0)):

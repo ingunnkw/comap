@@ -96,10 +96,12 @@ contains
     implicit none
     character(len=*), intent(in)    :: filename
     type(map_type),   intent(inout) :: map
+    integer(i4b), allocatable, dimension(:)    :: bytes             ! (2 ** (nctrl + 1))
     integer(i4b), optional :: det, sb
-    integer(i4b)       :: i, nf, nc
+    integer(i4b)       :: i, j, k, l, split_idx, nf, nc, dec, nbyte, counter, num
     
-    character(len=120) :: map_name, rms_name, hit_name  
+    character(len=512) :: map_name, rms_name, hit_name, dummy  
+
     type(hdf_file)     :: file
     call open_hdf_file(trim(filename), file, "w")
     call write_hdf(file, "runID",          map%irun - 1)
@@ -114,7 +116,7 @@ contains
     call write_hdf(file, "mean_el",      map%mean_el)
     call write_hdf(file, "time",         map%time)
     call write_hdf(file, "feeds",        map%feeds)
-    call write_hdf(file, "nsplit",          map%nsplit)
+    call write_hdf(file, "nsplit",       map%nsplit)
     call write_hdf(file, "nsim",         map%nsim)
     if (present(det)) then
        call write_hdf(file, "map",  map%m(:,:,:,sb:sb,det:det))
@@ -159,19 +161,65 @@ contains
        end do
     end if
     
-    if (map%n_test > 0) then
-       call create_hdf_group(file, "multisplits")
+   !  if (map%n_test > 0) then
+   !     call create_hdf_group(file, "multisplits")
 
-       do i = 1, map%n_test
-          map_name = "multisplits/map_"  // map%split_def(map%nsplit + map%n_ctrl + i)
-          rms_name = "multisplits/rms_"  // map%split_def(map%nsplit + map%n_ctrl + i)
-          hit_name = "multisplits/nhit_" // map%split_def(map%nsplit + map%n_ctrl + i)
-        
-          call write_hdf(file, trim(map_name), map%m_multisplit(:, :, :, :, :, i, :))
-          call write_hdf(file, trim(rms_name), map%rms_multisplit(:, :, :, :, :, i, :))
-          call write_hdf(file, trim(hit_name), map%nhit_multisplit(:, :, :, :, :, i, :))
-       end do
+   !     do i = 1, map%n_test
+   !        map_name = "multisplits/map_"  // map%split_def(map%nsplit + map%n_ctrl + i)
+   !        rms_name = "multisplits/rms_"  // map%split_def(map%nsplit + map%n_ctrl + i)
+   !        hit_name = "multisplits/nhit_" // map%split_def(map%nsplit + map%n_ctrl + i)
+       
+   !        call write_hdf(file, trim(map_name), map%m_multisplit(:, :, :, :, :, i, :))
+   !        call write_hdf(file, trim(rms_name), map%rms_multisplit(:, :, :, :, :, i, :))
+   !        call write_hdf(file, trim(hit_name), map%nhit_multisplit(:, :, :, :, :, i, :))
+   !     end do
+   !  end if
+
+
+    
+    if (map%n_test > 0) then
+      
+      call create_hdf_group(file, "multisplits")
+      
+
+      allocate(bytes(map%n_ctrl + 1))
+      
+      do k = 1, map%n_test
+      call create_hdf_group(file, "multisplits/" // trim(map%split_def(map%nsplit + map%n_ctrl + k)))
+
+         bytes = 0
+         do i = 1, 2 ** (map%n_ctrl + 1)
+            num = i - 1
+            
+            do j = map%n_ctrl + 1, 1, -1
+               bytes(j) = mod(num, 2)
+               num = num / 2
+            end do
+            
+            write(map_name, "(A4, A4, I1.1)") "map_", map%split_def(map%nsplit + map%n_ctrl + k), bytes(1)
+            write(hit_name, "(A4, A4, I1.1)") "hit_", map%split_def(map%nsplit + map%n_ctrl + k), bytes(1)
+            write(rms_name, "(A4, A4, I1.1)") "rms_", map%split_def(map%nsplit + map%n_ctrl + k), bytes(1)
+
+            do j = 1, map%n_ctrl
+               write(dummy, "(A4, I1.1)") map%split_def(map%nsplit + j), bytes(j + 1)
+               map_name = trim(map_name) // trim(dummy)
+               hit_name = trim(hit_name) // trim(dummy)
+               rms_name = trim(rms_name) // trim(dummy)
+            end do
+
+            call write_hdf(file, "multisplits/" // map%split_def(map%nsplit + map%n_ctrl + k) // "/" // trim(map_name), map%m_multisplit(:, :, :, :, :, k, i))
+            call write_hdf(file, "multisplits/" // map%split_def(map%nsplit + map%n_ctrl + k) // "/" // trim(rms_name), map%rms_multisplit(:, :, :, :, :, k, i))
+            call write_hdf(file, "multisplits/" // map%split_def(map%nsplit + map%n_ctrl + k) // "/" // trim(hit_name), map%nhit_multisplit(:, :, :, :, :, k, i))
+         end do
+      end do
+
+      deallocate(bytes)
+      
     end if
+      
+
+      
+
     
     call close_hdf_file(file)
     

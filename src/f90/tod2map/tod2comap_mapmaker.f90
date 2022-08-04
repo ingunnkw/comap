@@ -521,7 +521,7 @@ contains
                       split = split + split_array(map%nsplit + map%n_ctrl + spt, sb, det) * 2**map%n_ctrl
                       do k = 1, map%n_ctrl
                          split = split + split_array(map%nsplit + k, sb, det) * 2 ** (k - 1)
-                        end do
+                      end do
                       map%nhit_multisplit(p, q, freq_new, sb, det, spt, split) = map%nhit_multisplit(p, q, freq_new, sb, det, spt, split) + 1
                       map%dsum_multisplit(p, q, freq_new, sb, det, spt, split) = map%dsum_multisplit(p, q, freq_new, sb, det, spt, split) + 1.0 / tod%rms(freq, sb, j)**2 * tod%d(i, freq, sb, j)
                       map%div_multisplit(p, q, freq_new, sb, det, spt, split)  = map%div_multisplit(p, q, freq_new, sb, det, spt, split)  + 1.0 / tod%rms(freq, sb, j)**2
