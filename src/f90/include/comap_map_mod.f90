@@ -161,21 +161,6 @@ contains
        end do
     end if
     
-   !  if (map%n_test > 0) then
-   !     call create_hdf_group(file, "multisplits")
-
-   !     do i = 1, map%n_test
-   !        map_name = "multisplits/map_"  // map%split_def(map%nsplit + map%n_ctrl + i)
-   !        rms_name = "multisplits/rms_"  // map%split_def(map%nsplit + map%n_ctrl + i)
-   !        hit_name = "multisplits/nhit_" // map%split_def(map%nsplit + map%n_ctrl + i)
-       
-   !        call write_hdf(file, trim(map_name), map%m_multisplit(:, :, :, :, :, i, :))
-   !        call write_hdf(file, trim(rms_name), map%rms_multisplit(:, :, :, :, :, i, :))
-   !        call write_hdf(file, trim(hit_name), map%nhit_multisplit(:, :, :, :, :, i, :))
-   !     end do
-   !  end if
-
-
     
     if (map%n_test > 0) then
       
