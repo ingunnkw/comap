@@ -15,6 +15,7 @@ class COmap:
 
         self.path = path
         self.read_map()
+        self.keys = self.data.keys()
 
     def read_map(self):
         """Function for reading map data from file and fill data dictionary of Map class"""
