@@ -2,11 +2,14 @@ import argparse
 from map_object import COmap
 from scipy import linalg
 from scipy import sparse
+from scipy.stats import skewtest, skew
 import numpy as np
 from typing import List, Tuple
 import re
 import warnings
 from tqdm import tqdm
+
+import matplotlib.pyplot as plt
 
 # Ignore RuntimeWarning
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -15,20 +18,20 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 class PCA_SubTractor:
     """Class for computing PCA components of COMAP maps"""
 
-    def __init__(self, map: COmap, ncomps: int, verbose: str = False):
+    def __init__(self, map: COmap, ncomps: int, clean: bool = True, verbose: bool = False):
         """Initializing class instance
 
         Args:
             map (Map): COMAP map object to compute PCA compoents of.
             ncomp (int): Number of PCA components to compute/subtract.
-            verbose (bool): Boolean specifying whether to run in verbose mode.
+            verbose (bool, optional): Boolean specifying whether to run in verbose mode.
+            clean (bool, optional): Boolean specifying whether to clean subtract PCA modes.
         """
-        # Map object to operate on
+
         self.map = map
-
-        self.ncomps = ncomps
-
+        self.ncomps = ncomps        
         self.verbose = verbose
+        self.clean = clean
 
         # List of keys to perform PCA on (only per feed hence remove "map" and "rms")
         self.keys_to_pca = [
@@ -118,13 +121,15 @@ class PCA_SubTractor:
 
         if norm == "rms":
             # rms normalized PCA
-            norm_data = self.map.data[key] / self.map.data[rms_key]
+            self.norm_exponent = 1
         elif norm == "var":
             # variance normalized PCA
-            norm_data = self.map.data[key] / self.map.data[rms_key] ** 2
+            self.norm_exponent = 2
         else:
             # rms approximation normalized PCA
             return NotImplemented
+
+        norm_data = self.map[key] / self.map[rms_key] ** self.norm_exponent
 
         # Remove NaN values from indata
         norm_data = np.where(np.isfinite(norm_data), norm_data, 0)
@@ -147,7 +152,7 @@ class PCA_SubTractor:
         # Compute PCA of all feed-map datasets
         for key in self.keys_to_pca:
             if self.verbose:
-                print(" " * 4 + f"{key}")
+                print(" " * 4 + "Dataset: " + f"{key}")
 
             # Normalize data
             indata = self.normalize_data(key, norm)
@@ -156,26 +161,83 @@ class PCA_SubTractor:
             freqvec, angvec, singular_values = self.get_svd_basis(indata)
 
             # Save computed PCA components
-            self.map.data[key + "_pca_freqvec"] = freqvec
-            self.map.data[key + "_pca_angvec"] = angvec
-            self.map.data[key + "_pca_sing_val"] = singular_values
+            self.map[key + "_pca_freqvec"] = freqvec
+            self.map[key + "_pca_angvec"] = angvec
+            self.map[key + "_pca_sing_val"] = singular_values
+            
+            if self.clean:
+                fig, ax = plt.subplots(figsize = (10, 8))
+                rms_key = re.sub(r"map", "rms", key)
+
+                def gaussian(x):
+                    return 1 / np.sqrt(2 * np.pi) * np.exp(- 0.5 * x ** 2)
+    
+    
+                x = np.linspace(-5, 5, 100)
+                g = gaussian(x)
+                unit_norm_data = np.random.normal(0, 1, int(np.sum(np.isfinite(self.map[key] / self.map[rms_key]))))
+                ax.hist((self.map[key] / self.map[rms_key]).flatten(), bins = 100, histtype = "step", density = True, label = "Before subr")
+                print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                # Clean data
+                map_reconstruction = self.reconstruct_modes(key)
+                self.map[key] -= map_reconstruction
+                print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                print(skewtest(unit_norm_data))
+                print(skew(unit_norm_data))
+                ax.hist((self.map[key] / self.map[rms_key]).flatten(), bins = 100, histtype = "step", density = True, label = "After subr", linestyle = "dashed")
+                ax.plot(x, g, label = "N(0, 1)", linestyle = "dashed", c = "r")
+                ax.legend()
+                ax.set_yscale("log")
+                plt.show()
+                break
 
         # Assigning parameter specifying that map object is PCA subtracted
         # and what norm was used
-        self.map.data["is_pca_subtr"] = True
-        self.map.data["pca_norm"] = norm
+        self.map["is_pca_subtr"] = True
+        self.map["pca_norm"] = norm
 
-        # Update self.map's keys
-        self.map.keys = self.map.data.keys()
+    def reconstruct_modes(self, key: str):
+        """Method to compute PCA reconstructions of computed PCA modes for given dataset key.
 
-        print(self.map.data.keys())
+        Args:
+            key (str): Dataset key for which to clean out self.ncomps PCA modes.
+        """
+        
+        # Getting SVD basis
+        freqvec = self.map[key + "_pca_freqvec"][:, :self.ncomps, ...]
+        angvec = self.map[key + "_pca_angvec"][:, :self.ncomps, ...]
+        singular_values = self.map[key + "_pca_sing_val"][:, :self.ncomps]
 
+        # Input map from key
+        inmap = self.map[key]
+        
+        # Make key for rms dataset that corresponds to map dataset
+        rms_key = re.sub(r"map", "rms", key)
+
+        # Input rms map from key
+        inrms = self.map[rms_key]
+
+        # Perform outer product from basis vecotrs
+        map_reconstruction = angvec[:, :, :, :, None, None] 
+        map_reconstruction = map_reconstruction * freqvec[:, :, None, None, :, :]
+        map_reconstruction = map_reconstruction * singular_values[:, :, None, None, None, None]
+        map_reconstruction = np.sum(map_reconstruction, axis = 1)
+        
+        # Reshape to get original dimensionality
+        map_reconstruction = map_reconstruction.reshape(inmap.shape) 
+        
+        # Get back original units by undoing normalization
+        map_reconstruction *= inrms ** self.norm_exponent
+
+        return map_reconstruction
 
 if __name__ == "__main__":
     mappath = "/mn/stornext/d22/cmbco/comap/protodir/maps/"
     mapname = "co7_map_S2.h5"
     mymap = COmap(mappath + mapname)
 
-    pca_sub = PCA_SubTractor(mymap, 10, True)
+    pca_sub = PCA_SubTractor(mymap, 10, True, True)
 
     pca_sub.compute_pca()

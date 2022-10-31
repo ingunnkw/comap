@@ -1,8 +1,11 @@
 import argparse
+from typing import Any
 import h5py
 import numpy as np
+import numpy.typing as ntyping
+from dataclasses import dataclass
 
-
+@dataclass
 class COmap:
     """COMAP map data class"""
 
@@ -42,3 +45,27 @@ class COmap:
                 else:
                     # Copy dataset data to data dictionary
                     self.data[key] = value[()]
+
+    def __getitem__(self, key: str) -> ntyping.ArrayLike:
+        """Method for indexing map data as dictionary
+
+        Args:
+            key (str): Dataset key, corresponds to HDF5 map data keys
+
+        Returns:
+            dataset (ntyping.ArrayLike): Dataset from HDF5 map file
+        """
+
+        return self.data[key]
+
+    def __setitem__(self, key: str, value: ntyping.ArrayLike):
+        """Method for saving value corresponding to key
+
+        Args:
+            key (str): Key to new dataset
+            value (ntyping.ArrayLike): New dataset
+        """
+        # Set new item
+        self.data[key] = value
+        # Get new keys
+        self.keys = self.data.keys()
