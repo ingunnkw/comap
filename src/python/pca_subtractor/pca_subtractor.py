@@ -18,7 +18,9 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 class PCA_SubTractor:
     """Class for computing PCA components of COMAP maps"""
 
-    def __init__(self, map: COmap, ncomps: int, clean: bool = True, verbose: bool = False):
+    def __init__(
+        self, map: COmap, ncomps: int, clean: bool = True, verbose: bool = False
+    ):
         """Initializing class instance
 
         Args:
@@ -29,7 +31,7 @@ class PCA_SubTractor:
         """
 
         self.map = map
-        self.ncomps = ncomps        
+        self.ncomps = ncomps
         self.verbose = verbose
         self.clean = clean
 
@@ -89,9 +91,46 @@ class PCA_SubTractor:
             all_singular_values,
         )
 
-    def coadd_feeds(self):
-        # To be implemented
-        return NotImplemented
+    def get_coadded_feeds(self, key) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Coadd feed maps into one single map
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple of coadded map, hit map and rms map.
+        """
+        # Make keys for rms and nhit datasets that corresponds to map dataset
+        rms_key = re.sub(r"map", "rms", key)
+        nhit_key = re.sub(r"map", "nhit", key)
+
+        # Get feed map data
+        inmap = self.map[key]
+        inrms = self.map[rms_key]
+        innhit = self.map[nhit_key]
+
+        # Define inverse variance
+        inv_var = 1 / inrms**2
+
+        # Mask zero hit regions
+        mask = ~np.isfinite(inv_var)
+        inv_var[mask] = 0
+
+        # Define feed-coadded map
+        map_coadd = inmap.copy()
+
+        # Coadding feed maps
+        map_coadd = map_coadd * inv_var
+        map_coadd = map_coadd.sum(0)
+        map_coadd = map_coadd / inv_var.sum(0)
+
+        # Coadd nhit and rms feed maps
+        nhit_coadd = innhit.sum(0).astype(np.float32)
+        rms_coadd = 1 / np.sqrt(inv_var.sum(0))
+
+        # Mask regions with no hits in coadded feed maps
+        mask_coadd = ~np.isfinite(rms_coadd)
+        map_coadd[mask_coadd] = 0
+        nhit_coadd[mask_coadd] = 0
+        rms_coadd[mask_coadd] = 0
+        return (map_coadd, nhit_coadd, rms_coadd)
 
     def normalize_data(self, key: str, norm: str) -> np.ndarray:
         """_summary_
@@ -108,7 +147,7 @@ class PCA_SubTractor:
             ValueError: norm must be either of "approx", "rms", "var".
 
         Returns:
-            np.ndarray: _description_
+            np.ndarray: Normalized map dataset
         """
 
         # Making sure normalization is valid
@@ -136,7 +175,7 @@ class PCA_SubTractor:
 
         return norm_data
 
-    def compute_pca(self, norm: str = "rms"):
+    def compute_pca(self, norm: str = "rms") -> COmap:
         """Method to compute PCA of map datasets
 
         Args:
@@ -145,6 +184,9 @@ class PCA_SubTractor:
                          - 'approx' - for normalizing map by first PCA mode of RMS-map
                          - 'rms' - for normalizing map by RMS-map
                          - 'var' - for normalizing map by variance-map
+        Returns:
+            COmap: Map object with PCA modes saved. If self.clean the map object
+                   is also PCA subtracted.
         """
         if self.verbose:
             print(f"Computing {norm} normalized PCA of:")
@@ -164,55 +206,149 @@ class PCA_SubTractor:
             self.map[key + "_pca_freqvec"] = freqvec
             self.map[key + "_pca_angvec"] = angvec
             self.map[key + "_pca_sing_val"] = singular_values
-            
-            if self.clean:
-                fig, ax = plt.subplots(figsize = (10, 8))
-                rms_key = re.sub(r"map", "rms", key)
 
-                def gaussian(x):
-                    return 1 / np.sqrt(2 * np.pi) * np.exp(- 0.5 * x ** 2)
-    
-    
-                x = np.linspace(-5, 5, 100)
-                g = gaussian(x)
-                unit_norm_data = np.random.normal(0, 1, int(np.sum(np.isfinite(self.map[key] / self.map[rms_key]))))
-                ax.hist((self.map[key] / self.map[rms_key]).flatten(), bins = 100, histtype = "step", density = True, label = "Before subr")
-                print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
-                print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            if self.clean:
+                # fig, ax = plt.subplots(figsize = (10, 8))
+
+                # def gaussian(x):
+                #     return 1 / np.sqrt(2 * np.pi) * np.exp(- 0.5 * x ** 2)
+
+                # x = np.linspace(-5, 5, 100)
+                # g = gaussian(x)
+                # unit_norm_data = np.random.normal(0, 1, int(np.sum(np.isfinite(self.map[key] / self.map[rms_key]))))
+                # ax.hist((self.map[key] / self.map[rms_key]).flatten(), bins = 100, histtype = "step", density = True, label = "Before subr")
+                # print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                # print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
                 # Clean data
                 map_reconstruction = self.reconstruct_modes(key)
                 self.map[key] -= map_reconstruction
-                print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
-                print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
-                print(skewtest(unit_norm_data))
-                print(skew(unit_norm_data))
-                ax.hist((self.map[key] / self.map[rms_key]).flatten(), bins = 100, histtype = "step", density = True, label = "After subr", linestyle = "dashed")
-                ax.plot(x, g, label = "N(0, 1)", linestyle = "dashed", c = "r")
-                ax.legend()
-                ax.set_yscale("log")
-                plt.show()
-                break
+                # print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                # print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+                # print(skewtest(unit_norm_data))
+                # print(skew(unit_norm_data))
+                # ax.hist((self.map[key] / self.map[rms_key]).flatten(), bins = 100, histtype = "step", density = True, label = "After subr", linestyle = "dashed")
+                # ax.plot(x, g, label = "N(0, 1)", linestyle = "dashed", c = "r")
+                # ax.legend()
+                # ax.set_yscale("log")
+                # plt.show()
+                # break
+
+            break
+
+        if self.clean:
+            # Coadd feed map
+            map_coadd, nhit_coadd, rms_coadd = self.get_coadded_feeds("map")
+            # Assert if coadded rms and nhit maps are same as the ones from
+            # original initialization
+            assert np.allclose(nhit_coadd, self.map["nhit_coadd"])
+            assert np.allclose(rms_coadd, self.map["rms_coadd"])
+
+            fig, ax = plt.subplots(figsize=(10, 8))
+
+            def gaussian(x):
+                return 1 / np.sqrt(2 * np.pi) * np.exp(-0.5 * x**2)
+
+            x = np.linspace(-5, 5, 100)
+            g = gaussian(x)
+            # unit_norm_data = np.random.normal(0, 1, int(np.sum(np.isfinite(self.map[key] / self.map[rms_key]))))
+            ax.hist(
+                (map_coadd / rms_coadd).flatten(),
+                bins=100,
+                histtype="step",
+                density=True,
+                label="Coadded",
+            )
+            # print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # Clean data
+            map_reconstruction = self.reconstruct_modes(key)
+            # print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # print(skewtest(unit_norm_data))
+            # print(skew(unit_norm_data))
+            ax.hist(
+                (self.map["map_coadd"] / self.map["rms_coadd"]).flatten(),
+                bins=100,
+                histtype="step",
+                density=True,
+                label="Coadded from file",
+                linestyle="dashed",
+            )
+            ax.plot(x, g, label="N(0, 1)", linestyle="dashed", c="r")
+            ax.legend()
+            ax.set_yscale("log")
+            plt.show()
+        else:
+            # Coadd feed map
+            map_coadd, nhit_coadd, rms_coadd = self.get_coadded_feeds("map")
+            # Assert if coadded maps are same as the ones from
+            # original initialization
+            assert np.allclose(map_coadd, self.map["map_coadd"])
+            assert np.allclose(nhit_coadd, self.map["nhit_coadd"])
+            assert np.allclose(rms_coadd, self.map["rms_coadd"])
+
+            fig, ax = plt.subplots(figsize=(10, 8))
+
+            def gaussian(x):
+                return 1 / np.sqrt(2 * np.pi) * np.exp(-0.5 * x**2)
+
+            x = np.linspace(-5, 5, 100)
+            g = gaussian(x)
+            # unit_norm_data = np.random.normal(0, 1, int(np.sum(np.isfinite(self.map[key] / self.map[rms_key]))))
+            ax.hist(
+                (map_coadd / rms_coadd).flatten(),
+                bins=100,
+                histtype="step",
+                density=True,
+                label="Coadded",
+            )
+            # print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # Clean data
+            map_reconstruction = self.reconstruct_modes(key)
+            # print(skewtest((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # print(skew((self.map[key] / self.map[rms_key]).flatten(), nan_policy="omit"))
+            # print(skewtest(unit_norm_data))
+            # print(skew(unit_norm_data))
+            ax.hist(
+                (self.map["map_coadd"] / self.map["rms_coadd"]).flatten(),
+                bins=100,
+                histtype="step",
+                density=True,
+                label="Coadded from file",
+                linestyle="dashed",
+            )
+            ax.plot(x, g, label="N(0, 1)", linestyle="dashed", c="r")
+            ax.legend()
+            ax.set_yscale("log")
+            plt.show()
 
         # Assigning parameter specifying that map object is PCA subtracted
         # and what norm was used
         self.map["is_pca_subtr"] = True
         self.map["pca_norm"] = norm
 
-    def reconstruct_modes(self, key: str):
+        # Return copy of input map object
+        return self.map
+
+    def reconstruct_modes(self, key: str) -> np.ndarray:
         """Method to compute PCA reconstructions of computed PCA modes for given dataset key.
 
         Args:
             key (str): Dataset key for which to clean out self.ncomps PCA modes.
+
+        Returns:
+            np.ndarray: PCA map dataset reconstruction
         """
-        
+
         # Getting SVD basis
-        freqvec = self.map[key + "_pca_freqvec"][:, :self.ncomps, ...]
-        angvec = self.map[key + "_pca_angvec"][:, :self.ncomps, ...]
-        singular_values = self.map[key + "_pca_sing_val"][:, :self.ncomps]
+        freqvec = self.map[key + "_pca_freqvec"][:, : self.ncomps, ...]
+        angvec = self.map[key + "_pca_angvec"][:, : self.ncomps, ...]
+        singular_values = self.map[key + "_pca_sing_val"][:, : self.ncomps]
 
         # Input map from key
         inmap = self.map[key]
-        
+
         # Make key for rms dataset that corresponds to map dataset
         rms_key = re.sub(r"map", "rms", key)
 
@@ -220,24 +356,29 @@ class PCA_SubTractor:
         inrms = self.map[rms_key]
 
         # Perform outer product from basis vecotrs
-        map_reconstruction = angvec[:, :, :, :, None, None] 
+        map_reconstruction = angvec[:, :, :, :, None, None]
         map_reconstruction = map_reconstruction * freqvec[:, :, None, None, :, :]
-        map_reconstruction = map_reconstruction * singular_values[:, :, None, None, None, None]
-        map_reconstruction = np.sum(map_reconstruction, axis = 1)
-        
+        map_reconstruction = (
+            map_reconstruction * singular_values[:, :, None, None, None, None]
+        )
+        map_reconstruction = np.sum(map_reconstruction, axis=1)
+
         # Reshape to get original dimensionality
-        map_reconstruction = map_reconstruction.reshape(inmap.shape) 
-        
+        map_reconstruction = map_reconstruction.reshape(inmap.shape)
+
         # Get back original units by undoing normalization
-        map_reconstruction *= inrms ** self.norm_exponent
+        map_reconstruction *= inrms**self.norm_exponent
 
         return map_reconstruction
+
 
 if __name__ == "__main__":
     mappath = "/mn/stornext/d22/cmbco/comap/protodir/maps/"
     mapname = "co7_map_S2.h5"
     mymap = COmap(mappath + mapname)
 
+    mymap.read_map()
+
     pca_sub = PCA_SubTractor(mymap, 10, True, True)
 
-    pca_sub.compute_pca()
+    mymap_clean = pca_sub.compute_pca()

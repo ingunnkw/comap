@@ -1,30 +1,22 @@
 import argparse
-from typing import Any
+from typing import Dict, Any
 import h5py
 import numpy as np
 import numpy.typing as ntyping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
 
 @dataclass
 class COmap:
     """COMAP map data class"""
 
-    def __init__(self, path: str):
-        """Initializing map object
-
-        Args:
-            path (str): Full path to map file from which to initialize map object
-        """
-
-        self.path = path
-        self.read_map()
-        self.keys = self.data.keys()
+    path: str
 
     def read_map(self):
         """Function for reading map data from file and fill data dictionary of Map class"""
 
         # Empty data dict
-        self.data = {}
+        self._data = {}
 
         # Open and read file
         with h5py.File(self.path, "r") as infile:
@@ -38,13 +30,18 @@ class COmap:
                             for data_key, data_value in split_group.items():
                                 # Path to dataset
                                 complete_key = f"{key}/{split_key}/{data_key}"
-                                self.data[complete_key] = data_value[()]
+                                self._data[complete_key] = data_value[()]
                     else:
                         # TODO: fill in if new groups are implemented in map file later
                         pass
                 else:
                     # Copy dataset data to data dictionary
-                    self.data[key] = value[()]
+                    self._data[key] = value[()]
+
+        self.keys = self._data.keys()
+
+    def write_map(self, outpath):
+        return NotImplemented
 
     def __getitem__(self, key: str) -> ntyping.ArrayLike:
         """Method for indexing map data as dictionary
@@ -56,7 +53,7 @@ class COmap:
             dataset (ntyping.ArrayLike): Dataset from HDF5 map file
         """
 
-        return self.data[key]
+        return self._data[key]
 
     def __setitem__(self, key: str, value: ntyping.ArrayLike):
         """Method for saving value corresponding to key
@@ -66,6 +63,6 @@ class COmap:
             value (ntyping.ArrayLike): New dataset
         """
         # Set new item
-        self.data[key] = value
+        self._data[key] = value
         # Get new keys
-        self.keys = self.data.keys()
+        self.keys = self._data.keys()
