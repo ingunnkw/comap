@@ -186,9 +186,6 @@ class PCA_SubTractor:
         angvec = self.map[key + "_pca_angvec"][:, : self.ncomps, ...]
         singular_values = self.map[key + "_pca_sing_val"][:, : self.ncomps]
 
-        # Input map from key
-        inmap = self.map[key]
-
         # Make key for rms dataset that corresponds to map dataset
         rms_key = re.sub(r"map", "rms", key)
 
