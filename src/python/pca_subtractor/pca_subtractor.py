@@ -1,4 +1,3 @@
-import argparse
 from map_object import COmap
 from scipy import linalg
 
@@ -281,30 +280,3 @@ class PCA_SubTractor:
 
         # Return copy of input map object
         return self.map
-
-
-def main():
-
-    mappath = "/mn/stornext/d22/cmbco/comap/protodir/maps/"
-    mapname = "co2_map_S2_newpca_newsplits.h5"
-    # mapname = "co2_map_S1_newsplits.h5"
-
-    # mapname = "co7_map_S2_oldpca.h5"
-    # mapname = "co7_map_S1_newpca.h5"
-    # mapname = "co7_map_S2.h5"
-    # mapname = "co6_map_S2.h5"
-
-    mymap = COmap(mappath + mapname)
-    mymap.read_map()
-
-    pca_sub = PCA_SubTractor(mymap, 5, True, True)
-
-    mymap_clean = pca_sub.compute_pca()
-
-    mymap.write_map(
-        "/mn/stornext/d22/cmbco/comap/protodir/maps/" + "co6_map_S2_test_pca.h5"
-    )
-
-
-if __name__ == "__main__":
-    main()
