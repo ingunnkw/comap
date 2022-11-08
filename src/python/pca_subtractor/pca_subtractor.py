@@ -2,7 +2,8 @@ from map_object import COmap
 from scipy import linalg
 
 import numpy as np
-from typing import List, Tuple
+from typing import Tuple
+import numpy.typing as ntyping
 import re
 import warnings
 from tqdm import tqdm
@@ -128,7 +129,7 @@ class PCA_SubTractor:
         rms_coadd[mask_coadd] = 0
         return (map_coadd, nhit_coadd, rms_coadd)
 
-    def normalize_data(self, key: str, norm: str) -> np.ndarray:
+    def normalize_data(self, key: str, norm: str) -> ntyping.ArrayLike:
         """_summary_
 
         Args:
@@ -260,14 +261,9 @@ class PCA_SubTractor:
             assert np.allclose(nhit_coadd, self.map["nhit_coadd"])
             assert np.allclose(rms_coadd, self.map["rms_coadd"])
 
-        else:
-            # Coadd feed map
-            map_coadd, nhit_coadd, rms_coadd = self.get_coadded_feeds("map")
-            # Assert if coadded maps are same as the ones from
-            # original initialization
-            assert np.allclose(map_coadd, self.map["map_coadd"])
-            assert np.allclose(nhit_coadd, self.map["nhit_coadd"])
-            assert np.allclose(rms_coadd, self.map["rms_coadd"])
+            self.map["map_coadd"] = map_coadd
+            self.map["nhit_coadd"] = nhit_coadd
+            self.map["rms_coadd"] = rms_coadd
 
         # Assigning parameter specifying that map object is PCA subtracted
         # and what norm was used

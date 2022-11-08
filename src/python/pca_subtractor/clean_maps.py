@@ -34,7 +34,6 @@ def main():
     parser.add_argument(
         "-v",
         "--verbose",
-        type=bool,
         help="""Whether to run in verbose mode or not. Default is True""",
         action="store_true",
     )
@@ -57,7 +56,7 @@ def main():
 
     try:
         rmsnorm = args.rmsnorm
-        assert rmsnorm in [["approx", "rms", "var"]]
+        assert rmsnorm in ["approx", "rms", "var"]
     except:
         message = """Please choose a normalisation to apply prior to PCA;  -n approx, -n rms or -n var."""
         raise NameError(message)
