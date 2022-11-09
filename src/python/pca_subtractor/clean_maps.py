@@ -24,6 +24,14 @@ def main():
     )
 
     parser.add_argument(
+        "-m",
+        "--maskrms",
+        type=float,
+        help="""Value of RMS value (in muK) beyond which to mask maps prior to coadding together feed maps.""",
+        default=None,
+    )
+
+    parser.add_argument(
         "-n",
         "--ncomps",
         type=int,
@@ -71,6 +79,8 @@ def main():
 
     is_verbose = args.verbose
 
+    maskrms = args.maskrms
+
     # Define map object to process
     mymap = COmap(path=inpath)
 
@@ -78,7 +88,9 @@ def main():
     mymap.read_map()
 
     # Define PCA subtractor object
-    pca_sub = PCA_SubTractor(map=mymap, ncomps=ncomps, verbose=is_verbose)
+    pca_sub = PCA_SubTractor(
+        map=mymap, ncomps=ncomps, maskrms=maskrms, verbose=is_verbose
+    )
 
     # PCA mode subtracted cleaned map object
     mymap_clean = pca_sub.compute_pca(norm=rmsnorm)

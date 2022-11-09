@@ -2,7 +2,7 @@ from map_object import COmap
 from scipy import linalg
 
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy.typing as ntyping
 import re
 import warnings
@@ -16,7 +16,12 @@ class PCA_SubTractor:
     """Class for computing PCA components of COMAP maps"""
 
     def __init__(
-        self, map: COmap, ncomps: int, clean: bool = True, verbose: bool = False
+        self,
+        map: COmap,
+        ncomps: int,
+        clean: bool = True,
+        maskrms: Optional[float] = None,
+        verbose: bool = False,
     ):
         """Initializing class instance
 
@@ -24,6 +29,7 @@ class PCA_SubTractor:
             map (Map): COMAP map object to compute PCA compoents of.
             ncomp (int): Number of PCA components to compute/subtract.
             verbose (bool, optional): Boolean specifying whether to run in verbose mode.
+            maskrms (float, optional): RMS value beyond which to mask maps (in muK).
             clean (bool, optional): Boolean specifying whether to clean subtract PCA modes.
         """
 
@@ -31,6 +37,7 @@ class PCA_SubTractor:
         self.ncomps = ncomps
         self.verbose = verbose
         self.clean = clean
+        self.maskrms = maskrms
 
         # List of keys to perform PCA on (only per feed hence remove "map" and "rms")
         self.keys_to_pca = [
@@ -237,6 +244,23 @@ class PCA_SubTractor:
             if self.verbose:
                 print(" " * 4 + "Dataset: " + f"{key}")
 
+            if self.maskrms:
+                # Masking high-noise regions
+                maskrms = self.maskrms
+                # Make keys for rms and nhit datasets that corresponds to map dataset
+                rms_key = re.sub(r"map", "rms", key)
+                nhit_key = re.sub(r"map", "nhit", key)
+
+                self.map[key] = np.where(
+                    1e6 * self.map[rms_key] < maskrms, self.map[key], 0
+                )
+                self.map[nhit_key] = np.where(
+                    1e6 * self.map[rms_key] < maskrms, self.map[nhit_key], 0
+                )
+                self.map[rms_key] = np.where(
+                    1e6 * self.map[rms_key] < maskrms, self.map[rms_key], 0
+                )
+
             # Normalize data
             indata = self.normalize_data(key, norm)
 
@@ -256,10 +280,12 @@ class PCA_SubTractor:
         if self.clean:
             # Coadd feed map
             map_coadd, nhit_coadd, rms_coadd = self.get_coadded_feeds("map")
-            # Assert if coadded rms and nhit maps are same as the ones from
-            # original initialization
-            assert np.allclose(nhit_coadd, self.map["nhit_coadd"])
-            assert np.allclose(rms_coadd, self.map["rms_coadd"])
+
+            if not self.maskrms:
+                # Assert if coadded rms and nhit maps are same as the ones from
+                # original initialization
+                assert np.allclose(nhit_coadd, self.map["nhit_coadd"])
+                assert np.allclose(rms_coadd, self.map["rms_coadd"])
 
             self.map["map_coadd"] = map_coadd
             self.map["nhit_coadd"] = nhit_coadd
